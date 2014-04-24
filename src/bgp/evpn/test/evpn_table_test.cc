@@ -93,6 +93,29 @@ protected:
         TASK_UTIL_EXPECT_TRUE(rt == NULL);
     }
 
+    void VerifyTablePartitionCommon(bool empty, int start_idx, int end_idx) {
+        if (end_idx == -1)
+            end_idx = start_idx + 1;
+        TASK_UTIL_EXPECT_TRUE(start_idx < end_idx);
+        for (int idx = start_idx; idx < end_idx; ++idx) {
+            DBTablePartition *tbl_partition =
+                static_cast<DBTablePartition *>(evpn_->GetTablePartition(idx));
+            if (empty) {
+                TASK_UTIL_EXPECT_EQ(0, tbl_partition->size());
+            } else {
+                TASK_UTIL_EXPECT_NE(0, tbl_partition->size());
+            }
+        }
+    }
+
+    void VerifyTablePartitionEmpty(int start_idx, int end_idx = -1) {
+        VerifyTablePartitionCommon(true, start_idx, end_idx);
+    }
+
+    void VerifyTablePartitionNonEmpty(int start_idx, int end_idx = -1) {
+        VerifyTablePartitionCommon(false, start_idx, end_idx);
+    }
+
     void TableListener(DBTablePartBase *tpart, DBEntryBase *entry) {
         bool del_notify = entry->IsDeleted();
         if (del_notify) {
@@ -112,48 +135,211 @@ protected:
     tbb::atomic<long> del_notification_;
 };
 
-TEST_F(EvpnTableTest, AddDeleteSingleRoute) {
-    AddRoute("10.1.1.1:65535-11:12:13:14:15:16,192.168.1.1/32");
+class EvpnTableAutoDiscoveryTest : public EvpnTableTest {
+};
+
+TEST_F(EvpnTableAutoDiscoveryTest, AllocEntryStr) {
+    string prefix_str("1-10.1.1.1:65535-00:01:02:03:04:05:06:07:08:09-65536");
+    auto_ptr<DBEntry> route = master_->AllocEntryStr(prefix_str);
+    EXPECT_EQ(prefix_str, route->ToString());
+}
+
+TEST_F(EvpnTableAutoDiscoveryTest, AddDeleteSingleRoute) {
+    AddRoute("1-10.1.1.1:65535-00:01:02:03:04:05:06:07:08:09-65536");
     task_util::WaitForIdle();
-    VerifyRouteExists("10.1.1.1:65535-11:12:13:14:15:16,192.168.1.1/32");
+    VerifyRouteExists("1-10.1.1.1:65535-00:01:02:03:04:05:06:07:08:09-65536");
     TASK_UTIL_EXPECT_EQ(adc_notification_, 1);
 
-    DelRoute("10.1.1.1:65535-11:12:13:14:15:16,192.168.1.1/32");
+    DelRoute("1-10.1.1.1:65535-00:01:02:03:04:05:06:07:08:09-65536");
     task_util::WaitForIdle();
     TASK_UTIL_EXPECT_EQ(del_notification_, 1);
-    VerifyRouteNoExists("10.1.1.1:65535-11:12:13:14:15:16,192.168.1.1/32");
+    VerifyRouteNoExists("1-10.1.1.1:65535-00:01:02:03:04:05:06:07:08:09-65536");
 }
 
 // Prefixes differ only in the IP address field of the RD.
-TEST_F(EvpnTableTest, AddDeleteMultipleRoute1) {
+TEST_F(EvpnTableAutoDiscoveryTest, AddDeleteMultipleRoute1) {
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1." << idx << ":65535-";
-        repr << "07:00:00:00:00:01,192.168.1.1/32";
+        repr << "1-10.1.1." << idx << ":65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-65536";
         AddRoute(repr.str());
     }
     task_util::WaitForIdle();
 
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1." << idx << ":65535-";
-        repr << "07:00:00:00:00:01,192.168.1.1/32";
+        repr << "1-10.1.1." << idx << ":65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-65536";
         VerifyRouteExists(repr.str());
     }
     TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
 
+    VerifyTablePartitionNonEmpty(0);
+    VerifyTablePartitionEmpty(1, DB::PartitionCount());
+
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1." << idx << ":65535-";
-        repr << "07:00:00:00:00:01,192.168.1.1/32";
+        repr << "1-10.1.1." << idx << ":65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-65536";
         DelRoute(repr.str());
     }
     task_util::WaitForIdle();
 
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1." << idx << ":65535-";
-        repr << "07:00:00:00:00:01,192.168.1.1/32";
+        repr << "1-10.1.1." << idx << ":65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-65536";
+        VerifyRouteNoExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
+}
+
+
+// Prefixes differ only in the esi field.
+TEST_F(EvpnTableAutoDiscoveryTest, AddDeleteMultipleRoute2) {
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "1-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:" << hex << idx << "-65536";
+        AddRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "1-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:" << hex << idx << "-65536";
+        VerifyRouteExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
+
+    VerifyTablePartitionNonEmpty(0);
+    VerifyTablePartitionEmpty(1, DB::PartitionCount());
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "1-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:" << hex << idx << "-65536";
+        DelRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "1-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:" << hex << idx << "-65536";
+        VerifyRouteNoExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
+}
+
+// Prefixes differ only in the tag field.
+TEST_F(EvpnTableAutoDiscoveryTest, AddDeleteMultipleRoute3) {
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "1-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-" << idx;
+        AddRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "1-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-" << idx;
+        VerifyRouteExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
+
+    VerifyTablePartitionNonEmpty(0);
+    VerifyTablePartitionEmpty(1, DB::PartitionCount());
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "1-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-" << idx;
+        DelRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "1-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-" << idx;
+        VerifyRouteNoExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
+}
+
+class EvpnTableMacAdvertisementTest : public EvpnTableTest {
+};
+
+TEST_F(EvpnTableMacAdvertisementTest, AllocEntryStr1) {
+    string prefix_str("2-10.1.1.1:65535-0-11:12:13:14:15:16,192.168.1.1");
+    auto_ptr<DBEntry> route = master_->AllocEntryStr(prefix_str);
+    EXPECT_EQ(prefix_str, route->ToString());
+}
+
+TEST_F(EvpnTableMacAdvertisementTest, AllocEntryStr2) {
+    string prefix_str("2-10.1.1.1:65535-100000-11:12:13:14:15:16,192.168.1.1");
+    auto_ptr<DBEntry> route = master_->AllocEntryStr(prefix_str);
+    EXPECT_EQ(prefix_str, route->ToString());
+}
+
+TEST_F(EvpnTableMacAdvertisementTest, AllocEntryStr3) {
+    string prefix_str("2-10.1.1.1:65535-100000-11:12:13:14:15:16,0.0.0.0");
+    auto_ptr<DBEntry> route = master_->AllocEntryStr(prefix_str);
+    EXPECT_EQ(prefix_str, route->ToString());
+}
+
+TEST_F(EvpnTableMacAdvertisementTest, AllocEntryStr4) {
+    string prefix_str("2-10.1.1.1:65535-0-11:12:13:14:15:16,2001:db8:0:9::1");
+    auto_ptr<DBEntry> route = master_->AllocEntryStr(prefix_str);
+    EXPECT_EQ(prefix_str, route->ToString());
+}
+
+TEST_F(EvpnTableMacAdvertisementTest, AddDeleteSingleRoute) {
+    AddRoute("2-10.1.1.1:65535-0-11:12:13:14:15:16,192.168.1.1");
+    task_util::WaitForIdle();
+    VerifyRouteExists("2-10.1.1.1:65535-0-11:12:13:14:15:16,192.168.1.1");
+    TASK_UTIL_EXPECT_EQ(adc_notification_, 1);
+
+    DelRoute("2-10.1.1.1:65535-0-11:12:13:14:15:16,192.168.1.1");
+    task_util::WaitForIdle();
+    TASK_UTIL_EXPECT_EQ(del_notification_, 1);
+    VerifyRouteNoExists("2-10.1.1.1:65535-0-11:12:13:14:15:16,192.168.1.1");
+}
+
+// Prefixes differ only in the IP address field of the RD.
+TEST_F(EvpnTableMacAdvertisementTest, AddDeleteMultipleRoute1) {
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "2-10.1.1." << idx << ":65535-";
+        repr << "0-07:00:00:00:00:01,192.168.1.1";
+        AddRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "2-10.1.1." << idx << ":65535-";
+        repr << "0-07:00:00:00:00:01,192.168.1.1";
+        VerifyRouteExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "2-10.1.1." << idx << ":65535-";
+        repr << "0-07:00:00:00:00:01,192.168.1.1";
+        DelRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "2-10.1.1." << idx << ":65535-";
+        repr << "0-07:00:00:00:00:01,192.168.1.1";
         VerifyRouteNoExists(repr.str());
     }
     TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
@@ -161,97 +347,373 @@ TEST_F(EvpnTableTest, AddDeleteMultipleRoute1) {
 
 
 // Prefixes differ only in the mac_addr field.
-TEST_F(EvpnTableTest, AddDeleteMultipleRoute2) {
+TEST_F(EvpnTableMacAdvertisementTest, AddDeleteMultipleRoute2) {
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1.1:65535-";
-        repr << "07:00:00:00:00:" << hex << idx << ",192.168.1.1/32";
+        repr << "2-10.1.1.1:65535-";
+        repr << "0-07:00:00:00:00:" << hex << idx << ",192.168.1.1";
         AddRoute(repr.str());
     }
     task_util::WaitForIdle();
 
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1.1:65535-";
-        repr << "07:00:00:00:00:" << hex << idx << ",192.168.1.1/32";
+        repr << "2-10.1.1.1:65535-";
+        repr << "0-07:00:00:00:00:" << hex << idx << ",192.168.1.1";
         VerifyRouteExists(repr.str());
     }
     TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
 
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1.1:65535-";
-        repr << "07:00:00:00:00:" << hex << idx << ",192.168.1.1/32";
+        repr << "2-10.1.1.1:65535-";
+        repr << "0-07:00:00:00:00:" << hex << idx << ",192.168.1.1";
         DelRoute(repr.str());
     }
     task_util::WaitForIdle();
 
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1.1:65535-";
-        repr << "07:00:00:00:00:" << hex << idx << ",192.168.1.1/32";
+        repr << "2-10.1.1.1:65535-";
+        repr << "0-07:00:00:00:00:" << hex << idx << ",192.168.1.1";
         VerifyRouteNoExists(repr.str());
     }
     TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
 }
 
 // Prefixes differ only in the ip_addr field.
-TEST_F(EvpnTableTest, AddDeleteMultipleRoute3) {
+TEST_F(EvpnTableMacAdvertisementTest, AddDeleteMultipleRoute3) {
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1.1:65535-";
-        repr << "07:00:00:00:00:01,192.168.1." << idx << "/32";
+        repr << "2-10.1.1.1:65535-";
+        repr << "0-07:00:00:00:00:01,192.168.1." << idx;
         AddRoute(repr.str());
     }
     task_util::WaitForIdle();
 
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1.1:65535-";
-        repr << "07:00:00:00:00:01,192.168.1." << idx << "/32";
+        repr << "2-10.1.1.1:65535-";
+        repr << "0-07:00:00:00:00:01,192.168.1." << idx;
         VerifyRouteExists(repr.str());
     }
     TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
 
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1.1:65535-";
-        repr << "07:00:00:00:00:01,192.168.1." << idx << "/32";
+        repr << "2-10.1.1.1:65535-";
+        repr << "0-07:00:00:00:00:01,192.168.1." << idx;
         DelRoute(repr.str());
     }
     task_util::WaitForIdle();
 
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1.1:65535-";
-        repr << "07:00:00:00:00:01,192.168.1." << idx << "/32";
+        repr << "2-10.1.1.1:65535-";
+        repr << "0-07:00:00:00:00:01,192.168.1." << idx;
         VerifyRouteNoExists(repr.str());
     }
     TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
 }
 
-TEST_F(EvpnTableTest, Hashing) {
+TEST_F(EvpnTableMacAdvertisementTest, Hashing) {
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1.1:65535-";
-        repr << "07:00:00:00:00:" << hex << idx << ",192.168.1.1/32";
+        repr << "2-10.1.1.1:65535-";
+        repr << "0-07:00:00:00:00:" << hex << idx << ",192.168.1.1";
         AddRoute(repr.str());
     }
     task_util::WaitForIdle();
 
-    for (int idx = 0; idx < DB::PartitionCount(); idx++) {
-        DBTablePartition *tbl_partition =
-            static_cast<DBTablePartition *>(evpn_->GetTablePartition(idx));
-        TASK_UTIL_EXPECT_NE(0, tbl_partition->size());
-    }
+    VerifyTablePartitionNonEmpty(0, DB::PartitionCount());
 
     for (int idx = 1; idx <= kRouteCount; idx++) {
         ostringstream repr;
-        repr << "10.1.1.1:65535-";
-        repr << "07:00:00:00:00:" << hex << idx << ",192.168.1.1/32";
+        repr << "2-10.1.1.1:65535-";
+        repr << "0-07:00:00:00:00:" << hex << idx << ",192.168.1.1";
         DelRoute(repr.str());
     }
     task_util::WaitForIdle();
+}
+
+class EvpnTableInclusiveMulticastTest : public EvpnTableTest {
+};
+
+TEST_F(EvpnTableInclusiveMulticastTest, AllocEntryStr1) {
+    string prefix_str("3-10.1.1.1:65535-0-192.1.1.1");
+    auto_ptr<DBEntry> route = master_->AllocEntryStr(prefix_str);
+    EXPECT_EQ(prefix_str, route->ToString());
+}
+
+TEST_F(EvpnTableInclusiveMulticastTest, AllocEntryStr2) {
+    string prefix_str("3-10.1.1.1:65535-65536-192.1.1.1");
+    auto_ptr<DBEntry> route = master_->AllocEntryStr(prefix_str);
+    EXPECT_EQ(prefix_str, route->ToString());
+}
+
+TEST_F(EvpnTableInclusiveMulticastTest, AllocEntryStr3) {
+    string prefix_str("3-10.1.1.1:65535-65536-2001:db8:0:9::1");
+    auto_ptr<DBEntry> route = master_->AllocEntryStr(prefix_str);
+    EXPECT_EQ(prefix_str, route->ToString());
+}
+
+TEST_F(EvpnTableInclusiveMulticastTest, AddDeleteSingleRoute) {
+    AddRoute("3-10.1.1.1:65535-65536-192.1.1.1");
+    task_util::WaitForIdle();
+    VerifyRouteExists("3-10.1.1.1:65535-65536-192.1.1.1");
+    TASK_UTIL_EXPECT_EQ(adc_notification_, 1);
+
+    DelRoute("3-10.1.1.1:65535-65536-192.1.1.1");
+    task_util::WaitForIdle();
+    TASK_UTIL_EXPECT_EQ(del_notification_, 1);
+    VerifyRouteNoExists("3-10.1.1.1:65535-65536-192.1.1.1");
+}
+
+// Prefixes differ only in the IP address field of the RD.
+TEST_F(EvpnTableInclusiveMulticastTest, AddDeleteMultipleRoute1) {
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1." << idx << ":65535-65536-192.1.1.1";
+        AddRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1." << idx << ":65535-65536-192.1.1.1";
+        VerifyRouteExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
+
+    VerifyTablePartitionNonEmpty(0);
+    VerifyTablePartitionEmpty(1, DB::PartitionCount());
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1." << idx << ":65535-65536-192.1.1.1";
+        DelRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1." << idx << ":65535-65536-192.1.1.1";
+        VerifyRouteNoExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
+}
+
+
+// Prefixes differ only in the tag field.
+TEST_F(EvpnTableInclusiveMulticastTest, AddDeleteMultipleRoute2) {
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1.1:65535-" << idx << "-192.1.1.1";
+        AddRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1.1:65535-" << idx << "-192.1.1.1";
+        VerifyRouteExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
+
+    VerifyTablePartitionNonEmpty(0);
+    VerifyTablePartitionEmpty(1, DB::PartitionCount());
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1.1:65535-" << idx << "-192.1.1.1";
+        DelRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1.1:65535-" << idx << "-192.1.1.1";
+        VerifyRouteNoExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
+}
+
+// Prefixes differ only in the IP address field.
+TEST_F(EvpnTableInclusiveMulticastTest, AddDeleteMultipleRoute3) {
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1.1:65535-65536-192.1.1." << idx;
+        AddRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1.1:65535-65536-192.1.1." << idx;
+        VerifyRouteExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
+
+    VerifyTablePartitionNonEmpty(0);
+    VerifyTablePartitionEmpty(1, DB::PartitionCount());
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1.1:65535-65536-192.1.1." << idx;
+        DelRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "3-10.1.1.1:65535-65536-192.1.1." << idx;
+        VerifyRouteNoExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
+}
+
+class EvpnTableSegmentTest : public EvpnTableTest {
+};
+
+TEST_F(EvpnTableSegmentTest, AllocEntryStr1) {
+    string prefix_str(
+        "4-10.1.1.1:65535-00:01:02:03:04:05:06:07:08:09-192.1.1.1");
+    auto_ptr<DBEntry> route = master_->AllocEntryStr(prefix_str);
+    EXPECT_EQ(prefix_str, route->ToString());
+}
+
+TEST_F(EvpnTableSegmentTest, AllocEntryStr2) {
+    string prefix_str(
+        "4-10.1.1.1:65535-00:01:02:03:04:05:06:07:08:09-2001:db8:0:9::1");
+    auto_ptr<DBEntry> route = master_->AllocEntryStr(prefix_str);
+    EXPECT_EQ(prefix_str, route->ToString());
+}
+
+TEST_F(EvpnTableSegmentTest, AddDeleteSingleRoute) {
+    AddRoute("4-10.1.1.1:65535-00:01:02:03:04:05:06:07:08:09-192.1.1.1");
+    task_util::WaitForIdle();
+    VerifyRouteExists("4-10.1.1.1:65535-00:01:02:03:04:05:06:07:08:09-192.1.1.1");
+    TASK_UTIL_EXPECT_EQ(adc_notification_, 1);
+
+    DelRoute("4-10.1.1.1:65535-00:01:02:03:04:05:06:07:08:09-192.1.1.1");
+    task_util::WaitForIdle();
+    TASK_UTIL_EXPECT_EQ(del_notification_, 1);
+    VerifyRouteNoExists("4-10.1.1.1:65535-00:01:02:03:04:05:06:07:08:09-192.1.1.1");
+}
+
+// Prefixes differ only in the IP address field of the RD.
+TEST_F(EvpnTableSegmentTest, AddDeleteMultipleRoute1) {
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1." << idx << ":65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-192.1.1.1";
+        AddRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1." << idx << ":65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-192.1.1.1";
+        VerifyRouteExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
+
+    VerifyTablePartitionNonEmpty(0);
+    VerifyTablePartitionEmpty(1, DB::PartitionCount());
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1." << idx << ":65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-192.1.1.1";
+        DelRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1." << idx << ":65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-192.1.1.1";
+        VerifyRouteNoExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
+}
+
+
+// Prefixes differ only in the esi field.
+TEST_F(EvpnTableSegmentTest, AddDeleteMultipleRoute2) {
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:" << hex << idx << "-192.1.1.1";
+        AddRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:" << hex << idx << "-192.1.1.1";
+        VerifyRouteExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
+
+    VerifyTablePartitionNonEmpty(0);
+    VerifyTablePartitionEmpty(1, DB::PartitionCount());
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:" << hex << idx << "-192.1.1.1";
+        DelRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:" << hex << idx << "-192.1.1.1";
+        VerifyRouteNoExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
+}
+
+// Prefixes differ only in the IP address field.
+TEST_F(EvpnTableSegmentTest, AddDeleteMultipleRoute3) {
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-192.1.1." << idx;
+        AddRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-192.1.1." << idx;
+        VerifyRouteExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(adc_notification_, kRouteCount);
+
+    VerifyTablePartitionNonEmpty(0);
+    VerifyTablePartitionEmpty(1, DB::PartitionCount());
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-192.1.1." << idx;
+        DelRoute(repr.str());
+    }
+    task_util::WaitForIdle();
+
+    for (int idx = 1; idx <= kRouteCount; idx++) {
+        ostringstream repr;
+        repr << "4-10.1.1.1:65535-";
+        repr << "00:01:02:03:04:05:06:07:08:09-192.1.1." << idx;
+        VerifyRouteNoExists(repr.str());
+    }
+    TASK_UTIL_EXPECT_EQ(del_notification_, kRouteCount);
 }
 
 int main(int argc, char **argv) {

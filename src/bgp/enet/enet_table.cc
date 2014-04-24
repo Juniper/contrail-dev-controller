@@ -73,23 +73,20 @@ BgpRoute *EnetTable::RouteReplicate(BgpServer *server,
     if (src_table->family() != Address::EVPN)
         return NULL;
 
+    EvpnRoute *evpn = dynamic_cast<EvpnRoute *>(src_rt);
+    assert(evpn);
+    if (evpn->GetPrefix().type() != EvpnPrefix::MacAdvertisementRoute)
+        return NULL;
+
     OriginVn origin_vn(server->autonomous_system(),
         routing_instance()->virtual_network_index());
     if (!community->ContainsOriginVn(origin_vn.GetExtCommunity()))
         return NULL;
 
-    EnetRoute *enet= dynamic_cast<EnetRoute *>(src_rt);
     boost::scoped_ptr<EnetPrefix> enet_prefix;
-
-    if (enet) {
-        enet_prefix.reset(new EnetPrefix(enet->GetPrefix().mac_addr(),
-            enet->GetPrefix().ip_prefix()));
-    } else {
-        EvpnRoute *evpn = dynamic_cast<EvpnRoute *>(src_rt);
-        assert(evpn);
-        enet_prefix.reset(new EnetPrefix(evpn->GetPrefix().mac_addr(),
-            evpn->GetPrefix().ip_prefix()));
-    }
+    Ip4Prefix ip4prefix(evpn->GetPrefix().ip_address().to_v4(), 32);
+    enet_prefix.reset(
+        new EnetPrefix(evpn->GetPrefix().mac_addr(), ip4prefix));
 
     EnetRoute rt_key(*enet_prefix);
     DBTablePartition *rtp =

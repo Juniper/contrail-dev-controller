@@ -33,6 +33,7 @@ libbgp = env.Library('bgp',
                      SandeshGenSrcs +
                      ['bgp_aspath.cc',
                       'bgp_attr.cc',
+                      'bgp_attr_base.cc',
                       'bgp_condition_listener.cc',
                       'bgp_config.cc',
                       'bgp_config_listener.cc',

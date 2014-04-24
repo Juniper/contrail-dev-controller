@@ -20,6 +20,7 @@
 #include "bgp/community.h"
 
 #include "net/address.h"
+#include "net/esi.h"
 #include "net/rd.h"
 
 // BGP UPDATE attributes: as-path, community, ext-community, next-hop,
@@ -142,6 +143,74 @@ struct BgpMpNlri : public BgpAttribute {
 
     std::vector<BgpProtoPrefix *> nlri;
 };
+
+struct PmsiTunnelSpec : public BgpAttribute {
+    enum Flags {
+        LeafInfoRequired = 1 << 0,
+        EdgeReplicationSupported = 1 << 7
+    };
+
+    enum Type {
+        NoTunnelInfo = 0,
+        RsvpP2mpLsp = 1,
+        LdpP2mpLsp = 2,
+        PimSsmTree = 3,
+        PimSmTree = 4,
+        BidirPimTree = 5,
+        IngressReplication = 6,
+        MldpMp2mpLsp = 7
+    };
+
+    static const int kSize = -1;
+    static const uint8_t kFlags = Optional | Transitive;
+    PmsiTunnelSpec();
+    explicit PmsiTunnelSpec(const BgpAttribute &rhs);
+
+    virtual int CompareTo(const BgpAttribute &rhs_attr) const;
+    virtual void ToCanonical(BgpAttr *attr);
+    virtual std::string ToString() const;
+
+    uint32_t GetLabel() const;
+    void SetLabel(uint32_t label);
+    Ip4Address GetIdentifier() const;
+    void SetIdentifier(Ip4Address identifier);
+
+    uint8_t tunnel_flags;
+    uint8_t tunnel_type;
+    uint32_t label;
+    std::vector<uint8_t> identifier;
+};
+
+class PmsiTunnel {
+public:
+    explicit PmsiTunnel(const PmsiTunnelSpec &pmsispec);
+    const PmsiTunnelSpec &pmsi_tunnel() const { return pmsispec_; }
+
+    uint8_t flags;
+    uint8_t type;
+    uint32_t label;
+    Ip4Address identifier;
+
+private:
+    friend void intrusive_ptr_add_ref(PmsiTunnel *pmsi_tunnel);
+    friend void intrusive_ptr_release(PmsiTunnel *pmsi_tunnel);
+
+    tbb::atomic<int> refcount_;
+    PmsiTunnelSpec pmsispec_;
+};
+
+inline void intrusive_ptr_add_ref(PmsiTunnel *pmsi_tunnel) {
+    pmsi_tunnel->refcount_.fetch_and_increment();
+}
+
+inline void intrusive_ptr_release(PmsiTunnel *pmsi_tunnel) {
+    int prev = pmsi_tunnel->refcount_.fetch_and_decrement();
+    if (prev == 1) {
+        delete pmsi_tunnel;
+    }
+}
+
+typedef boost::intrusive_ptr<PmsiTunnel> PmsiTunnelPtr;
 
 struct EdgeDiscoverySpec : public BgpAttribute {
     static const int kSize = -1;
@@ -356,6 +425,17 @@ struct BgpAttrSourceRd : public BgpAttribute {
     virtual std::string ToString() const;
 };
 
+struct BgpAttrEsi : public BgpAttribute {
+    BgpAttrEsi() : BgpAttribute(0, Esi, 0) {}
+    BgpAttrEsi(const BgpAttribute &rhs) : BgpAttribute(rhs) {}
+    explicit BgpAttrEsi(EthernetSegmentId esi) :
+            BgpAttribute(0, Esi, 0), esi(esi) {}
+    EthernetSegmentId esi;
+    virtual int CompareTo(const BgpAttribute &rhs_attr) const;
+    virtual void ToCanonical(BgpAttr *attr);
+    virtual std::string ToString() const;
+};
+
 typedef std::vector<BgpAttribute *> BgpAttrSpec;
 
 // Canonicalized BGP attribute
@@ -380,10 +460,12 @@ public:
         aggregator_address_ = address;
     }
     void set_source_rd(RouteDistinguisher source_rd) { source_rd_ = source_rd; }
+    void set_esi(EthernetSegmentId esi) { esi_ = esi; }
     void set_as_path(const AsPathSpec *spec);
     void set_community(const CommunitySpec *comm);
     void set_ext_community(ExtCommunityPtr comm);
     void set_ext_community(const ExtCommunitySpec *extcomm);
+    void set_pmsi_tunnel(const PmsiTunnelSpec *pmsispec);
     void set_edge_discovery(const EdgeDiscoverySpec *edspec);
     void set_edge_forwarding(const EdgeForwardingSpec *efspec);
     void set_label_block(LabelBlockPtr label_block);
@@ -399,10 +481,12 @@ public:
     uint32_t neighbor_as() const;
     const IpAddress &aggregator_adderess() const { return aggregator_address_; }
     RouteDistinguisher source_rd() const { return source_rd_; }
+    EthernetSegmentId esi() const { return esi_; }
     const AsPath *as_path() const { return as_path_.get(); }
     int as_path_count() const { return as_path_ ? as_path_->AsCount() : 0; }
     const Community *community() const { return community_.get(); }
     const ExtCommunity *ext_community() const { return ext_community_.get(); }
+    const PmsiTunnel *pmsi_tunnel() const { return pmsi_tunnel_.get(); }
     const EdgeDiscovery *edge_discovery() const { return edge_discovery_.get(); }
     const EdgeForwarding *edge_forwarding() const { return edge_forwarding_.get(); }
     LabelBlockPtr label_block() const { return label_block_; }
@@ -425,9 +509,11 @@ private:
     as_t aggregator_as_num_;
     IpAddress aggregator_address_;
     RouteDistinguisher source_rd_;
+    EthernetSegmentId esi_;
     AsPathPtr as_path_;
     CommunityPtr community_;
     ExtCommunityPtr ext_community_;
+    PmsiTunnelPtr pmsi_tunnel_;
     EdgeDiscoveryPtr edge_discovery_;
     EdgeForwardingPtr edge_forwarding_;
     LabelBlockPtr label_block_;
@@ -470,6 +556,7 @@ public:
                                                uint32_t local_pref);
     BgpAttrPtr ReplaceSourceRdAndLocate(const BgpAttr *attr,
                                         RouteDistinguisher source_rd);
+    BgpAttrPtr ReplaceEsiAndLocate(const BgpAttr *attr, EthernetSegmentId esi);
     BgpAttrPtr ReplaceMulticastEdgeDiscoveryAndLocate(const BgpAttr *attr,
                                         BgpAttrPtr edge_discovery_attribute) {
         return attr;

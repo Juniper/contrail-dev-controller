@@ -71,7 +71,7 @@ void EnetRoute::SetKey(const DBRequestKey *reqkey) {
 }
 
 void EnetRoute::BuildProtoPrefix(BgpProtoPrefix *prefix,
-        uint32_t label) const {
+        const BgpAttr *attr, uint32_t label) const {
 }
 
 void EnetRoute::BuildBgpProtoNextHop(vector<uint8_t> &nh,

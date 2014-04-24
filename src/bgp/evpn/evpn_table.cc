@@ -23,6 +23,9 @@
 using namespace std;
 
 size_t EvpnTable::HashFunction(const EvpnPrefix &prefix) {
+    if (prefix.type() != EvpnPrefix::MacAdvertisementRoute)
+        return 0;
+
     const uint8_t *data = prefix.mac_addr().GetData();
     uint32_t value = get_value(data + 2, 4);
     return boost::hash_value(value);
@@ -90,8 +93,9 @@ BgpRoute *EvpnTable::RouteReplicate(BgpServer *server,
 
     const RouteDistinguisher &rd = GenerateDistinguisher(src_table, src_path);
 
-    EvpnPrefix vpn_prefix(
-        rd, enet->GetPrefix().mac_addr(), enet->GetPrefix().ip_prefix());
+    EvpnPrefix vpn_prefix(rd, EvpnPrefix::kNullTag,
+        enet->GetPrefix().mac_addr(),
+        enet->GetPrefix().ip_prefix().ip4_addr());
     EvpnRoute rt_key(vpn_prefix);
 
     DBTablePartition *rtp =
