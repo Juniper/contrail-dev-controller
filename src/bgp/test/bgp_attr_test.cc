@@ -333,6 +333,90 @@ TEST_F(BgpAttrTest, SourceRdBasic3) {
     EXPECT_EQ(rd2, ptr->source_rd());
 }
 
+TEST_F(BgpAttrTest, PmsiTunnel1) {
+    PmsiTunnelSpec pmsispec;
+    EXPECT_EQ(0, pmsispec.identifier.size());
+    EXPECT_EQ(BgpAttribute::PmsiTunnel, pmsispec.code);
+    EXPECT_EQ(BgpAttribute::Optional | BgpAttribute::Transitive,
+        pmsispec.flags);
+}
+
+TEST_F(BgpAttrTest, PmsiTunnel2) {
+    PmsiTunnelSpec pmsispec;
+    pmsispec.tunnel_flags = PmsiTunnelSpec::EdgeReplicationSupported;
+    pmsispec.tunnel_type = PmsiTunnelSpec::IngressReplication;
+    pmsispec.SetLabel(10000);
+    error_code ec;
+    pmsispec.SetIdentifier(Ip4Address::from_string("10.1.1.1", ec));
+
+    EXPECT_EQ(4, pmsispec.identifier.size());
+    EXPECT_EQ(BgpAttribute::PmsiTunnel, pmsispec.code);
+    EXPECT_EQ(BgpAttribute::Optional | BgpAttribute::Transitive,
+        pmsispec.flags);
+    EXPECT_EQ(PmsiTunnelSpec::EdgeReplicationSupported, pmsispec.tunnel_flags);
+    EXPECT_EQ(PmsiTunnelSpec::IngressReplication, pmsispec.tunnel_type);
+    EXPECT_EQ(10000, pmsispec.GetLabel());
+    EXPECT_EQ("10.1.1.1", pmsispec.GetIdentifier().to_string());
+}
+
+TEST_F(BgpAttrTest, PmsiTunnel3) {
+    PmsiTunnelSpec pmsispec1;
+    pmsispec1.tunnel_flags = PmsiTunnelSpec::EdgeReplicationSupported;
+    pmsispec1.tunnel_type = PmsiTunnelSpec::IngressReplication;
+    pmsispec1.SetLabel(10000);
+    error_code ec;
+    pmsispec1.SetIdentifier(Ip4Address::from_string("10.1.1.1", ec));
+
+    PmsiTunnelSpec pmsispec2(pmsispec1);
+    EXPECT_EQ(4, pmsispec2.identifier.size());
+    EXPECT_EQ(BgpAttribute::PmsiTunnel, pmsispec2.code);
+    EXPECT_EQ(BgpAttribute::Optional | BgpAttribute::Transitive,
+        pmsispec2.flags);
+    EXPECT_EQ(PmsiTunnelSpec::EdgeReplicationSupported, pmsispec2.tunnel_flags);
+    EXPECT_EQ(PmsiTunnelSpec::IngressReplication, pmsispec2.tunnel_type);
+    EXPECT_EQ(10000, pmsispec2.GetLabel());
+    EXPECT_EQ("10.1.1.1", pmsispec2.GetIdentifier().to_string());
+}
+
+TEST_F(BgpAttrTest, PmsiTunnel4) {
+    BgpAttrSpec attr_spec;
+    PmsiTunnelSpec pmsispec;
+    pmsispec.tunnel_flags = PmsiTunnelSpec::EdgeReplicationSupported;
+    pmsispec.tunnel_type = PmsiTunnelSpec::IngressReplication;
+    pmsispec.SetLabel(10000);
+    error_code ec;
+    pmsispec.SetIdentifier(Ip4Address::from_string("10.1.1.1", ec));
+    attr_spec.push_back(&pmsispec);
+    BgpAttrPtr attr = attr_db_->Locate(attr_spec);
+    EXPECT_EQ(1, attr_db_->Size());
+
+    const PmsiTunnel *pmsi_tunnel = attr->pmsi_tunnel();
+    EXPECT_EQ(PmsiTunnelSpec::EdgeReplicationSupported, pmsi_tunnel->flags);
+    EXPECT_EQ(PmsiTunnelSpec::IngressReplication, pmsi_tunnel->type);
+    EXPECT_EQ(10000, pmsi_tunnel->label);
+    EXPECT_EQ("10.1.1.1", pmsi_tunnel->identifier.to_string());
+}
+
+TEST_F(BgpAttrTest, PmsiTunnelSpecToString1) {
+    PmsiTunnelSpec pmsispec;
+    EXPECT_EQ("PmsiTunnel <code: 22, flags: 0xc0>"
+              " Tunnel Flags: 0x0 Tunnel Type: 0 Label: 0 Identifier: 0.0.0.0",
+        pmsispec.ToString());
+}
+
+TEST_F(BgpAttrTest, PmsiTunnelSpecToString2) {
+    PmsiTunnelSpec pmsispec;
+    pmsispec.tunnel_flags = PmsiTunnelSpec::EdgeReplicationSupported;
+    pmsispec.tunnel_type = PmsiTunnelSpec::IngressReplication;
+    pmsispec.SetLabel(10000);
+    error_code ec;
+    pmsispec.SetIdentifier(Ip4Address::from_string("10.1.1.1", ec));
+    EXPECT_EQ("PmsiTunnel <code: 22, flags: 0xc0>"
+              " Tunnel Flags: 0x80 Tunnel Type: 6 Label: 10000"
+              " Identifier: 10.1.1.1",
+        pmsispec.ToString());
+}
+
 TEST_F(BgpAttrTest, EdgeDiscovery1) {
     EdgeDiscoverySpec edspec;
     EXPECT_EQ(0, edspec.edge_list.size());
