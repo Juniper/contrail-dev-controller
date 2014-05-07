@@ -63,6 +63,7 @@ public:
     static EvpnPrefix FromString(const std::string &str,
         boost::system::error_code *errorp = NULL);
     std::string ToString() const;
+    std::string ToXmppIdString() const;
 
     int CompareTo(const EvpnPrefix &rhs) const;
     bool operator==(const EvpnPrefix &rhs) const { return CompareTo(rhs) == 0; }
@@ -74,7 +75,8 @@ public:
     MacAddress mac_addr() const { return mac_addr_; }
     Address::Family family() const { return family_; }
     IpAddress ip_address() const { return ip_address_; }
-    static size_t label_offset(const BgpProtoPrefix &proto_prefix);
+    uint8_t ip_address_length() const;
+    void set_route_distinguisher(RouteDistinguisher rd) { rd_ = rd; }
 
 private:
     uint8_t type_;
@@ -96,6 +98,8 @@ public:
     EvpnRoute(const EvpnPrefix &prefix);
     virtual int CompareTo(const Route &rhs) const;
     virtual std::string ToString() const;
+    std::string ToXmppIdString() const;
+    virtual bool IsValid() const;
 
     const EvpnPrefix &GetPrefix() const { return prefix_; }
 

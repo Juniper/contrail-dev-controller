@@ -110,6 +110,25 @@ std::string BgpAttrAggregator::ToString() const {
     return std::string(repr);
 }
 
+int BgpAttrOriginatorId::CompareTo(const BgpAttribute &rhs_attr) const {
+    int ret = BgpAttribute::CompareTo(rhs_attr);
+    if (ret != 0) return ret;
+    KEY_COMPARE(originator_id,
+        static_cast<const BgpAttrOriginatorId &>(rhs_attr).originator_id);
+    return 0;
+}
+
+void BgpAttrOriginatorId::ToCanonical(BgpAttr *attr) {
+    attr->set_originator_id(Ip4Address(originator_id));
+}
+
+std::string BgpAttrOriginatorId::ToString() const {
+    char repr[80];
+    snprintf(repr, sizeof(repr), "OriginatorId <code: %d, flags: 0x%02x> : %s",
+             code, flags, Ip4Address(originator_id).to_string().c_str());
+    return std::string(repr);
+}
+
 int BgpMpNlri::CompareTo(const BgpAttribute &rhs_attr) const {
     int ret = BgpAttribute::CompareTo(rhs_attr);
     if (ret != 0) return ret;
@@ -184,13 +203,13 @@ void PmsiTunnelSpec::SetIdentifier(Ip4Address in_identifier) {
     std::copy(bytes.begin(), bytes.begin() + 4, identifier.begin());
 }
 
-PmsiTunnel::PmsiTunnel(const PmsiTunnelSpec &pmsispec)
-    : pmsispec_(pmsispec) {
+PmsiTunnel::PmsiTunnel(const PmsiTunnelSpec &pmsi_spec)
+    : pmsi_spec_(pmsi_spec) {
     refcount_ = 0;
-    flags = pmsispec_.tunnel_flags;
-    type = pmsispec_.tunnel_type;
-    label = pmsispec_.GetLabel();
-    identifier = pmsispec_.GetIdentifier();
+    tunnel_flags = pmsi_spec_.tunnel_flags;
+    tunnel_type = pmsi_spec_.tunnel_type;
+    label = pmsi_spec_.GetLabel();
+    identifier = pmsi_spec_.GetIdentifier();
 }
 
 EdgeDiscoverySpec::EdgeDiscoverySpec()
@@ -451,17 +470,35 @@ std::string BgpAttrEsi::ToString() const {
     return esi.ToString();
 }
 
+int BgpAttrParams::CompareTo(const BgpAttribute &rhs_attr) const {
+    int ret = BgpAttribute::CompareTo(rhs_attr);
+    if (ret != 0) return ret;
+    KEY_COMPARE(params, static_cast<const BgpAttrParams &>(rhs_attr).params);
+    return 0;
+}
+
+void BgpAttrParams::ToCanonical(BgpAttr *attr) {
+    attr->set_params(params);
+}
+
+std::string BgpAttrParams::ToString() const {
+    char repr[80];
+    snprintf(repr, sizeof(repr), "Params <subcode: %d> : 0x%016lx",
+             subcode, params);
+    return std::string(repr);
+}
+
 BgpAttr::BgpAttr()
     : origin_(BgpAttrOrigin::INCOMPLETE), nexthop_(),
       med_(0), local_pref_(0), atomic_aggregate_(false),
-      aggregator_as_num_(0), aggregator_address_() {
+      aggregator_as_num_(0), params_(0) {
     refcount_ = 0;
 }
 
 BgpAttr::BgpAttr(BgpAttrDB *attr_db)
     : attr_db_(attr_db), origin_(BgpAttrOrigin::INCOMPLETE),
       nexthop_(), med_(0), local_pref_(0), atomic_aggregate_(false),
-      aggregator_as_num_(0), aggregator_address_() {
+      aggregator_as_num_(0), params_(0) {
     refcount_ = 0;
 }
 
@@ -470,7 +507,7 @@ BgpAttr::BgpAttr(BgpAttrDB *attr_db, const BgpAttrSpec &spec)
       nexthop_(), med_(0),
       local_pref_(BgpAttrLocalPref::kDefault),
       atomic_aggregate_(false),
-      aggregator_as_num_(0), aggregator_address_() {
+      aggregator_as_num_(0), aggregator_address_(), params_(0) {
     refcount_ = 0;
     for (std::vector<BgpAttribute *>::const_iterator it = spec.begin();
          it < spec.end(); it++) {
@@ -484,10 +521,12 @@ BgpAttr::BgpAttr(const BgpAttr &rhs)
       atomic_aggregate_(rhs.atomic_aggregate_),
       aggregator_as_num_(rhs.aggregator_as_num_),
       aggregator_address_(rhs.aggregator_address_),
-      source_rd_(rhs.source_rd_),
+      originator_id_(rhs.originator_id_),
+      source_rd_(rhs.source_rd_), esi_(rhs.esi_), params_(rhs.params_),
       as_path_(rhs.as_path_),
       community_(rhs.community_),
       ext_community_(rhs.ext_community_),
+      pmsi_tunnel_(rhs.pmsi_tunnel_),
       edge_discovery_(rhs.edge_discovery_),
       edge_forwarding_(rhs.edge_forwarding_),
       label_block_(rhs.label_block_), olist_(rhs.olist_) {
@@ -522,9 +561,9 @@ void BgpAttr::set_ext_community(const ExtCommunitySpec *extcomm) {
     }
 }
 
-void BgpAttr::set_pmsi_tunnel(const PmsiTunnelSpec *pmsispec) {
-    if (pmsispec) {
-        pmsi_tunnel_.reset(new PmsiTunnel(*pmsispec));
+void BgpAttr::set_pmsi_tunnel(const PmsiTunnelSpec *pmsi_spec) {
+    if (pmsi_spec) {
+        pmsi_tunnel_.reset(new PmsiTunnel(*pmsi_spec));
     }
 }
 
@@ -565,10 +604,12 @@ int BgpAttr::CompareTo(const BgpAttr &rhs) const {
     KEY_COMPARE(atomic_aggregate_, rhs.atomic_aggregate_);
     KEY_COMPARE(aggregator_as_num_, rhs.aggregator_as_num_);
     KEY_COMPARE(aggregator_address_, rhs.aggregator_address_);
+    KEY_COMPARE(originator_id_, rhs.originator_id_);
     KEY_COMPARE(pmsi_tunnel_.get(), rhs.pmsi_tunnel_.get());
     KEY_COMPARE(edge_discovery_.get(), rhs.edge_discovery_.get());
     KEY_COMPARE(edge_forwarding_.get(), rhs.edge_forwarding_.get());
     KEY_COMPARE(esi_, rhs.esi_);
+    KEY_COMPARE(params_, rhs.params_);
     KEY_COMPARE(source_rd_, rhs.source_rd_);
     KEY_COMPARE(label_block_.get(), rhs.label_block_.get());
     KEY_COMPARE(olist_.get(), rhs.olist_.get());
@@ -607,7 +648,10 @@ std::size_t hash_value(BgpAttr const &attr) {
     boost::hash_combine(hash, attr.atomic_aggregate_);
     boost::hash_combine(hash, attr.aggregator_as_num_);
     boost::hash_combine(hash, attr.aggregator_address_.to_string());
+    boost::hash_combine(hash, attr.originator_id_.to_string());
+    boost::hash_combine(hash, attr.params_);
     boost::hash_combine(hash, attr.source_rd_.ToString());
+    boost::hash_combine(hash, attr.esi_.ToString());
 
     if (attr.label_block_) {
         boost::hash_combine(hash, attr.label_block_->first());
@@ -645,6 +689,14 @@ BgpAttrPtr BgpAttrDB::ReplaceLocalPreferenceAndLocate(const BgpAttr *attr,
     return Locate(clone);
 }
 
+// Return a clone of attribute with updated originator id.
+BgpAttrPtr BgpAttrDB::ReplaceOriginatorIdAndLocate(const BgpAttr *attr,
+                                                   Ip4Address originator_id) {
+    BgpAttr *clone = new BgpAttr(*attr);
+    clone->set_originator_id(originator_id);
+    return Locate(clone);
+}
+
 // Return a clone of attribute with updated source rd.
 BgpAttrPtr BgpAttrDB::ReplaceSourceRdAndLocate(const BgpAttr *attr,
                                                RouteDistinguisher source_rd) {
@@ -653,11 +705,27 @@ BgpAttrPtr BgpAttrDB::ReplaceSourceRdAndLocate(const BgpAttr *attr,
     return Locate(clone);
 }
 
-// Return a clone of attribute with updated esi
+// Return a clone of attribute with updated esi.
 BgpAttrPtr BgpAttrDB::ReplaceEsiAndLocate(const BgpAttr *attr,
                                           EthernetSegmentId esi) {
     BgpAttr *clone = new BgpAttr(*attr);
     clone->set_esi(esi);
+    return Locate(clone);
+}
+
+// Return a clone of attribute with updated olist.
+BgpAttrPtr BgpAttrDB::ReplaceOListAndLocate(const BgpAttr *attr,
+                                            BgpOListPtr olist) {
+    BgpAttr *clone = new BgpAttr(*attr);
+    clone->set_olist(olist);
+    return Locate(clone);
+}
+
+// Return a clone of attribute with updated pmsi tunnel.
+BgpAttrPtr BgpAttrDB::ReplacePmsiTunnelAndLocate(const BgpAttr *attr,
+                                                 PmsiTunnelSpec *pmsi_spec) {
+    BgpAttr *clone = new BgpAttr(*attr);
+    clone->set_pmsi_tunnel(pmsi_spec);
     return Locate(clone);
 }
 
