@@ -164,6 +164,11 @@ int EvpnPrefix::FromProtoPrefix(BgpServer *server,
             return -1;
         size_t ip_offset = ip_len_offset + 1;
         prefix->ReadIpAddress(proto_prefix, ip_offset, ip_size);
+        const PmsiTunnel *pmsi_tunnel = attr ? attr->pmsi_tunnel() : NULL;
+        if (pmsi_tunnel &&
+            pmsi_tunnel->tunnel_type == PmsiTunnelSpec::IngressReplication) {
+            *label = pmsi_tunnel->label;
+        }
         break;
     }
     case SegmentRoute: {
@@ -560,6 +565,20 @@ string EvpnPrefix::ToString() const {
     return str;
 }
 
+string EvpnPrefix::ToXmppIdString() const {
+    string str = mac_addr_.ToString() + "," + ip_address_.to_string() + "/" +
+        integerToString(ip_address_length());
+    return str;
+}
+
+uint8_t EvpnPrefix::ip_address_length() const {
+    if (family_ == Address::INET)
+        return 32;
+    if (family_ == Address::INET6)
+        return 128;
+    return 32;
+}
+
 size_t EvpnPrefix::GetIpAddressSize() const {
     if (family_ == Address::INET)
         return 4;
@@ -611,6 +630,41 @@ int EvpnRoute::CompareTo(const Route &rhs) const {
 
 string EvpnRoute::ToString() const {
     return prefix_.ToString();
+}
+
+string EvpnRoute::ToXmppIdString() const {
+    return prefix_.ToXmppIdString();
+}
+
+bool EvpnRoute::IsValid() const {
+    if (!BgpRoute::IsValid())
+        return false;
+
+    const BgpAttr *attr = BestPath()->GetAttr();
+    switch (prefix_.type()) {
+    case EvpnPrefix::AutoDiscoveryRoute: {
+        return false;
+    }
+    case EvpnPrefix::MacAdvertisementRoute: {
+        return prefix_.mac_addr().IsBroadcast();
+    }
+    case EvpnPrefix::InclusiveMulticastRoute: {
+        const PmsiTunnel *pmsi_tunnel = attr->pmsi_tunnel();
+        if (!pmsi_tunnel)
+            return false;
+        if (pmsi_tunnel->tunnel_type != PmsiTunnelSpec::IngressReplication)
+            return false;
+        return true;
+    }
+    case EvpnPrefix::SegmentRoute: {
+        return false;
+    }
+    default: {
+        break;
+    }
+    }
+
+    return false;
 }
 
 void EvpnRoute::SetKey(const DBRequestKey *reqkey) {

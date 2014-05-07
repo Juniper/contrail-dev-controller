@@ -48,15 +48,21 @@ void BgpMessage::StartReach(const RibOutAttr *roattr, const BgpRoute *route) {
         update.path_attributes.push_back(agg);
     }
 
+    if (!attr->originator_id().is_unspecified()) {
+        BgpAttrOriginatorId *originator_id =
+            new BgpAttrOriginatorId(attr->originator_id().to_ulong());
+        update.path_attributes.push_back(originator_id);
+    }
+
     if (attr->as_path()) {
         AsPathSpec *path = new AsPathSpec(attr->as_path()->path());
         update.path_attributes.push_back(path);
     }
 
     if (attr->pmsi_tunnel()) {
-        PmsiTunnelSpec *pmsispec =
+        PmsiTunnelSpec *pmsi_spec =
             new PmsiTunnelSpec(attr->pmsi_tunnel()->pmsi_tunnel());
-        update.path_attributes.push_back(pmsispec);
+        update.path_attributes.push_back(pmsi_spec);
     }
 
     if (attr->edge_discovery()) {

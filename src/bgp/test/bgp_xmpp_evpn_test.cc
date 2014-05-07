@@ -8,8 +8,6 @@
 #include "bgp/bgp_factory.h"
 #include "bgp/bgp_session_manager.h"
 #include "bgp/bgp_xmpp_channel.h"
-#include "bgp/enet/enet_route.h"
-#include "bgp/enet/enet_table.h"
 #include "bgp/test/bgp_server_test_util.h"
 #include "control-node/control_node.h"
 #include "control-node/test/network_agent_mock.h"
@@ -75,26 +73,18 @@ private:
 class BgpXmppChannelManagerMock : public BgpXmppChannelManager {
 public:
     BgpXmppChannelManagerMock(XmppServer *x, BgpServer *b) :
-        BgpXmppChannelManager(x, b), count(0), channels(0) { }
+        BgpXmppChannelManager(x, b) { }
 
     virtual void XmppHandleChannelEvent(XmppChannel *channel,
                                         xmps::PeerState state) {
-         count++;
          BgpXmppChannelManager::XmppHandleChannelEvent(channel, state);
     }
 
     virtual BgpXmppChannel *CreateChannel(XmppChannel *channel) {
-        channel_[channels] = new BgpXmppChannelMock(channel, bgp_server_, this);
-        channels++;
-        return channel_[channels-1];
+        BgpXmppChannel *mock_channel =
+            new BgpXmppChannelMock(channel, bgp_server_, this);
+        return mock_channel;
     }
-
-    int Count() {
-        return count;
-    }
-    int count;
-    int channels;
-    BgpXmppChannelMock *channel_[2];
 };
 
 static const autogen::EnetItemType *VerifyRouteUpdated(
@@ -2543,6 +2533,372 @@ TEST_F(BgpXmppEvpnTest2, ConnectedInstances) {
     // Close the sessions.
     agent_a_->SessionDown();
     agent_b_->SessionDown();
+}
+
+static const char *config_template_mcast_1 = "\
+<config>\
+    <bgp-router name=\'X\'>\
+        <identifier>192.168.0.1</identifier>\
+        <address>127.0.0.1</address>\
+    </bgp-router>\
+    <virtual-network name='blue'>\
+        <network-id>1</network-id>\
+    </virtual-network>\
+    <routing-instance name='blue'>\
+        <virtual-network>blue</virtual-network>\
+        <vrf-target>target:1:1</vrf-target>\
+    </routing-instance>\
+</config>\
+";
+
+//
+// Single Control Node X.
+//
+class BgpXmppEvpnMcastTest1 : public ::testing::Test {
+protected:
+
+    BgpXmppEvpnMcastTest1() : thread_(&evm_) {
+        mx_params_.edge_replication_not_supported = true;
+        bcast_mac_ = string("ff:ff:ff:ff:ff:ff,0.0.0.0/32");
+    }
+
+    virtual void SetUp() {
+        bs_x_.reset(new BgpServerTest(&evm_, "X"));
+        xs_x_ = new XmppServer(&evm_, test::XmppDocumentMock::kControlNodeJID);
+        bs_x_->session_manager()->Initialize(0);
+        LOG(DEBUG, "Created server at port: " <<
+            bs_x_->session_manager()->GetPort());
+        xs_x_->Initialize(0, false);
+        bgp_channel_manager_.reset(
+            new BgpXmppChannelManagerMock(xs_x_, bs_x_.get()));
+        thread_.Start();
+        task_util::WaitForIdle();
+    }
+
+    virtual void TearDown() {
+        xs_x_->Shutdown();
+        task_util::WaitForIdle();
+        bs_x_->Shutdown();
+        task_util::WaitForIdle();
+        bgp_channel_manager_.reset();
+        TcpServerManager::DeleteServer(xs_x_);
+        xs_x_ = NULL;
+        DeleteAgents();
+        DeleteMxs();
+        evm_.Shutdown();
+        thread_.Join();
+        task_util::WaitForIdle();
+        STLDeleteValues(&agents_);
+        STLDeleteValues(&mxs_);
+    }
+
+    void Configure() {
+        bs_x_->Configure(config_template_mcast_1);
+        task_util::WaitForIdle();
+    }
+
+    bool VerifyVrouterInOList(test::NetworkAgentMock *vrouter, bool is_mx,
+        int idx, const autogen::EnetItemType *rt) {
+        char nh_addr[32];
+        if (is_mx) {
+            snprintf(nh_addr, sizeof(nh_addr), "192.168.1.2%d", idx);
+        } else {
+            snprintf(nh_addr, sizeof(nh_addr), "192.168.1.1%d", idx);
+        }
+        const autogen::EnetOlistType &olist = rt->entry.olist;
+        if (olist.next_hop.size() == 0)
+            return false;
+
+        bool found = false;
+        BOOST_FOREACH(const autogen::EnetNextHopType &nh, olist.next_hop) {
+            if (nh.address == nh_addr) {
+                EXPECT_FALSE(found);
+                found = true;
+            }
+        }
+        return found;
+    }
+
+    bool VerifyVrouterNotInOList(test::NetworkAgentMock *vrouter, bool is_mx,
+        int idx, const autogen::EnetItemType *rt) {
+        if (!rt)
+            return false;
+
+        const autogen::EnetOlistType &olist = rt->entry.olist;
+        if (olist.next_hop.size() == 0)
+            return false;
+
+        char nh_addr[32];
+        if (is_mx) {
+            snprintf(nh_addr, sizeof(nh_addr), "192.168.1.2%d", idx);
+        } else {
+            snprintf(nh_addr, sizeof(nh_addr), "192.168.1.1%d", idx);
+        }
+        bool found = false;
+        BOOST_FOREACH(const autogen::EnetNextHopType &nh, olist.next_hop) {
+            if (nh.address == nh_addr)
+                return false;
+        }
+        return true;
+    }
+
+    bool VerifyOListCommon(test::NetworkAgentMock *vrouter,
+        bool odd, bool even, bool include_agents) {
+        const autogen::EnetItemType *rt =
+            vrouter->EnetRouteLookup("blue", bcast_mac_);
+
+        size_t count = 0;
+        int mx_idx = 0;
+        BOOST_FOREACH(test::NetworkAgentMock *mx, mxs_) {
+            if (vrouter == mx) {
+                mx_idx++;
+                continue;
+            }
+            if ((odd && mx_idx % 2 != 0) || (even && mx_idx % 2 == 0)) {
+                if (!rt)
+                    return false;
+                if (!VerifyVrouterInOList(mx, true, mx_idx, rt))
+                    return false;
+                count++;
+            } else {
+                if (!VerifyVrouterNotInOList(mx, true, mx_idx, rt))
+                    return false;
+            }
+            mx_idx++;
+        }
+
+        int agent_idx = 0;
+        if (include_agents) {
+            BOOST_FOREACH(test::NetworkAgentMock *agent, agents_) {
+                if (!rt)
+                    return false;
+                if (!VerifyVrouterInOList(agent, false, agent_idx, rt))
+                    return false;
+                count++;
+                agent_idx++;
+            }
+        }
+
+        const autogen::EnetOlistType &olist = rt->entry.olist;
+        if (olist.next_hop.size() != count)
+            return false;
+
+        return true;
+    }
+
+    void CreateAgents() {
+        for (int idx = 0; idx < 2; ++idx) {
+            char name[32];
+            snprintf(name, sizeof(name), "agent-%d", idx);
+            char local_addr[32];
+            snprintf(local_addr, sizeof(local_addr), "127.0.0.1%d", idx);
+            test::NetworkAgentMock *agent = new test::NetworkAgentMock(
+                &evm_, name, xs_x_->GetPort(), local_addr);
+            agents_.push_back(agent);
+            TASK_UTIL_EXPECT_TRUE(agent->IsEstablished());
+        }
+    }
+
+    void DeleteAgents() {
+        BOOST_FOREACH(test::NetworkAgentMock *agent, agents_) {
+            agent->Delete();
+        }
+    }
+
+    void SubscribeAgents() {
+        BOOST_FOREACH(test::NetworkAgentMock *agent, agents_) {
+            agent->EnetSubscribe("blue", 1);
+            usleep(10000);
+            task_util::WaitForIdle();
+        }
+    }
+
+    void UnsubscribeAgents() {
+        BOOST_FOREACH(test::NetworkAgentMock *agent, agents_) {
+            agent->EnetUnsubscribe("blue");
+            usleep(10000);
+            task_util::WaitForIdle();
+        }
+    }
+
+    void AddAgentsBroadcastMacRouteCommon(bool odd, bool even) {
+        int idx = 0;
+        BOOST_FOREACH(test::NetworkAgentMock *agent, agents_) {
+            char nh_addr[32];
+            snprintf(nh_addr, sizeof(nh_addr), "192.168.1.1%d", idx);
+            if ((odd && idx % 2 != 0) || (even && idx % 2 == 0)) {
+                agent->AddEnetRoute("blue", bcast_mac_, nh_addr);
+                usleep(10000);
+                task_util::WaitForIdle();
+            }
+            idx++;
+        }
+    }
+
+    void AddOddAgentsBroadcastMacRoute() {
+        AddAgentsBroadcastMacRouteCommon(true, false);
+    }
+
+    void AddEvenAgentsBroadcastMacRoute() {
+        AddAgentsBroadcastMacRouteCommon(false, true);
+    }
+
+    void AddAllAgentsBroadcastMacRoute() {
+        AddAgentsBroadcastMacRouteCommon(true, true);
+    }
+
+    void DelAllAgentsBroadcastMacRoute() {
+        BOOST_FOREACH(test::NetworkAgentMock *agent, agents_) {
+            agent->DeleteEnetRoute("blue", bcast_mac_);
+            usleep(10000);
+            task_util::WaitForIdle();
+        }
+    }
+
+    void VerifyAllAgentsOlist() {
+        BOOST_FOREACH(test::NetworkAgentMock *agent, agents_) {
+            TASK_UTIL_EXPECT_TRUE(
+                VerifyOListCommon(agent, true, true, false));
+        }
+    }
+
+    void CreateMxs() {
+        for (int idx = 0; idx < 2; ++idx) {
+            char name[32];
+            snprintf(name, sizeof(name), "mx-%d", idx);
+            char local_addr[32];
+            snprintf(local_addr, sizeof(local_addr), "127.0.0.2%d", idx);
+            test::NetworkAgentMock *mx = new test::NetworkAgentMock(
+                &evm_, name, xs_x_->GetPort(), local_addr);
+            mxs_.push_back(mx);
+            TASK_UTIL_EXPECT_TRUE(mx->IsEstablished());
+        }
+    }
+
+    void DeleteMxs() {
+        BOOST_FOREACH(test::NetworkAgentMock *mx, mxs_) {
+            mx->Delete();
+        }
+    }
+
+    void SubscribeMxs() {
+        BOOST_FOREACH(test::NetworkAgentMock *mx, mxs_) {
+            mx->EnetSubscribe("blue", 1);
+            usleep(10000);
+            task_util::WaitForIdle();
+        }
+    }
+
+    void UnsubscribeMxs() {
+        BOOST_FOREACH(test::NetworkAgentMock *mx, mxs_) {
+            mx->EnetUnsubscribe("blue");
+            usleep(10000);
+            task_util::WaitForIdle();
+        }
+    }
+
+    void AddMxsBroadcastMacRouteCommon(bool odd, bool even) {
+        int idx = 0;
+        BOOST_FOREACH(test::NetworkAgentMock *mx, mxs_) {
+            char nh_addr[32];
+            snprintf(nh_addr, sizeof(nh_addr), "192.168.1.2%d", idx);
+            if ((odd && idx % 2 != 0) || (even && idx % 2 == 0)) {
+                mx->AddEnetRoute("blue", bcast_mac_, nh_addr, &mx_params_);
+                usleep(10000);
+                task_util::WaitForIdle();
+            }
+            idx++;
+        }
+    }
+
+    void AddOddMxsBroadcastMacRoute() {
+        AddMxsBroadcastMacRouteCommon(true, false);
+    }
+
+    void AddEvenMxsBroadcastMacRoute() {
+        AddMxsBroadcastMacRouteCommon(false, true);
+    }
+
+    void AddAllMxsBroadcastMacRoute() {
+        AddMxsBroadcastMacRouteCommon(true, true);
+    }
+
+    void DelMxsBroadcastMacRouteCommon(bool odd, bool even) {
+        int idx = 0;
+        BOOST_FOREACH(test::NetworkAgentMock *mx, mxs_) {
+            if ((odd && idx % 2 != 0) || (even && idx % 2 == 0)) {
+                mx->DeleteEnetRoute("blue", bcast_mac_);
+                usleep(10000);
+                task_util::WaitForIdle();
+            }
+            idx++;
+        }
+    }
+
+    void DelOddMxsBroadcastMacRoute() {
+        DelMxsBroadcastMacRouteCommon(true, false);
+    }
+
+    void DelEvenMxsBroadcastMacRoute() {
+        DelMxsBroadcastMacRouteCommon(false, true);
+    }
+
+    void DelAllMxsBroadcastMacRoute() {
+        DelMxsBroadcastMacRouteCommon(true, true);
+    }
+
+    void VerifyAllMxsOlist() {
+        BOOST_FOREACH(test::NetworkAgentMock *mx, mxs_) {
+            TASK_UTIL_EXPECT_TRUE(
+                VerifyOListCommon(mx, true, true, true));
+        }
+    }
+
+    EventManager evm_;
+    ServerThread thread_;
+    BgpServerTestPtr bs_x_;
+    XmppServer *xs_x_;
+    vector<test::NetworkAgentMock *> agents_;
+    vector<test::NetworkAgentMock *> mxs_;
+    boost::scoped_ptr<BgpXmppChannelManagerMock> bgp_channel_manager_;
+    test::RouteParams mx_params_;
+    string bcast_mac_;
+};
+
+TEST_F(BgpXmppEvpnMcastTest1, Basic1) {
+    Configure();
+    CreateAgents();
+    CreateMxs();
+    SubscribeAgents();
+    SubscribeMxs();
+
+    AddAllAgentsBroadcastMacRoute();
+    AddAllMxsBroadcastMacRoute();
+    VerifyAllAgentsOlist();
+    VerifyAllMxsOlist();
+
+    DelAllAgentsBroadcastMacRoute();
+    DelAllMxsBroadcastMacRoute();
+    UnsubscribeAgents();
+    UnsubscribeMxs();
+}
+
+TEST_F(BgpXmppEvpnMcastTest1, Basic2) {
+    Configure();
+    CreateAgents();
+    CreateMxs();
+    SubscribeAgents();
+    SubscribeMxs();
+
+    AddAllMxsBroadcastMacRoute();
+    AddAllAgentsBroadcastMacRoute();
+    VerifyAllAgentsOlist();
+    VerifyAllMxsOlist();
+
+    DelAllAgentsBroadcastMacRoute();
+    DelAllMxsBroadcastMacRoute();
+    UnsubscribeAgents();
+    UnsubscribeMxs();
 }
 
 class TestEnvironment : public ::testing::Environment {

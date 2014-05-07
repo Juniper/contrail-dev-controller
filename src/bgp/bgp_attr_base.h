@@ -46,7 +46,8 @@ struct BgpAttribute : public ParseObject {
         OList = 1,
         LabelBlock = 2,
         SourceRd = 3,
-        Esi = 4
+        Esi = 4,
+        Params = 5
     };
 
     BgpAttribute() : code(0), subcode(0), flags(0) { }

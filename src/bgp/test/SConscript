@@ -19,7 +19,6 @@ env.Append(CPPPATH = [env['TOP'],
 env.Append(LIBPATH = ['#/' + Dir('..').path,
                       '../../base',
                       '../../bgp/inet',
-                      '../../bgp/enet',
                       '../../bgp/ermvpn',
                       '../../bgp/evpn',
                       '../../bgp/l3vpn',
@@ -65,14 +64,12 @@ env.Prepend(LIBS = ['control_test', 'bgptest', 'bgp', 'peer_sandesh',
 
 if sys.platform == 'darwin':
     bgp_inet = Dir('../inet').path + '/libbgp_inet.a'
-    bgp_enet = Dir('../enet').path + '/libbgp_enet.a'
     bgp_ermvpn = Dir('../ermvpn').path + '/libbgp_ermvpn.a'
     bgp_evpn = Dir('../evpn').path + '/libbgp_evpn.a'
     bgp_l3vpn = Dir('../l3vpn').path + '/libbgp_l3vpn.a'
     bgp_rtarget = Dir('../rtarget').path + '/librtarget.a'
     env.Prepend(LINKFLAGS =
                 ['-Wl,-force_load,' + bgp_inet,
-                 '-Wl,-force_load,' + bgp_enet,
                  '-Wl,-force_load,' + bgp_ermvpn,
                  '-Wl,-force_load,' + bgp_evpn,
                  '-Wl,-force_load,' + bgp_l3vpn,
@@ -82,14 +79,13 @@ else:
                 ['-Wl,--whole-archive',
                  '-rdynamic',
                  '-lbgp_inet',
-                 '-lbgp_enet',
                  '-lbgp_ermvpn',
                  '-lbgp_evpn',
                  '-lbgp_l3vpn',
                  '-lrtarget',
                  '-Wl,--no-whole-archive'])
 
-env.Append(LIBS = ['bgp_enet', 'bgp_ermvpn', 'bgp_evpn'])
+env.Append(LIBS = ['bgp_ermvpn', 'bgp_evpn'])
 env.Append(LIBS = ['bgp_inet', 'bgp_l3vpn'])
 env.Append(LIBS = ['route', 'net', 'routing_instance', 'rtarget'])
 env.Append(LIBS = ['origin_vn', 'security_group', 'tunnel_encap'])
@@ -129,6 +125,10 @@ env.Alias('src/bgp:bgp_config_manager_test', bgp_config_manager_test)
 bgp_config_test = config_test_env.UnitTest('bgp_config_test',
                                            ['bgp_config_test.cc'])
 env.Alias('src/bgp:bgp_config_test', bgp_config_test)
+
+bgp_evpn_manager_test = env.UnitTest('bgp_evpn_manager_test',
+                                     ['bgp_evpn_manager_test.cc'])
+env.Alias('src/bgp:bgp_evpn_manager_test', bgp_evpn_manager_test)
 
 bgp_export_nostate_test = env.UnitTest('bgp_export_nostate_test',
                                        ['bgp_export_nostate_test.cc'])
@@ -301,6 +301,7 @@ test_suite = [
     bgp_config_listener_test,
     bgp_config_manager_test,
     bgp_config_test,
+    bgp_evpn_manager_test,
     bgp_export_nostate_test,
     bgp_export_rstate_test,
     bgp_export_rtupdate_test,
@@ -347,7 +348,6 @@ test = env.TestSuite('bgp-test', test_suite)
 
 env.Alias('controller/src/bgp:test', [
     test,
-    'controller/src/bgp/enet:test',
     'controller/src/bgp/ermvpn:test',
     'controller/src/bgp/evpn:test',
     'controller/src/bgp/l3vpn:test',
@@ -355,6 +355,15 @@ env.Alias('controller/src/bgp:test', [
     'controller/src/bgp/rtarget:test',
     'controller/src/bgp/tunnel_encap:test',
 ])
+
+# EVPN Related Tests
+evpn_test_suite = [
+    bgp_evpn_manager_test,
+    bgp_xmpp_evpn_test,
+]
+
+evpn_test = env.TestSuite('bgp-evpn-test', evpn_test_suite)
+env.Alias('src/bgp:evpn_test', evpn_test)
 
 #  Update Engine Tests
 update_test_suite = [
