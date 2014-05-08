@@ -1852,7 +1852,7 @@ class DBInterface(object):
             if filters and 'id' in filters:
                 _collect_without_prune(filters['id'])
             elif filters and 'name' in filters:
-                net_objs = self._network_list_project(context.tenant)
+                net_objs = self._network_list_project(context['tenant'])
                 all_net_objs.extend(net_objs)
                 all_net_objs.extend(self._network_list_shared())
                 all_net_objs.extend(self._network_list_router_external())
@@ -1864,7 +1864,7 @@ class DBInterface(object):
             elif filters and 'router:external' in filters and 'shared' in filters:
                 all_net_objs.extend(self._network_list_shared_and_ext())
             else:
-                project_uuid = str(uuid.UUID(context.tenant))
+                project_uuid = str(uuid.UUID(context['tenant']))
                 if not filters:
                     all_net_objs.extend(self._network_list_router_external())
                     all_net_objs.extend(self._network_list_shared())
@@ -2084,7 +2084,7 @@ class DBInterface(object):
                                                            detail=True))
         else:
             if not context['is_admin']:
-                proj_id = context.tenant
+                proj_id = context['tenant']
             else:
                 proj_id = None
             net_objs = self._network_list_project(proj_id)
@@ -2293,7 +2293,7 @@ class DBInterface(object):
         # see if we can return fast...
         if fields and (len(fields) == 1) and fields[0] == 'tenant_id':
             tenant_id = self._get_obj_tenant_id('router', rtr_uuid)
-            return {'q_api_data': {'id': rtr_uuid, 'tenant_id': tenant_id}}
+            return {'id': rtr_uuid, 'tenant_id': tenant_id}
 
         try:
             # return self._db_cache['q_routers']['rtr_uuid']
@@ -2580,7 +2580,7 @@ class DBInterface(object):
                 port_ids = filters['port_id']
         else:  # no filters
             if not context['is_admin']:
-                proj_ids = [str(uuid.UUID(context.tenant))]
+                proj_ids = [str(uuid.UUID(context['tenant']))]
 
         if port_ids:
             fip_objs = self._floatingip_list(back_ref_id=port_ids)
@@ -2762,7 +2762,7 @@ class DBInterface(object):
                 # TODO once vmi is linked to project in schema, use project_id
                 # to limit scope of list
                 if not context['is_admin']:
-                    project_id = str(uuid.UUID(context.tenant))
+                    project_id = str(uuid.UUID(context['tenant']))
                 else:
                     project_id = None
 
@@ -2781,7 +2781,7 @@ class DBInterface(object):
             elif 'tenant_id' in filters:
                 all_project_ids = [str(uuid.UUID(id)) for id in filters['tenant_id']]
             elif 'name' in filters:
-                all_project_ids = [str(uuid.UUID(context.tenant))]
+                all_project_ids = [str(uuid.UUID(context['tenant']))]
             elif 'id' in filters:
                 # TODO optimize
                 for port_id in filters['id']:
@@ -2921,7 +2921,7 @@ class DBInterface(object):
                 project_sgs = self._security_group_list_project(p_id)
                 all_sgs.append(project_sgs)
         elif filters and 'name' in filters:
-            p_id = str(uuid.UUID(context.tenant))
+            p_id = str(uuid.UUID(context['tenant']))
             project_sgs = self._security_group_list_project(p_id)
             all_sgs.append(project_sgs)
         else:  # no filters
@@ -3008,7 +3008,7 @@ class DBInterface(object):
                     continue
                 sgr_info = self.security_group_rules_read(sg_obj.uuid)
                 if sgr_info:
-                    ret_list.append(sgr_info)
+                    ret_list.extend(sgr_info)
 
         return ret_list
     #end security_group_rule_list
@@ -3053,7 +3053,7 @@ class DBInterface(object):
                 project_rts = self._route_table_list_project(p_id)
                 all_rts.append(project_rts)
         elif filters and 'name' in filters:
-            p_id = str(uuid.UUID(context.tenant))
+            p_id = str(uuid.UUID(context['tenant']))
             project_rts = self._route_table_list_project(p_id)
             all_rts.append(project_rts)
         else:  # no filters
@@ -3072,7 +3072,7 @@ class DBInterface(object):
                     continue
                 rt_info = self.route_table_read(proj_rt_id)
                 if not self._filters_is_present(filters, 'name',
-                                                rt_info['q_api_data']['name']):
+                                                rt_info['name']):
                     continue
                 ret_list.append(rt_info)
 
@@ -3112,7 +3112,7 @@ class DBInterface(object):
                 project_sis = self._svc_instance_list_project(p_id)
                 all_sis.append(project_sis)
         elif filters and 'name' in filters:
-            p_id = str(uuid.UUID(context.tenant))
+            p_id = str(uuid.UUID(context['tenant']))
             project_sis = self._svc_instance_list_project(p_id)
             all_sis.append(project_sis)
         else:  # no filters

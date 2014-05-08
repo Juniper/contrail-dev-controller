@@ -654,7 +654,7 @@ class NeutronPluginInterface(object):
             cfgdb = self._get_user_cfgdb(context)
             cfgdb.security_group_rule_delete(sg_rule['id'])
             LOG.debug("plugin_delete_sec_group_rule(): " + 
-                pformat(floatingip['id']))
+                pformat(sg_rule['id']))
         except Exception as e:
             cgitb.Hook(format="text").handle(sys.exc_info())
             raise e
@@ -669,7 +669,7 @@ class NeutronPluginInterface(object):
 
         try:
             cfgdb = self._get_user_cfgdb(context)
-            sg_rules_info = cfgdb.security_group_rule_list(context, filters)
+            sg_rules_info = cfgdb.security_group_rule_list(filters)
             return json.dumps(sg_rules_info)
         except Exception as e:
             cgitb.Hook(format="text").handle(sys.exc_info())
