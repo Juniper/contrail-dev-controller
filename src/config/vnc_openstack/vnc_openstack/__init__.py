@@ -265,12 +265,37 @@ class NeutronApiDriver(vnc_plugin_base.NeutronApi):
         # Bottle callbacks for network operations
         bottle.route('/neutron/network',
                      'POST', self._npi.plugin_http_post_network)
+
         # Bottle callbacks for subnet operations
         bottle.route('/neutron/subnet',
                      'POST', self._npi.plugin_http_post_subnet)
+
         # Bottle callbacks for port operations
         bottle.route('/neutron/port',
                      'POST', self._npi.plugin_http_post_port)
+
+        # Bottle callbacks for floating IP operations
+        bottle.route('/neutron/floatingip',
+                     'POST', self._npi.plugin_http_post_floatingip)
+
+        # Bottle callbacks for security group operations
+        bottle.route('/neutron/security_group',
+                     'POST', self._npi.plugin_http_post_securitygroup)
+
+        # Bottle callbacks for security group rule operations
+        bottle.route('/neutron/security_group_rule',
+                     'POST', self._npi.plugin_http_post_securitygrouprule)
+
+        # Bottle callbacks for router operations
+        bottle.route('/neutron/router',
+                     'POST', self._npi.plugin_http_post_router)
+
+        # Bottle callbacks for ipam operations
+        bottle.route('/neutron/ipam',
+                     'POST', self._npi.plugin_http_post_ipam)
+        # Bottle callbacks for Policy operations
+        bottle.route('/neutron/policy',
+                     'POST', self._npi.plugin_http_post_policy)
 
     def __call__(self):
         pass

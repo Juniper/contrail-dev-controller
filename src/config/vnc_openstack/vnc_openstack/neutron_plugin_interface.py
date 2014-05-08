@@ -94,6 +94,7 @@ class NeutronPluginInterface(object):
         except Exception as e:
             bottle.abort(400, 'Unable to parse request data')
 
+    # Network API Handling
     def plugin_get_network(self, context, network):
         """
         Network get request
@@ -201,6 +202,7 @@ class NeutronPluginInterface(object):
         elif context['operation'] == 'READCOUNT':
             return self.plugin_get_networks_count(context, network)
 
+    # Subnet API Handling
     def plugin_get_subnet(self, context, subnet):
         """
         Subnet get request
@@ -308,6 +310,7 @@ class NeutronPluginInterface(object):
         elif context['operation'] == 'READCOUNT':
             return self.plugin_get_subnets_count(context, subnet)
 
+    # Port API Handling
     def plugin_get_port(self, context, port):
         """
         Port get request
@@ -317,7 +320,7 @@ class NeutronPluginInterface(object):
 
         try:
             cfgdb = self._get_user_cfgdb(context)
-            port_info = cfgdb.port_read(port['id'], fields)
+            port_info = cfgdb.port_read(port['id'])
             return port_info
         except Exception as e:
             cgitb.Hook(format="text").handle(sys.exc_info())
@@ -414,4 +417,608 @@ class NeutronPluginInterface(object):
             return self.plugin_get_ports(context, port)
         elif context['operation'] == 'READCOUNT':
             return self.plugin_get_ports_count(context, port)
+
+    # Floating IP API Handling
+    def plugin_get_floatingip(self, context, floatingip):
+        """
+        Floating IP get request
+        """
+
+        fields = floatingip['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            fip_info = cfgdb.floatingip_read(floatingip['id'])
+            return fip_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_create_floatingip(self, context, floatingip):
+        """
+        Floating IP create request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            net_info = cfgdb.floatingip_create(floatingip['resource'])
+            return net_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_update_floatingip(self, context, floatingip):
+        """
+        Floating IP update request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            floatingip_info = cfgdb.floatingip_update(floatingip['id'],
+                                                      floatingip['resource'])
+            return floatingip_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_delete_floatingip(self, context, floatingip):
+        """
+        Floating IP delete request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            cfgdb.floatingip_delete(floatingip['id'])
+            LOG.debug("plugin_delete_floatingip(): " + 
+                pformat(floatingip['id']))
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_floatingips(self, context, floatingip):
+        """
+        Floating IPs get request
+        """
+
+        filters = floatingip['filters']
+        fields = floatingip['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            floatingips_info = cfgdb.floatingip_list(context, filters)
+            return json.dumps(floatingips_info)
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_floatingips_count(self, context, floatingip):
+        """
+        Floating IPs count request
+        """
+
+        filters = floatingip['filters']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            floatingips_count = cfgdb.floatingip_count(context, filters)
+            LOG.debug("plugin_get_floatingips_count(): filters: "
+                      + pformat(filters) + " data: " + str(floatingips_count))
+            return {'count': floatingips_count}
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_http_post_floatingip(self):
+        """
+        Bottle callback for Floating IP POST
+        """
+        context, floatingip = self._get_requests_data()
+
+        if context['operation'] == 'READ':
+            return self.plugin_get_floatingip(context, floatingip)
+        elif context['operation'] == 'CREATE':
+            return self.plugin_create_floatingip(context, floatingip)
+        elif context['operation'] == 'UPDATE':
+            return self.plugin_update_floatingip(context, floatingip)
+        elif context['operation'] == 'DELETE':
+            return self.plugin_delete_floatingip(context, floatingip)
+        elif context['operation'] == 'READALL':
+            return self.plugin_get_floatingips(context, floatingip)
+        elif context['operation'] == 'READCOUNT':
+            return self.plugin_get_floatingips_count(context, floatingip)
+
+    # Security Group API Handling
+    def plugin_get_sec_group(self, context, sg):
+        """
+        Security group get request
+        """
+
+        fields = sg['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            sg_info = cfgdb.security_group_read(sg['id'])
+            return sg_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_create_sec_group(self, context, sg):
+        """
+        Security group create request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            sg_info = cfgdb.security_group_create(sg['resource'])
+            return sg_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_update_sec_group(self, context, sg):
+        """
+        Security group update request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            sg_info = cfgdb.security_group_update(sg['id'],
+                                                  sg['resource'])
+            return sg_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_delete_sec_group(self, context, sg):
+        """
+        Security group delete request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            cfgdb.security_group_delete(sg['id'])
+            LOG.debug("plugin_delete_sec_group(): " + pformat(sg['id']))
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_sec_groups(self, context, sg):
+        """
+        Security groups get request
+        """
+
+        filters = sg['filters']
+        fields = sg['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            sgs_info = cfgdb.security_group_list(context, filters)
+            return json.dumps(sgs_info)
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_http_post_securitygroup(self):
+        """
+        Bottle callback for Security Group POST
+        """
+        context, sg = self._get_requests_data()
+
+        if context['operation'] == 'READ':
+            return self.plugin_get_sec_group(context, sg)
+        elif context['operation'] == 'CREATE':
+            return self.plugin_create_sec_group(context, sg)
+        elif context['operation'] == 'UPDATE':
+            return self.plugin_update_sec_group(context, sg)
+        elif context['operation'] == 'DELETE':
+            return self.plugin_delete_sec_group(context, sg)
+        elif context['operation'] == 'READALL':
+            return self.plugin_get_sec_groups(context, sg)
+
+    # Floating IP API Handling
+    def plugin_get_sec_group_rule(self, context, sg_rule):
+        """
+        Security group rule get request
+        """
+
+        fields = sg_rule['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            sg_rule_info = cfgdb.security_group_rule_read(sg_rule['id'])
+            return sg_rule_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_create_sec_group_rule(self, context, sg_rule):
+        """
+        Security group rule create request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            sg_rule_info = cfgdb.security_group_rule_create(sg_rule['resource'])
+            return sg_rule_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_delete_sec_group_rule(self, context, sg_rule):
+        """
+        Security group rule delete request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            cfgdb.security_group_rule_delete(sg_rule['id'])
+            LOG.debug("plugin_delete_sec_group_rule(): " + 
+                pformat(floatingip['id']))
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_sec_group_rules(self, context, sg_rule):
+        """
+        Security group rules get request
+        """
+
+        filters = sg_rule['filters']
+        fields = sg_rule['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            sg_rules_info = cfgdb.security_group_rule_list(context, filters)
+            return json.dumps(sg_rules_info)
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_http_post_securitygrouprule(self):
+        """
+        Bottle callback for sec_group_rule POST
+        """
+        context, sg_rule = self._get_requests_data()
+
+        if context['operation'] == 'READ':
+            return self.plugin_get_sec_group_rule(context, sg_rule)
+        elif context['operation'] == 'CREATE':
+            return self.plugin_create_sec_group_rule(context, sg_rule)
+        elif context['operation'] == 'UPDATE':
+            return self.plugin_update_sec_group_rule(context, sg_rule)
+        elif context['operation'] == 'DELETE':
+            return self.plugin_delete_sec_group_rule(context, sg_rule)
+        elif context['operation'] == 'READALL':
+            return self.plugin_get_sec_group_rules(context, sg_rule)
+        elif context['operation'] == 'READCOUNT':
+            return self.plugin_get_sec_group_rules_count(context, sg_rule)
+
+    # Router IP API Handling
+    def plugin_get_router(self, context, router):
+        """
+        Router get request
+        """
+
+        fields = router['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            router_info = cfgdb.router_read(router['id'])
+            return router_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_create_router(self, context, router):
+        """
+        Router create request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            router_info = cfgdb.router_create(router['resource'])
+            return router_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_update_router(self, context, router):
+        """
+        Router update request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            router_info = cfgdb.router_update(router['id'],
+                                              router['resource'])
+            return router_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_delete_router(self, context, router):
+        """
+        Router delete request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            cfgdb.router_delete(router['id'])
+            LOG.debug("plugin_delete_router(): " + 
+                pformat(router['id']))
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_routers(self, context, router):
+        """
+        Routers get request
+        """
+
+        filters = router['filters']
+        fields = router['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            routers_info = cfgdb.router_list(filters)
+            return json.dumps(routers_info)
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_routers_count(self, context, router):
+        """
+        Routers count request
+        """
+
+        filters = router['filters']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            routers_count = cfgdb.router_count(filters)
+            LOG.debug("plugin_get_routers_count(): filters: "
+                      + pformat(filters) + " data: " + str(routers_count))
+            return {'count': routers_count}
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_http_post_router(self):
+        """
+        Bottle callback for Router POST
+        """
+        context, router = self._get_requests_data()
+
+        if context['operation'] == 'READ':
+            return self.plugin_get_router(context, router)
+        elif context['operation'] == 'CREATE':
+            return self.plugin_create_router(context, router)
+        elif context['operation'] == 'UPDATE':
+            return self.plugin_update_router(context, router)
+        elif context['operation'] == 'DELETE':
+            return self.plugin_delete_router(context, router)
+        elif context['operation'] == 'READALL':
+            return self.plugin_get_routers(context, router)
+        elif context['operation'] == 'READCOUNT':
+            return self.plugin_get_routers_count(context, router)
+
+
+    # IPAM API Handling
+    def plugin_get_ipam(self, context, ipam):
+        """
+        IPAM get request
+        """
+
+        fields = ipam['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            ipam_info = cfgdb.ipam_read(ipam['id'])
+            return ipam_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_create_ipam(self, context, ipam):
+        """
+        IPAM create request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            ipam_info = cfgdb.ipam_create(ipam['resource'])
+            return ipam_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_update_ipam(self, context, ipam):
+        """
+        IPAM update request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            ipam_info = cfgdb.ipam_update(ipam['id'],
+                                          ipam['resource'])
+            return ipam_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_delete_ipam(self, context, ipam):
+        """
+        IPAM delete request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            cfgdb.ipam_delete(ipam['id'])
+            LOG.debug("plugin_delete_ipam(): " + 
+                pformat(ipam['id']))
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_ipams(self, context, ipam):
+        """
+        IPAM get request
+        """
+
+        filters = ipam['filters']
+        fields = ipam['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            ipams_info = cfgdb.ipam_list(context, filters)
+            return json.dumps(ipams_info)
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_ipams_count(self, context, ipam):
+        """
+        IPAM count request
+        """
+
+        filters = ipam['filters']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            ipams_count = cfgdb.ipam_count(context, filters)
+            LOG.debug("plugin_get_ipams_count(): filters: "
+                      + pformat(filters) + " data: " + str(ipams_count))
+            return {'count': ipams_count}
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_http_post_ipam(self):
+        """
+        Bottle callback for IPAM POST
+        """
+        context, ipam = self._get_requests_data()
+
+        if context['operation'] == 'READ':
+            return self.plugin_get_ipam(context, ipam)
+        elif context['operation'] == 'CREATE':
+            return self.plugin_create_ipam(context, ipam)
+        elif context['operation'] == 'UPDATE':
+            return self.plugin_update_ipam(context, ipam)
+        elif context['operation'] == 'DELETE':
+            return self.plugin_delete_ipam(context, ipam)
+        elif context['operation'] == 'READALL':
+            return self.plugin_get_ipams(context, ipam)
+        elif context['operation'] == 'READCOUNT':
+            return self.plugin_get_ipams_count(context, ipam)
+
+    # Policy IP API Handling
+    def plugin_get_policy(self, context, policy):
+        """
+        Policy get request
+        """
+
+        fields = policy['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            pol_info = cfgdb.policy_read(floatingip['id'])
+            return pol_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_create_policy(self, context, policy):
+        """
+        Policy create request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            pol_info = cfgdb.policy_create(policy['resource'])
+            return pol_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_update_policy(self, context, policy):
+        """
+        Policy update request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            policy_info = cfgdb.policy_update(policy['id'],
+                                              policy['resource'])
+            return policy_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_delete_policy(self, context, policy):
+        """
+        Policy delete request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            cfgdb.policy_delete(policy['id'])
+            LOG.debug("plugin_delete_policy(): " + 
+                pformat(policy['id']))
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_policys(self, context, policy):
+        """
+        Policys get request
+        """
+
+        filters = policy['filters']
+        fields = policy['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            policys_info = cfgdb.policy_list(context, filters)
+            return json.dumps(policys_info)
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_policys_count(self, context, policy):
+        """
+        Policys count request
+        """
+
+        filters = policy['filters']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            policys_count = cfgdb.policy_count(context, filters)
+            LOG.debug("plugin_get_policys_count(): filters: "
+                      + pformat(filters) + " data: " + str(policys_count))
+            return {'count': policys_count}
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_http_post_policy(self):
+        """
+        Bottle callback for Policy POST
+        """
+        context, policy = self._get_requests_data()
+
+        if context['operation'] == 'READ':
+            return self.plugin_get_policy(context, policy)
+        elif context['operation'] == 'CREATE':
+            return self.plugin_create_policy(context, policy)
+        elif context['operation'] == 'UPDATE':
+            return self.plugin_update_policy(context, policy)
+        elif context['operation'] == 'DELETE':
+            return self.plugin_delete_policy(context, policy)
+        elif context['operation'] == 'READALL':
+            return self.plugin_get_policys(context, policy)
+        elif context['operation'] == 'READCOUNT':
+            return self.plugin_get_policys_count(context, policy)
 

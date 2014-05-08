@@ -1143,24 +1143,21 @@ class DBInterface(object):
 
     def _security_group_vnc_to_neutron(self, sg_obj):
         sg_q_dict = self._obj_to_dict(sg_obj)
-        extra_dict = {}
 
         # replace field names
         sg_q_dict['id'] = sg_obj.uuid
         sg_q_dict['tenant_id'] = sg_obj.parent_uuid.replace('-', '')
         sg_q_dict['name'] = sg_obj.name
         sg_q_dict['description'] = sg_obj.get_id_perms().get_description()
-        extra_dict['contrail:fq_name'] = sg_obj.get_fq_name()
 
         # get security group rules
         sg_q_dict['rules'] = []
         rule_list = self.security_group_rules_read(sg_obj.uuid, sg_obj)
         if rule_list:
             for rule in rule_list:
-                sg_q_dict['rules'].append(rule['q_api_data'])
+                sg_q_dict['rules'].append(rule)
 
-        return {'q_api_data': sg_q_dict,
-                'q_extra_data': extra_dict}
+        return sg_q_dict
     #end _security_group_vnc_to_neutron
 
     def _security_group_neutron_to_vnc(self, sg_q, oper):
@@ -1185,8 +1182,7 @@ class DBInterface(object):
     def _security_group_rule_vnc_to_neutron(self, sg_id, sg_rule, sg_obj=None):
         sgr_q_dict = {}
         if sg_id == None:
-            return {'q_api_data': sgr_q_dict,
-                    'q_extra_data': {}}
+            return sgr_q_dict
 
         if not sg_obj:
             try:
@@ -1233,8 +1229,7 @@ class DBInterface(object):
         sgr_q_dict['remote_ip_prefix'] = remote_cidr
         sgr_q_dict['remote_group_id'] = remote_sg_uuid
 
-        return {'q_api_data': sgr_q_dict,
-                'q_extra_data': {}}
+        return sgr_q_dict
     #end _security_group_rule_vnc_to_neutron
 
     def _security_group_rule_neutron_to_vnc(self, sgr_q, oper):
@@ -1451,10 +1446,6 @@ class DBInterface(object):
         else:
             sn_q_dict['shared'] = False
 
-        extra_dict = {}
-        extra_dict['contrail:instance_count'] = 0
-        extra_dict['contrail:ipam_fq_name'] = ipam_fq_name
-
         return sn_q_dict
     #end _subnet_vnc_to_neutron
 
@@ -1554,11 +1545,9 @@ class DBInterface(object):
 
     def _router_vnc_to_neutron(self, rtr_obj, rtr_repr='SHOW'):
         rtr_q_dict = {}
-        extra_dict = {}
 
         rtr_q_dict['id'] = rtr_obj.uuid
         rtr_q_dict['name'] = rtr_obj.name
-        extra_dict['contrail:fq_name'] = rtr_obj.get_fq_name()
         rtr_q_dict['tenant_id'] = rtr_obj.parent_uuid.replace('-', '')
         rtr_q_dict['admin_state_up'] = rtr_obj.get_id_perms().enable
         rtr_q_dict['shared'] = False
@@ -1569,8 +1558,7 @@ class DBInterface(object):
             rtr_q_dict['gw_port_id'] = {'network_id': gw_info}
         except NoIdError:
             pass
-        return {'q_api_data': rtr_q_dict,
-                'q_extra_data': extra_dict}
+        return rtr_q_dict
     #end _router_vnc_to_neutron
 
     def _floatingip_neutron_to_vnc(self, fip_q, oper):
@@ -1602,7 +1590,6 @@ class DBInterface(object):
 
     def _floatingip_vnc_to_neutron(self, fip_obj):
         fip_q_dict = {}
-        extra_dict = {}
 
         net_id = self._vnc_lib.fq_name_to_id('virtual-network',
                                              fip_obj.get_fq_name()[:-2])
@@ -1629,8 +1616,7 @@ class DBInterface(object):
         fip_q_dict['port_id'] = port_id
         fip_q_dict['fixed_ip_address'] = fixed_ip
 
-        return {'q_api_data': fip_q_dict,
-                'q_extra_data': extra_dict}
+        return fip_q_dict
     #end _floatingip_vnc_to_neutron
 
     def _port_neutron_to_vnc(self, port_q, net_obj, oper):
@@ -1655,7 +1641,7 @@ class DBInterface(object):
                                               'floating_ip_back_refs'])
 
         port_obj.set_security_group_list([])
-        if 'security_groups' in port_q and port_q['security_groups'].__class__ is not object:
+        if 'security_groups' in port_q and port_q['security_groups']:
             for sg_id in port_q['security_groups']:
                 # TODO optimize to not read sg (only uuid/fqn needed)
                 sg_obj = self._vnc_lib.security_group_read(id=sg_id)
@@ -2593,7 +2579,7 @@ class DBInterface(object):
             elif 'port_id' in filters:
                 port_ids = filters['port_id']
         else:  # no filters
-            if not context.is_admin:
+            if not context['is_admin']:
                 proj_ids = [str(uuid.UUID(context.tenant))]
 
         if port_ids:
@@ -2630,7 +2616,7 @@ class DBInterface(object):
         # if ip address passed then use it
         ip_addr = None
         ip_obj = None
-        if port_q['fixed_ips'].__class__ is not object:
+        if port_q['fixed_ips']:
             ip_addr = port_q['fixed_ips'][0]['ip_address']
             ip_name = '%s %s' % (net_id, ip_addr)
             try:
