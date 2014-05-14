@@ -1486,8 +1486,7 @@ class DBInterface(object):
                 net_fq_name = net_back_ref['to']
                 ipam_q_dict['nets_using'].append(net_fq_name)
 
-        return {'q_api_data': ipam_q_dict,
-                'q_extra_data': {}}
+        return ipam_q_dict
     #end _ipam_vnc_to_neutron
 
     def _policy_neutron_to_vnc(self, policy_q, oper):
@@ -1521,8 +1520,7 @@ class DBInterface(object):
                 net_fq_name = net_back_ref['to']
                 policy_q_dict['nets_using'].append(net_fq_name)
 
-        return {'q_api_data': policy_q_dict,
-                'q_extra_data': {}}
+        return policy_q_dict
     #end _policy_vnc_to_neutron
 
     def _router_neutron_to_vnc(self, router_q, oper):
