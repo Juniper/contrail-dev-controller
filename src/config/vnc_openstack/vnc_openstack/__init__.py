@@ -293,6 +293,7 @@ class NeutronApiDriver(vnc_plugin_base.NeutronApi):
         # Bottle callbacks for ipam operations
         bottle.route('/neutron/ipam',
                      'POST', self._npi.plugin_http_post_ipam)
+
         # Bottle callbacks for Policy operations
         bottle.route('/neutron/policy',
                      'POST', self._npi.plugin_http_post_policy)

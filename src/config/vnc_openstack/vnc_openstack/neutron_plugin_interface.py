@@ -871,7 +871,7 @@ class NeutronPluginInterface(object):
 
         try:
             cfgdb = self._get_user_cfgdb(context)
-            ipams_info = cfgdb.ipam_list(context, filters)
+            ipams_info = cfgdb.ipam_list(filters)
             return json.dumps(ipams_info)
         except Exception as e:
             cgitb.Hook(format="text").handle(sys.exc_info())
@@ -923,7 +923,7 @@ class NeutronPluginInterface(object):
 
         try:
             cfgdb = self._get_user_cfgdb(context)
-            pol_info = cfgdb.policy_read(floatingip['id'])
+            pol_info = cfgdb.policy_read(policy['id'])
             return pol_info
         except Exception as e:
             cgitb.Hook(format="text").handle(sys.exc_info())
@@ -980,7 +980,7 @@ class NeutronPluginInterface(object):
 
         try:
             cfgdb = self._get_user_cfgdb(context)
-            policys_info = cfgdb.policy_list(context, filters)
+            policys_info = cfgdb.policy_list(filters)
             return json.dumps(policys_info)
         except Exception as e:
             cgitb.Hook(format="text").handle(sys.exc_info())
