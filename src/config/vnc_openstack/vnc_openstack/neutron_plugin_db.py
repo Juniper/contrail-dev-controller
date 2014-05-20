@@ -1079,8 +1079,7 @@ class DBInterface(object):
             si_q_dict['external_net'] = str(vn_obj.uuid) + ' ' + vn_obj.name
             si_q_dict['internal_net'] = '' 
 
-        return {'q_api_data': si_q_dict,
-                'q_extra_data': {}}
+        return si_q_dict
     #end _route_table_vnc_to_neutron
 
     def _route_table_neutron_to_vnc(self, rt_q, oper):
@@ -1137,8 +1136,7 @@ class DBInterface(object):
                 if route['next_hop_type']:
                     route['next_hop'] = route['next_hop_type']    
 
-        return {'q_api_data': rt_q_dict,
-                'q_extra_data': {}}
+        return rt_q_dict
     #end _route_table_vnc_to_neutron
 
     def _security_group_vnc_to_neutron(self, sg_obj):
@@ -3129,7 +3127,7 @@ class DBInterface(object):
                     continue
                 si_info = self.svc_instance_read(proj_si_id)
                 if not self._filters_is_present(filters, 'name',
-                                                si_info['q_api_data']['name']):
+                                                si_info['name']):
                     continue
                 ret_list.append(si_info)
 
