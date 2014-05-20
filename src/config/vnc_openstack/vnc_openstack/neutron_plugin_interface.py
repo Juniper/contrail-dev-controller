@@ -1022,3 +1022,184 @@ class NeutronPluginInterface(object):
         elif context['operation'] == 'READCOUNT':
             return self.plugin_get_policys_count(context, policy)
 
+    def plugin_get_route_table(self, context, route_table):
+        """
+        Route table get request
+        """
+
+        fields = route_table['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            rt_info = cfgdb.route_table_read(route_table['id'])
+            return rt_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_create_route_table(self, context, route_table):
+        """
+        Route table create request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            rt_info = cfgdb.route_table_create(route_table['resource'])
+            return rt_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_update_route_table(self, context, route_table):
+        """
+        Route table update request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            rt_info = cfgdb.route_table_update(route_table['id'],
+                                               route_table['resource'])
+            return rt_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_delete_route_table(self, context, route_table):
+        """
+        Route table delete request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            cfgdb.route_table_delete(route_table['id'])
+            LOG.debug("plugin_delete_route_table(): " +
+                pformat(route_table['id']))
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_route_tables(self, context, route_table):
+        """
+        Route Tables get request
+        """
+
+        filters = route_table['filters']
+        fields = route_table['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            rts_info = cfgdb.route_table_list(context, filters)
+            return json.dumps(rts_info)
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_route_tables_count(self, context, route_table):
+        """
+        Route Tables count request
+        """
+
+        filters = route_table['filters']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            rts_count = cfgdb.route_table_count(filters)
+            LOG.debug("plugin_get_route_tables_count(): filters: "
+                      + pformat(filters) + " data: " + str(rts_count))
+            return {'count': rts_count}
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_http_post_route_table(self):
+        """
+        Bottle callback for Route-table POST
+        """
+        context, route_table = self._get_requests_data()
+
+        if context['operation'] == 'READ':
+            return self.plugin_get_route_table(context, route_table)
+        elif context['operation'] == 'CREATE':
+            return self.plugin_create_route_table(context, route_table)
+        elif context['operation'] == 'UPDATE':
+            return self.plugin_update_route_table(context, route_table)
+        elif context['operation'] == 'DELETE':
+            return self.plugin_delete_route_table(context, route_table)
+        elif context['operation'] == 'READALL':
+            return self.plugin_get_route_tables(context, route_table)
+        elif context['operation'] == 'READCOUNT':
+            return self.plugin_get_route_tables_count(context, route_table)
+
+    def plugin_get_svc_instance(self, context, svc_instance):
+        """
+        Service instance get request
+        """
+
+        fields = svc_instance['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            si_info = cfgdb.svc_instance_read(svc_instance['id'])
+            return si_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_create_svc_instance(self, context, svc_instance):
+        """
+        Service instance create request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            si_info = cfgdb.svc_instance_create(svc_instance['resource'])
+            return si_info
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_delete_svc_instance(self, context, svc_instance):
+        """
+        Service instance delete request
+        """
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            cfgdb.svc_instance_delete(svc_instance['id'])
+            LOG.debug("plugin_delete_svc_instance(): " +
+                pformat(svc_instance['id']))
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_get_svc_instances(self, context, svc_instance):
+        """
+        Service instance get request
+        """
+
+        filters = svc_instance['filters']
+        fields = svc_instance['fields']
+
+        try:
+            cfgdb = self._get_user_cfgdb(context)
+            sis_info = cfgdb.svc_instance_list(context, filters)
+            return json.dumps(sis_info)
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_http_post_svc_instance(self):
+        """
+        Bottle callback for Route-table POST
+        """
+        context, svc_instance = self._get_requests_data()
+
+        if context['operation'] == 'READ':
+            return self.plugin_get_svc_instance(context, svc_instance)
+        elif context['operation'] == 'CREATE':
+            return self.plugin_create_svc_instance(context, svc_instance)
+        elif context['operation'] == 'DELETE':
+            return self.plugin_delete_svc_instance(context, svc_instance)
+        elif context['operation'] == 'READALL':
+            return self.plugin_get_svc_instances(context, svc_instance)
+
