@@ -14,7 +14,7 @@ import time
 import socket
 import netaddr
 from netaddr import IPNetwork, IPSet, IPAddress
-import eventlet
+import gevent
 
 from neutron.common import constants
 from neutron.common import exceptions
@@ -1900,7 +1900,7 @@ class DBInterface(object):
             project_uuids = [proj['uuid'] for proj in dom_projects]
 
             for proj_id in project_uuids:
-                if not filters and 'router:external' not in filters:
+                if not filters or 'router:external' not in filters:
                     all_net_objs.extend(self._network_list_project(proj_id))
 
             if not filters or 'router:external' in filters:
@@ -2763,14 +2763,16 @@ class DBInterface(object):
                     project_id = None
 
                 # read all VMI and IIP in detail one-shot 
-                all_port_greenlet = eventlet.spawn(self._virtual_machine_interface_list,
-                                                   fields=['instance_ip_back_refs'])
-                port_iip_greenlet = eventlet.spawn(self._instance_ip_list)
-                port_net_greenlet = eventlet.spawn(self._virtual_network_list, detail=True)
+                all_port_gevent = gevent.spawn(self._virtual_machine_interface_list,
+                                               fields=['instance_ip_back_refs'])
+                port_iip_gevent = gevent.spawn(self._instance_ip_list)
+                port_net_gevent = gevent.spawn(self._virtual_network_list, detail=True)
 
-                all_port_objs = all_port_greenlet.wait()
-                port_iip_objs = port_iip_greenlet.wait()
-                port_net_objs = port_net_greenlet.wait()              
+                gevent.joinall([all_port_gevent, port_iip_gevent, port_net_gevent])
+
+                all_port_objs = all_port_gevent.value
+                port_iip_objs = port_iip_gevent.value
+                port_net_objs = port_net_gevent.value
 
                 ret_q_ports = self._port_list(port_net_objs, all_port_objs, port_iip_objs)
 
