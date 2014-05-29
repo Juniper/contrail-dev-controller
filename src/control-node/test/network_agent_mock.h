@@ -87,6 +87,12 @@ public:
     pugi::xml_document *RouteDeleteXmlDoc(const std::string &network, 
                                           const std::string &prefix,
         NextHops nexthops = NextHops());
+    pugi::xml_document *Inet6RouteAddXmlDoc(const std::string &network,
+                                            const std::string &prefix,
+                                            NextHops nexthops = NextHops());
+    pugi::xml_document *Inet6RouteDeleteXmlDoc(const std::string &network,
+                                               const std::string &prefix,
+                                               NextHops nexthops = NextHops());
     pugi::xml_document *RouteEnetAddXmlDoc(const std::string &network,
                                            const std::string &prefix,
         NextHops nexthops = NextHops());
@@ -115,9 +121,9 @@ private:
     pugi::xml_document *SubUnsubXmlDoc(
             const std::string &network, int id, bool sub, std::string type);
     pugi::xml_document *RouteAddDeleteXmlDoc(const std::string &network,
-            const std::string &prefix, bool add, const std::string nexthop);
-    pugi::xml_document *RouteAddDeleteXmlDoc(const std::string &network,
             const std::string &prefix, bool add, NextHops nexthop);
+    pugi::xml_document *Inet6RouteAddDeleteXmlDoc(const std::string &network,
+            const std::string &prefix, bool add, NextHops nexthops);
     pugi::xml_document *RouteEnetAddDeleteXmlDoc(const std::string &network,
             const std::string &prefix, const std::string nexthop, bool add);
     pugi::xml_document *RouteEnetAddDeleteXmlDoc(const std::string &network,
@@ -138,6 +144,9 @@ private:
 public:
     typedef autogen::ItemType RouteEntry;
     typedef std::map<std::string, RouteEntry *> RouteTable;
+
+    typedef autogen::ItemType Inet6RouteEntry;
+    typedef std::map<std::string, Inet6RouteEntry *> Inet6RouteTable;
 
     typedef autogen::EnetItemType EnetRouteEntry;
     typedef std::map<std::string, EnetRouteEntry *> EnetRouteTable;
@@ -228,6 +237,21 @@ public:
         return route_mgr_->Lookup(network, prefix);
     }
 
+    void Inet6Subscribe(const std::string &network, int id = -1,
+                        bool wait_for_established = true) {
+        inet6_route_mgr_->Subscribe(network, id, wait_for_established);
+    }
+    void Inet6Unsubscribe(const std::string &network, int id = -1,
+                          bool wait_for_established = true) {
+        inet6_route_mgr_->Unsubscribe(network, id, wait_for_established);
+    }
+    int Inet6RouteCount(const std::string &network) const;
+    int Inet6RouteCount() const;
+    const RouteEntry *Inet6RouteLookup(const std::string &network,
+                                       const std::string &prefix) const {
+        return inet6_route_mgr_->Lookup(network, prefix);
+    }
+
     void AddRoute(const std::string &network, const std::string &prefix,
                   const std::string nexthop = "");
     void DeleteRoute(const std::string &network, const std::string &prefix,
@@ -237,6 +261,11 @@ public:
                   NextHops nexthops);
     void DeleteRoute(const std::string &network, const std::string &prefix,
                   NextHops nexthops);
+
+    void AddInet6Route(const std::string &network, const std::string &prefix,
+                       const std::string nexthop = "");
+    void DeleteInet6Route(const std::string &network, const std::string &prefix,
+                          const std::string nexthop = "");
 
     void EnetSubscribe(const std::string &network, int id = -1,
                        bool wait_for_established = true) {
@@ -314,6 +343,7 @@ public:
     bool ProcessRequest(Request *request);
 
     boost::scoped_ptr<InstanceMgr<RouteEntry> > route_mgr_;
+    boost::scoped_ptr<InstanceMgr<Inet6RouteEntry> > inet6_route_mgr_;
     boost::scoped_ptr<InstanceMgr<EnetRouteEntry> > enet_route_mgr_;
     boost::scoped_ptr<InstanceMgr<McastRouteEntry> > mcast_route_mgr_;
     boost::scoped_ptr<InstanceMgr<VRouterEntry> > vrouter_mgr_;

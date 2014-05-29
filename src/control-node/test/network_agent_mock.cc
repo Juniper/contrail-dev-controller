@@ -113,6 +113,7 @@ public:
 
         std::string nodename(node.value());
         bool inet_route = false;
+        bool inet6_route = false;
         bool enet_route = false;
         bool mcast_route = false;
         const char *af = NULL, *safi = NULL, *network;
@@ -124,6 +125,8 @@ public:
 
         if (atoi(af) == BgpAf::IPv4 && atoi(safi) == BgpAf::Unicast) {
             inet_route = true;
+        } else if (atoi(af) == BgpAf::IPv6 && atoi(safi) == BgpAf::Unicast) {
+            inet6_route = true;
         } else if (atoi(af) == BgpAf::L2Vpn && atoi(safi) == BgpAf::Enet) {
             enet_route = true;
         } else if (atoi(af) == BgpAf::IPv4 && atoi(safi) == BgpAf::Mcast) {
@@ -139,6 +142,12 @@ public:
                         parent_->route_mgr_->Update(node.value(), -1);
                     } else {
                         parent_->route_mgr_->Remove(network, sid);
+                    }
+                } else if (inet6_route) {
+                    if (parent_->skip_updates_processing()) {
+                        parent_->inet6_route_mgr_->Update(network, -1);
+                    } else {
+                        parent_->inet6_route_mgr_->Remove(network, sid);
                     }
                 } else if (enet_route) {
                     if (parent_->skip_updates_processing()) {
@@ -175,6 +184,19 @@ public:
                     } else {
                         parent_->route_mgr_->Update(
                                 network, sid, rt_entry.release());
+                    }
+                } else if (inet6_route) {
+                    auto_ptr<autogen::ItemType> rt_entry(
+                            new autogen::ItemType());
+                    if (!rt_entry->XmlParse(item)) {
+                        continue;
+                    }
+
+                    if (parent_->skip_updates_processing()) {
+                        parent_->inet6_route_mgr_->Update(network, +1);
+                    } else {
+                        parent_->inet6_route_mgr_->Update(network, sid,
+                                                     rt_entry.release());
                     }
                 } else if (enet_route) {
                     auto_ptr<autogen::EnetItemType> rt_entry(
@@ -238,6 +260,18 @@ pugi::xml_document *XmppDocumentMock::RouteDeleteXmlDoc(
         const std::string &network, const std::string &prefix,
         NextHops nexthops) {
     return RouteAddDeleteXmlDoc(network, prefix, false, nexthops);
+}
+
+pugi::xml_document *XmppDocumentMock::Inet6RouteAddXmlDoc(
+        const std::string &network, const std::string &prefix, 
+        NextHops nexthops) {
+    return Inet6RouteAddDeleteXmlDoc(network, prefix, true, nexthops);
+}
+
+pugi::xml_document *XmppDocumentMock::Inet6RouteDeleteXmlDoc(
+        const std::string &network, const std::string &prefix,
+        NextHops nexthops) {
+    return Inet6RouteAddDeleteXmlDoc(network, prefix, false, nexthops);
 }
 
 pugi::xml_document *XmppDocumentMock::RouteEnetAddXmlDoc(
@@ -344,6 +378,51 @@ pugi::xml_document *XmppDocumentMock::RouteAddDeleteXmlDoc(
     collection.append_attribute("node") = network.c_str();
     xml_node assoc = collection.append_child(
             add ? "associate" : "dissociate");
+    assoc.append_attribute("node") = header.str().c_str();
+    return xdoc_.get();
+}
+
+pugi::xml_document *XmppDocumentMock::Inet6RouteAddDeleteXmlDoc(
+        const std::string &network, const std::string &prefix, bool add,
+        NextHops nexthops) {
+    xdoc_->reset();
+    xml_node pubsub = PubSubHeader(kNetworkServiceJID);
+    xml_node pub = pubsub.append_child("publish");
+    stringstream header;
+    header << BgpAf::IPv6 << "/" <<  BgpAf::Unicast << "/" <<
+              network.c_str() << "/" << prefix.c_str();
+    pub.append_attribute("node") = header.str().c_str();
+    autogen::ItemType rt_entry;
+    rt_entry.Clear();
+    rt_entry.entry.nlri.af = BgpAf::IPv6;
+    rt_entry.entry.nlri.safi = BgpAf::Unicast;
+    rt_entry.entry.nlri.address = prefix;
+    rt_entry.entry.security_group_list.security_group.push_back(101);
+
+    if (nexthops.empty()) {
+        NextHop nexthop = NextHop(localaddr(), 0);
+        nexthop.tunnel_encapsulations_.push_back("gre");
+        nexthops.push_back(nexthop);
+    }
+
+    BOOST_FOREACH(NextHop nexthop, nexthops) {
+        autogen::NextHopType item_nexthop;
+
+        item_nexthop.af = BgpAf::IPv4;
+        assert(!nexthop.address_.empty());
+        item_nexthop.address = nexthop.address_;
+        item_nexthop.label = add ? (nexthop.label_ ?: label_alloc_++) : 0xFFFFF;
+        item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation = 
+            nexthop.tunnel_encapsulations_;
+        rt_entry.entry.next_hops.next_hop.push_back(item_nexthop);
+    }
+
+    xml_node item = pub.append_child("item");
+    rt_entry.Encode(&item);
+    pubsub = PubSubHeader(kNetworkServiceJID);
+    xml_node collection = pubsub.append_child("collection");
+    collection.append_attribute("node") = network.c_str();
+    xml_node assoc = collection.append_child(add ? "associate" : "dissociate");
     assoc.append_attribute("node") = header.str().c_str();
     return xdoc_.get();
 }
@@ -515,6 +594,8 @@ NetworkAgentMock::NetworkAgentMock(EventManager *evm, const string &hostname,
 
     route_mgr_.reset(new InstanceMgr<RouteEntry>(this,
             XmppDocumentMock::kNetworkServiceJID));
+    inet6_route_mgr_.reset(new InstanceMgr<Inet6RouteEntry>(this,
+            XmppDocumentMock::kNetworkServiceJID));
     enet_route_mgr_.reset(new InstanceMgr<EnetRouteEntry>(this,
             XmppDocumentMock::kNetworkServiceJID));
     mcast_route_mgr_.reset(new InstanceMgr<McastRouteEntry>(this,
@@ -549,6 +630,7 @@ const string NetworkAgentMock::ToString() const {
 
 void NetworkAgentMock::ClearInstances() {
     route_mgr_->Clear();
+    inet6_route_mgr_->Clear();
     enet_route_mgr_->Clear();
     mcast_route_mgr_->Clear();
     vrouter_mgr_->Clear();
@@ -711,6 +793,35 @@ void NetworkAgentMock::DeleteRoute(const string &network_name,
                                    const string &prefix, NextHops nexthops) {
     AgentPeer *peer = GetAgent();
     xml_document *xdoc = impl_->RouteDeleteXmlDoc(network_name, prefix,
+                                                  nexthops);
+    peer->SendDocument(xdoc);
+}
+
+void NetworkAgentMock::AddInet6Route(const string &network_name,
+                                 const string &prefix, const string nexthop) {
+    NextHops nexthops;
+
+    if (!nexthop.empty()) {
+        nexthops.push_back(NextHop(nexthop, 0));
+    }
+
+    AgentPeer *peer = GetAgent();
+    xml_document *xdoc = impl_->Inet6RouteAddXmlDoc(network_name, prefix,
+                                                    nexthops);
+
+    peer->SendDocument(xdoc);
+}
+
+void NetworkAgentMock::DeleteInet6Route(const string &network_name,
+                                   const string &prefix, const string nexthop) {
+    NextHops nexthops;
+
+    if (!nexthop.empty()) {
+        nexthops.push_back(NextHop(nexthop, 0));
+    }
+
+    AgentPeer *peer = GetAgent();
+    xml_document *xdoc = impl_->Inet6RouteDeleteXmlDoc(network_name, prefix,
                                                   nexthops);
     peer->SendDocument(xdoc);
 }
@@ -1014,6 +1125,7 @@ template int NetworkAgentMock::InstanceMgr<T>::Count() const; \
 template void NetworkAgentMock::InstanceMgr<T>::Clear(); \
 template const T *NetworkAgentMock::InstanceMgr<T>::Lookup(const std::string &network, const std::string &prefix) const;
 
+// RouteEntry is the same type as Inet6RouteEntry, used for both inet and inet6
 INSTANTIATE_INSTANCE_TEMPLATES(NetworkAgentMock::RouteEntry)
 INSTANTIATE_INSTANCE_TEMPLATES(NetworkAgentMock::EnetRouteEntry)
 INSTANTIATE_INSTANCE_TEMPLATES(NetworkAgentMock::McastRouteEntry)
@@ -1026,6 +1138,14 @@ int NetworkAgentMock::RouteCount(const std::string &network) const {
 
 int NetworkAgentMock::RouteCount() const {
     return route_mgr_->Count();
+}
+
+int NetworkAgentMock::Inet6RouteCount(const std::string &network) const {
+    return inet6_route_mgr_->Count(network);
+}
+
+int NetworkAgentMock::Inet6RouteCount() const {
+    return inet6_route_mgr_->Count();
 }
 
 int NetworkAgentMock::EnetRouteCount(const std::string &network) const {

@@ -21,7 +21,9 @@ env.Append(LIBPATH = env['TOP'] + '/bgp/evpn')
 env.Append(LIBPATH = env['TOP'] + '/bgp/inet')
 env.Append(LIBPATH = env['TOP'] + '/bgp/inetmcast')
 env.Append(LIBPATH = env['TOP'] + '/bgp/test')
+env.Append(LIBPATH = env['TOP'] + '/bgp/inet6')
 env.Append(LIBPATH = env['TOP'] + '/bgp/l3vpn')
+env.Append(LIBPATH = env['TOP'] + '/bgp/inet6vpn')
 env.Append(LIBPATH = env['TOP'] + '/bgp/origin-vn')
 env.Append(LIBPATH = env['TOP'] + '/bgp/routing-instance')
 env.Append(LIBPATH = env['TOP'] + '/bgp/rtarget')
@@ -82,6 +84,8 @@ if sys.platform != 'darwin':
                              '-lbgp_inet',
                              '-lbgp_inetmcast',
                              '-lrtarget',
+                             '-lbgp_inet6',
+                             '-lbgp_inet6vpn',
                              '-ltask_test',
                              '-Wl,--no-whole-archive'])
 else:
@@ -95,6 +99,10 @@ else:
     env.Prepend(LINKFLAGS = ['-Wl,-force_load,' + lib_inetmcast])
     lib_rtarget = Dir('..').path + '/librtarget.a'
     env.Prepend(LINKFLAGS = ['-Wl,-force_load,' + lib_rtarget])
+    lib_inet6 = Dir('../../inet6').path + '/libbgp_inet6.a'
+    env.Prepend(LINKFLAGS = ['-Wl,-force_load,' + lib_inet6])
+    lib_inet6vpn = Dir('../../inet6vpn').path + '/libbgp_inet6vpn.a'
+    env.Prepend(LINKFLAGS = ['-Wl,-force_load,' + lib_inet6vpn])
 
 inetmcast_table_test = env.UnitTest('inetmcast_table_test',
                                    ['inetmcast_table_test.cc'])

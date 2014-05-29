@@ -42,9 +42,11 @@ public:
 private:
     void EncodeNextHop(const BgpRoute *route, RibOutAttr::NextHop nexthop,
                        autogen::ItemType &item);
-    void AddInetReach(const BgpRoute *route, const RibOutAttr *roattr);
-    void AddInetUnreach(const BgpRoute *route);
+    void AddIpReach(const BgpRoute *route, const RibOutAttr *roattr);
+    void AddIpUnreach(const BgpRoute *route);
     bool AddInetRoute(const BgpRoute *route, const RibOutAttr *roattr);
+
+    bool AddInet6Route(const BgpRoute *route, const RibOutAttr *roattr);
 
     void EncodeEnetNextHop(const BgpRoute *route, RibOutAttr::NextHop nexthop,
                            autogen::EnetItemType &item);
@@ -114,6 +116,9 @@ void BgpXmppMessage::Start(const RibOutAttr *roattr, const BgpRoute *route) {
     } else if (table_->family() == Address::ENET) {
         xitems_.append_attribute("node") = node.c_str();
         AddEnetRoute(route, roattr);
+    } else if (table_->family() == Address::INET6) {
+        xitems_.append_attribute("node") = node.c_str();
+        AddInet6Route(route, roattr);
     } else {
         xitems_.append_attribute("node") = node.c_str();
         AddInetRoute(route, roattr);
@@ -125,6 +130,8 @@ bool BgpXmppMessage::AddRoute(const BgpRoute *route, const RibOutAttr *roattr) {
         return AddMcastRoute(route, roattr);
     } else if (table_->family() == Address::ENET) {
         return AddEnetRoute(route, roattr);
+    } else if (table_->family() == Address::INET6) {
+        return AddInet6Route(route, roattr);
     } else {
         return AddInetRoute(route, roattr);
     }
@@ -135,21 +142,24 @@ void BgpXmppMessage::EncodeNextHop(const BgpRoute *route,
                                    autogen::ItemType &item) {
     autogen::NextHopType item_nexthop;
 
-    item_nexthop.af = route->Afi();
+    item_nexthop.af = route->NexthopAfi();
     item_nexthop.address = nexthop.address().to_v4().to_string();
     item_nexthop.label = nexthop.label();
     if (nexthop.encap().empty()) {
         // If encap list is empty, routes from non-control-node, 
         // use mpls over gre as default encap
-        item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation.push_back(std::string("gre"));
+        item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation.
+            push_back(std::string("gre"));
     } else {
-        item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation= nexthop.encap();
+        item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation =
+            nexthop.encap();
     }
 
     item.entry.next_hops.next_hop.push_back(item_nexthop);
 }
 
-void BgpXmppMessage::AddInetReach(const BgpRoute *route, const RibOutAttr *roattr) {
+void BgpXmppMessage::AddIpReach(const BgpRoute *route,
+                                const RibOutAttr *roattr) {
     autogen::ItemType item;
 
     item.entry.nlri.af = route->Afi();
@@ -177,18 +187,31 @@ void BgpXmppMessage::AddInetReach(const BgpRoute *route, const RibOutAttr *roatt
     item.Encode(&node);
 }
 
-void BgpXmppMessage::AddInetUnreach(const BgpRoute *route) {
+void BgpXmppMessage::AddIpUnreach(const BgpRoute *route) {
     xml_node node = xitems_.append_child("retract");
     node.append_attribute("id") = route->ToXmppIdString().c_str();
 }
 
-bool BgpXmppMessage::AddInetRoute(const BgpRoute *route, const RibOutAttr *roattr) {
+bool BgpXmppMessage::AddInetRoute(const BgpRoute *route,
+                                  const RibOutAttr *roattr) {
     if (is_reachable_) {
         num_reach_route_++;
-        AddInetReach(route, roattr);
+        AddIpReach(route, roattr);
     } else {
         num_unreach_route_++;
-        AddInetUnreach(route);
+        AddIpUnreach(route);
+    }
+    return true;
+}
+
+bool BgpXmppMessage::AddInet6Route(const BgpRoute *route,
+                                   const RibOutAttr *roattr) {
+    if (is_reachable_) {
+        num_reach_route_++;
+        AddIpReach(route, roattr);
+    } else {
+        num_unreach_route_++;
+        AddIpUnreach(route);
     }
     return true;
 }

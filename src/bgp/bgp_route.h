@@ -42,6 +42,10 @@ public:
     // Get AFI and SAFI.
     virtual u_int16_t Afi() const = 0;
     virtual u_int8_t Safi() const = 0;
+    virtual u_int16_t NexthopAfi() const {
+        return Afi();
+    }
+
     virtual std::string ToXmppIdString() const { return ToString(); }
 
     virtual void BuildProtoPrefix(BgpProtoPrefix *prefix,

@@ -106,6 +106,8 @@ private:
 
     void ProcessItem(std::string rt_instance, const pugi::xml_node &item,
                      bool add_change);
+    void ProcessInet6Item(std::string vrf_name, const pugi::xml_node &node,
+                          bool add_change);
     void ProcessMcastItem(std::string rt_instance, 
                           const pugi::xml_node &item, bool add_change);
     void ProcessEnetItem(std::string rt_instance,

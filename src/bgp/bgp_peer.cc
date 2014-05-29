@@ -6,6 +6,9 @@
 
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/foreach.hpp>
+#include <boost/throw_exception.hpp>
+#include <boost/asio/ip/address.hpp>
+#include <boost/asio/ip/address_v6.hpp>
 
 #include "base/logging.h"
 #include "base/task_annotations.h"
@@ -28,6 +31,9 @@
 #include "bgp/evpn/evpn_table.h"
 #include "bgp/inet/inet_table.h"
 #include "bgp/l3vpn/inetvpn_table.h"
+#include "bgp/inet6/inet6_table.h"
+#include "bgp/inet6vpn/inet6vpn_route.h"
+#include "bgp/inet6vpn/inet6vpn_table.h"
 #include "bgp/routing-instance/peer_manager.h"
 #include "bgp/routing-instance/routing_instance.h"
 #include "bgp/rtarget/rtarget_table.h"
@@ -468,6 +474,8 @@ bool BgpPeer::IsFamilyNegotiated(Address::Family family) {
     case Address::EVPN:
         return MpNlriAllowed(BgpAf::L2Vpn, BgpAf::EVpn);
         break;
+    case Address::INET6VPN:
+        return MpNlriAllowed(BgpAf::IPv6, BgpAf::Vpn);
     default:
         break;
     }
@@ -629,11 +637,12 @@ void BgpPeer::SendOpen(TcpSession *session) {
     openmsg.as_num = server->autonomous_system();
     openmsg.holdtime = state_machine_->GetConfiguredHoldTime();
     openmsg.identifier = local_bgp_id_;
-    static const uint8_t cap_mp[4][4] = {
+    static const uint8_t cap_mp[5][4] = {
         { 0, BgpAf::IPv4,  0, BgpAf::Unicast },
         { 0, BgpAf::IPv4,  0, BgpAf::Vpn },
         { 0, BgpAf::L2Vpn, 0, BgpAf::EVpn },
         { 0, BgpAf::IPv4,  0, BgpAf::RTarget },
+        { 0, BgpAf::IPv6,  0, BgpAf::Vpn },
     };
 
     BgpProto::OpenMessage::OptParam *opt_param =
@@ -665,6 +674,13 @@ void BgpPeer::SendOpen(TcpSession *session) {
                 new BgpProto::OpenMessage::Capability(
                         BgpProto::OpenMessage::Capability::MpExtension,
                         cap_mp[3], 4);
+        opt_param->capabilities.push_back(cap);
+    }
+    if (LookupFamily(Address::INET6VPN)) {
+        BgpProto::OpenMessage::Capability *cap =
+                new BgpProto::OpenMessage::Capability(
+                        BgpProto::OpenMessage::Capability::MpExtension,
+                        cap_mp[4], 4);
         opt_param->capabilities.push_back(cap);
     }
 
@@ -767,7 +783,7 @@ void BgpPeer::SetCapabilities(const BgpProto::OpenMessage *msg) {
     remote_bgp_id_ = msg->identifier;
     capabilities_.clear();
     std::vector<BgpProto::OpenMessage::OptParam *>::const_iterator it;
-    for (it = msg->opt_params.begin(); it < msg->opt_params.end(); it++) {
+    for (it = msg->opt_params.begin(); it < msg->opt_params.end(); ++it) {
         capabilities_.insert(capabilities_.end(), (*it)->capabilities.begin(),
                              (*it)->capabilities.end());
         (*it)->capabilities.clear();
@@ -965,6 +981,30 @@ void BgpPeer::ProcessUpdate(const BgpProto::Update *msg) {
             break;
         }
 
+        case Address::INET6VPN: {
+            Inet6VpnTable *table = 
+                static_cast<Inet6VpnTable *>(instance->GetTable(family));
+            assert(table);
+
+            vector<BgpProtoPrefix *>::const_iterator it;
+            for (it = nlri->nlri.begin(); it < nlri->nlri.end(); it++) {
+                uint32_t label = ((*it)->prefix[0] << 16 |
+                                  (*it)->prefix[1] << 8 |
+                                  (*it)->prefix[2]) >> 4;
+                DBRequest req;
+                req.oper = oper;
+                if (oper == DBRequest::DB_ENTRY_ADD_CHANGE) {
+                    req.data.reset(
+                            new Inet6VpnTable::RequestData(attr, flags, label));
+                }
+                req.key.reset(
+                    new Inet6VpnTable::RequestKey(Inet6VpnPrefix(**it), this));
+                table->Enqueue(&req);
+            }
+            break;
+        }
+
+
         case Address::EVPN: {
             EvpnTable *table =
               static_cast<EvpnTable *>(instance->GetTable(family));
@@ -1041,6 +1081,18 @@ void BgpPeer::RegisterToVpnTables(bool established) {
         if (table) {
             membership_mgr->Register(this, table, policy_, -1,
                 boost::bind(&BgpPeer::MembershipRequestCallback, this, _1, _2, 
+                            established));
+            membership_req_pending_++;
+        }
+    }
+
+    if (IsFamilyNegotiated(Address::INET6VPN)) {
+        BgpTable *vtable = instance->GetTable(Address::INET6VPN);
+        BGP_LOG_PEER_TABLE(this, SandeshLevel::SYS_DEBUG, BGP_LOG_FLAG_TRACE,
+                           vtable, "Register peer with the table");
+        if (vtable) {
+            membership_mgr->Register(this, vtable, policy_, -1,
+                boost::bind(&BgpPeer::MembershipRequestCallback, this, _1, _2,
                             established));
             membership_req_pending_++;
         }
@@ -1235,6 +1287,18 @@ BgpAttrPtr BgpPeer::GetMpNlriNexthop(BgpMpNlri *nlri, BgpAttrPtr attr) {
             std::copy(nlri->nexthop.begin(), nlri->nexthop.end(),
                       bt.begin());
             update_nh = true;
+        }
+    } else if (nlri->afi == BgpAf::IPv6) {
+        if (nlri->safi == BgpAf::Vpn) {
+            Ip6Address::bytes_type v6_bt = { { 0 } };
+            size_t rdsize = RouteDistinguisher::kSize;
+            std::copy(nlri->nexthop.begin() + rdsize,
+                      nlri->nexthop.end(), v6_bt.begin());
+            Ip6Address v6_address(v6_bt);
+            if (v6_address.is_v4_mapped()) {
+                bt = Address::V4FromV4MappedV6(v6_address).to_bytes();
+                update_nh = true;
+            }
         }
     }
 
