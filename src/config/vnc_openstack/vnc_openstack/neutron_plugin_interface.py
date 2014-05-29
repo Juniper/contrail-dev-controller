@@ -784,6 +784,41 @@ class NeutronPluginInterface(object):
             cgitb.Hook(format="text").handle(sys.exc_info())
             raise e
 
+    def plugin_add_router_interface(self, context, interface_info):
+        """
+        Add interface to a router
+        """
+        try:
+            cfgdb = NeutronPluginContrailCoreV2._get_user_cfgdb(context)
+            if 'port_id' in interface_info:
+                port_id = interface_info['port_id']
+                return cfgdb.add_router_interface(router_id, port_id=port_id)
+            elif 'subnet_id' in interface_info:
+                subnet_id = interface_info['subnet_id']
+                return cfgdb.add_router_interface(router_id,
+                                                  subnet_id=subnet_id)
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
+    def plugin_del_router_interface(self, context, interface_info):
+        """
+        Delete interface from a router
+        """
+        try:
+            cfgdb = NeutronPluginContrailCoreV2._get_user_cfgdb(context)
+            if 'port_id' in interface_info:
+                port_id = interface_info['port_id']
+                return cfgdb.remove_router_interface(router_id,
+                                                     port_id=port_id)
+            elif 'subnet_id' in interface_info:
+                subnet_id = interface_info['subnet_id']
+                return cfgdb.remove_router_interface(router_id,
+                                                     subnet_id=subnet_id)
+        except Exception as e:
+            cgitb.Hook(format="text").handle(sys.exc_info())
+            raise e
+
     def plugin_http_post_router(self):
         """
         Bottle callback for Router POST
@@ -802,6 +837,10 @@ class NeutronPluginInterface(object):
             return self.plugin_get_routers(context, router)
         elif context['operation'] == 'READCOUNT':
             return self.plugin_get_routers_count(context, router)
+        elif context['operation'] == 'ADDINTERFACE':
+            return self.plugin_add_router_interface(context, router)
+        elif context['operation'] == 'DELINTERFACE':
+            return self.plugin_del_router_interface(context, router)
 
 
     # IPAM API Handling
