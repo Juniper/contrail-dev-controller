@@ -212,7 +212,7 @@ class NeutronPluginInterface(object):
 
         try:
             cfgdb = self._get_user_cfgdb(context)
-            subnet_info = cfgdb.subnet_read(subnet['id'], fields)
+            subnet_info = cfgdb.subnet_read(subnet['id'])
             return subnet_info
         except Exception as e:
             cgitb.Hook(format="text").handle(sys.exc_info())
