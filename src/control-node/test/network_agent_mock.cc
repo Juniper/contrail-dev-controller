@@ -263,15 +263,15 @@ pugi::xml_document *XmppDocumentMock::RouteDeleteXmlDoc(
 }
 
 pugi::xml_document *XmppDocumentMock::Inet6RouteAddXmlDoc(
-        const std::string &network, const std::string &prefix, 
-        NextHops nexthops) {
-    return Inet6RouteAddDeleteXmlDoc(network, prefix, true, nexthops);
+        const std::string &network, const std::string &prefix,
+        NextHops nexthops, const vector<int> &sgids) {
+    return Inet6RouteAddDeleteXmlDoc(network, prefix, true, nexthops, sgids);
 }
 
 pugi::xml_document *XmppDocumentMock::Inet6RouteDeleteXmlDoc(
         const std::string &network, const std::string &prefix,
-        NextHops nexthops) {
-    return Inet6RouteAddDeleteXmlDoc(network, prefix, false, nexthops);
+        NextHops nexthops, const vector<int> &sgids) {
+    return Inet6RouteAddDeleteXmlDoc(network, prefix, false, nexthops, sgids);
 }
 
 pugi::xml_document *XmppDocumentMock::RouteEnetAddXmlDoc(
@@ -384,7 +384,7 @@ pugi::xml_document *XmppDocumentMock::RouteAddDeleteXmlDoc(
 
 pugi::xml_document *XmppDocumentMock::Inet6RouteAddDeleteXmlDoc(
         const std::string &network, const std::string &prefix, bool add,
-        NextHops nexthops) {
+        NextHops nexthops, const vector<int> &sgids) {
     xdoc_->reset();
     xml_node pubsub = PubSubHeader(kNetworkServiceJID);
     xml_node pub = pubsub.append_child("publish");
@@ -397,7 +397,11 @@ pugi::xml_document *XmppDocumentMock::Inet6RouteAddDeleteXmlDoc(
     rt_entry.entry.nlri.af = BgpAf::IPv6;
     rt_entry.entry.nlri.safi = BgpAf::Unicast;
     rt_entry.entry.nlri.address = prefix;
-    rt_entry.entry.security_group_list.security_group.push_back(101);
+    if (sgids.size()) {
+        rt_entry.entry.security_group_list.security_group = sgids;
+    } else {
+        rt_entry.entry.security_group_list.security_group.push_back(101);
+    }
 
     if (nexthops.empty()) {
         NextHop nexthop = NextHop(localaddr(), 0);
@@ -414,6 +418,15 @@ pugi::xml_document *XmppDocumentMock::Inet6RouteAddDeleteXmlDoc(
         item_nexthop.label = add ? (nexthop.label_ ?: label_alloc_++) : 0xFFFFF;
         item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation = 
             nexthop.tunnel_encapsulations_;
+        if (nexthop.tunnel_encapsulations_[0] == "all_ipv6") {
+            item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation.
+                push_back("gre");
+            item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation.
+                push_back("udp");
+        } else {
+            item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation.
+                push_back(nexthop.tunnel_encapsulations_[0]);
+        }
         rt_entry.entry.next_hops.next_hop.push_back(item_nexthop);
     }
 
@@ -798,22 +811,27 @@ void NetworkAgentMock::DeleteRoute(const string &network_name,
 }
 
 void NetworkAgentMock::AddInet6Route(const string &network_name,
-                                 const string &prefix, const string nexthop) {
+        const string &prefix, const string &nexthop, const string &encap,
+        const vector<int> &sgids) {
     NextHops nexthops;
 
     if (!nexthop.empty()) {
-        nexthops.push_back(NextHop(nexthop, 0));
+        if (encap.length()) {
+            nexthops.push_back(NextHop(nexthop, 0, encap));
+        } else {
+            nexthops.push_back(NextHop(nexthop, 0));
+        }
     }
 
     AgentPeer *peer = GetAgent();
     xml_document *xdoc = impl_->Inet6RouteAddXmlDoc(network_name, prefix,
-                                                    nexthops);
-
+                                                    nexthops, sgids);
     peer->SendDocument(xdoc);
 }
 
 void NetworkAgentMock::DeleteInet6Route(const string &network_name,
-                                   const string &prefix, const string nexthop) {
+        const string &prefix, const string &nexthop, const string &encap,
+        const vector<int> &sgids) {
     NextHops nexthops;
 
     if (!nexthop.empty()) {
@@ -822,7 +840,7 @@ void NetworkAgentMock::DeleteInet6Route(const string &network_name,
 
     AgentPeer *peer = GetAgent();
     xml_document *xdoc = impl_->Inet6RouteDeleteXmlDoc(network_name, prefix,
-                                                  nexthops);
+                                                       nexthops, sgids);
     peer->SendDocument(xdoc);
 }
 

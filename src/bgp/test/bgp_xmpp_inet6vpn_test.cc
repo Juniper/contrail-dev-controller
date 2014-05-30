@@ -173,7 +173,7 @@ protected:
                 return false;
             }
             string nh = rt->entry.next_hops.next_hop[0].address;
-            if (nexthop.length() && (nexthop.compare(nh) == 0)) {
+            if (nexthop.length() && (nexthop == nh)) {
                 return true;
             } else {
                 return false;
@@ -1211,6 +1211,9 @@ protected:
         cm2_.reset(
             new BgpXmppChannelManagerMock(xmpp_server2_, bgp_server2_.get()));
 
+        // Insert the 'all' encaps in sorted order.
+        all_encap_list.push_back("gre");
+        all_encap_list.push_back("udp");
         thread_.Start();
     }
 
@@ -1276,7 +1279,7 @@ protected:
                 return false;
             }
             string nh = rt->entry.next_hops.next_hop[0].address;
-            if (nexthop.length() && (nexthop.compare(nh) == 0)) {
+            if (nexthop.length() && (nexthop == nh)) {
                 return true;
             } else {
                 return false;
@@ -1305,6 +1308,43 @@ protected:
         }
     }
 
+    bool VerifyRouteUpdateEncap(string instance_name, string route,
+            string encap, test::NetworkAgentMock *agent) {
+        const autogen::ItemType *rt =
+            agent->Inet6RouteLookup(instance_name, route);
+        if (rt) {
+            autogen::TunnelEncapsulationListType rcvd_encap_info =
+                rt->entry.next_hops.next_hop[0].tunnel_encapsulation_list;
+            size_t received_size = rcvd_encap_info.tunnel_encapsulation.size();
+            if (encap == "all_ipv6") {
+                if (received_size != 2) {
+                    return false;
+                }
+                std::vector<std::string> rcvd_encap_list =
+                    rcvd_encap_info.tunnel_encapsulation;
+                sort(rcvd_encap_list.begin(), rcvd_encap_list.end());
+                if (rcvd_encap_list == all_encap_list) {
+                    return true;
+                } else {
+                    return false;
+                }
+            } else {
+                if (received_size != 1) {
+                    return false;
+                }
+                string encap_value;
+                encap_value = rcvd_encap_info.tunnel_encapsulation[0];
+                if (encap_value.length() && (encap_value == encap)) {
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+        } else {
+            return false;
+        }
+    }
+
     EventManager evm_;
     ServerThread thread_;
     BgpServerTestPtr bgp_server1_;
@@ -1317,6 +1357,7 @@ protected:
     boost::scoped_ptr<BgpXmppChannelManagerMock> cm2_;
     boost::scoped_ptr<test::NetworkAgentMock> agent_y1_;
     boost::scoped_ptr<test::NetworkAgentMock> agent_y2_;
+    std::vector<std::string> all_encap_list; // statically configured at init
 };
 
 // Route from 1 agent shows up on the other.
@@ -3189,6 +3230,407 @@ TEST_F(BgpXmppInet6Test2Peers, ImportExportWithMultipleRoutes1) {
         agent_b_->DeleteInet6Route("pink", route_b.str());
     }
     task_util::WaitForIdle();
+    TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount("pink"));
+    TASK_UTIL_EXPECT_EQ(0, agent_b_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(0, agent_b_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(0, agent_b_->Inet6RouteCount("pink"));
+
+    // Close the sessions.
+    agent_a_->SessionDown();
+    agent_b_->SessionDown();
+}
+
+// A and B add routes with encap. Then A changes the encap of the route a few
+// times i.e.  cycle through udp, all and back to gre.
+TEST_F(BgpXmppInet6Test2Peers, ImportExportWithEncapAddChange) {
+    Configure(two_cns_connected_instances_config);
+    task_util::WaitForIdle();
+
+    // Make sure that the config got applied properly on bgp-server 1.
+    RoutingInstanceMgr *mgr_1 = bgp_server1_->routing_instance_mgr();
+    RoutingInstance *blue_ri1 = mgr_1->GetRoutingInstance("blue");
+    TASK_UTIL_ASSERT_TRUE(blue_ri1 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, blue_ri1->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, blue_ri1->GetImportList().size());
+    RoutingInstance *pink_ri1 = mgr_1->GetRoutingInstance("pink");
+    TASK_UTIL_ASSERT_TRUE(pink_ri1 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, pink_ri1->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, pink_ri1->GetImportList().size());
+
+    // Make sure that the config got applied properly on bgp-server 2.
+    RoutingInstanceMgr *mgr_2 = bgp_server2_->routing_instance_mgr();
+    RoutingInstance *blue_ri2 = mgr_2->GetRoutingInstance("blue");
+    TASK_UTIL_ASSERT_TRUE(blue_ri2 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, blue_ri2->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, blue_ri2->GetImportList().size());
+    RoutingInstance *pink_ri2 = mgr_2->GetRoutingInstance("pink");
+    TASK_UTIL_ASSERT_TRUE(pink_ri2 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, pink_ri2->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, pink_ri2->GetImportList().size());
+
+    // Create XMPP Agent A connected to XMPP server 1.
+    agent_a_.reset(
+        new test::NetworkAgentMock(&evm_, "agent-a", xmpp_server1_->GetPort(),
+            "127.0.0.1", "127.0.0.1"));
+    TASK_UTIL_EXPECT_TRUE(agent_a_->IsEstablished());
+
+    // Create XMPP Agent B connected to XMPP server 2.
+    agent_b_.reset(
+        new test::NetworkAgentMock(&evm_, "agent-b", xmpp_server2_->GetPort(),
+            "127.0.0.2", "127.0.0.2"));
+    TASK_UTIL_EXPECT_TRUE(agent_b_->IsEstablished());
+
+    // Register to blue and pink instances from A.
+    agent_a_->Inet6Subscribe("blue", 1);
+    agent_a_->Inet6Subscribe("pink", 2);
+
+    // Register to blue and pink instances from B.
+    agent_b_->Inet6Subscribe("blue", 1);
+    agent_b_->Inet6Subscribe("pink", 2);
+
+    // Add route from agent A to blue instance.
+    stringstream route_a;
+    route_a << "2001:db8:85a3::8a2e:370:aaaa/128";
+    agent_a_->AddInet6Route("blue", route_a.str(), "192.168.1.1", "gre");
+    task_util::WaitForIdle();
+
+    // Add route from agent B to pink instance.
+    stringstream route_b;
+    route_b << "2001:db8:85a3::8a2e:370:bbbb/128";
+    agent_b_->AddInet6Route("pink", route_b.str(), "192.168.1.2", "udp");
+    task_util::WaitForIdle();
+
+    // Verify that routes show up in both instances on Agent A.
+    TASK_UTIL_EXPECT_EQ(4, agent_a_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(2, agent_a_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(2, agent_a_->Inet6RouteCount("pink"));
+
+    // Verify that routes show up in both instances on Agent B.
+    TASK_UTIL_EXPECT_EQ(4, agent_b_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(2, agent_b_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(2, agent_b_->Inet6RouteCount("pink"));
+
+    // Verify that route_a has the right encap on agent A.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(), "gre",
+                                                 agent_a_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(), "gre",
+                                                 agent_a_.get()));
+
+    // Verify that route_b has the right encap on agent A.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_b.str(), "udp",
+                                                 agent_a_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_b.str(), "udp",
+                                                 agent_a_.get()));
+
+    // Verify that route_a has the right encap on agent B.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(), "gre",
+                                                 agent_b_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(), "gre",
+                                                 agent_b_.get()));
+
+    // Verify that route_b has the right encap on agent B.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_b.str(), "udp",
+                                                 agent_b_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_b.str(), "udp",
+                                                 agent_b_.get()));
+
+    // Change encap for route_a to 'udp'.
+    agent_a_->AddInet6Route("blue", route_a.str(), "192.168.1.1", "udp");
+
+    // Verify that the encap has changed on agent A.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(), "udp",
+                                                 agent_a_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(), "udp",
+                                                 agent_a_.get()));
+
+    // Verify that the encap has changed on agent B.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(), "udp",
+                                                 agent_b_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(), "udp",
+                                                 agent_b_.get()));
+
+    // Change encap for route_a to 'all'.
+    agent_a_->AddInet6Route("blue", route_a.str(), "192.168.1.1", "all_ipv6");
+
+    // Verify that the encap has changed on agent A.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(),
+                                                 "all_ipv6", agent_a_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(),
+                                                 "all_ipv6", agent_a_.get()));
+
+    // Verify that the encap has changed on agent B.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(),
+                                                 "all_ipv6", agent_b_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(),
+                                                 "all_ipv6", agent_b_.get()));
+
+    // Change encap for route_a to 'all'.
+    agent_a_->AddInet6Route("blue", route_a.str(), "192.168.1.1", "gre");
+
+    // Verify that the encap has changed on agent A.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(),
+                                                 "gre", agent_a_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(),
+                                                 "gre", agent_a_.get()));
+
+    // Verify that the encap has changed on agent B.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(),
+                                                 "gre", agent_b_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(),
+                                                 "gre", agent_b_.get()));
+
+    // Delete routes.
+    agent_a_->DeleteInet6Route("blue", route_a.str());
+    task_util::WaitForIdle();
+    agent_b_->DeleteInet6Route("pink", route_b.str());
+    task_util::WaitForIdle();
+
+    TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount("pink"));
+    TASK_UTIL_EXPECT_EQ(0, agent_b_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(0, agent_b_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(0, agent_b_->Inet6RouteCount("pink"));
+
+    // Close the sessions.
+    agent_a_->SessionDown();
+    agent_b_->SessionDown();
+}
+
+// A adds a route, then xmpp goes down, route changes with new encap, XMPP
+// comes up. Check encaps.
+TEST_F(BgpXmppInet6Test2Peers, ImportExportWithEncapAddChangeXmppDown) {
+    Configure(two_cns_connected_instances_config);
+    task_util::WaitForIdle();
+
+    // Make sure that the config got applied properly on bgp-server 1.
+    RoutingInstanceMgr *mgr_1 = bgp_server1_->routing_instance_mgr();
+    RoutingInstance *blue_ri1 = mgr_1->GetRoutingInstance("blue");
+    TASK_UTIL_ASSERT_TRUE(blue_ri1 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, blue_ri1->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, blue_ri1->GetImportList().size());
+    RoutingInstance *pink_ri1 = mgr_1->GetRoutingInstance("pink");
+    TASK_UTIL_ASSERT_TRUE(pink_ri1 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, pink_ri1->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, pink_ri1->GetImportList().size());
+
+    // Make sure that the config got applied properly on bgp-server 2.
+    RoutingInstanceMgr *mgr_2 = bgp_server2_->routing_instance_mgr();
+    RoutingInstance *blue_ri2 = mgr_2->GetRoutingInstance("blue");
+    TASK_UTIL_ASSERT_TRUE(blue_ri2 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, blue_ri2->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, blue_ri2->GetImportList().size());
+    RoutingInstance *pink_ri2 = mgr_2->GetRoutingInstance("pink");
+    TASK_UTIL_ASSERT_TRUE(pink_ri2 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, pink_ri2->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, pink_ri2->GetImportList().size());
+
+    // Create XMPP Agent A connected to XMPP server 1.
+    agent_a_.reset(
+        new test::NetworkAgentMock(&evm_, "agent-a", xmpp_server1_->GetPort(),
+            "127.0.0.1", "127.0.0.1"));
+    TASK_UTIL_EXPECT_TRUE(agent_a_->IsEstablished());
+
+    // Create XMPP Agent B connected to XMPP server 2.
+    agent_b_.reset(
+        new test::NetworkAgentMock(&evm_, "agent-b", xmpp_server2_->GetPort(),
+            "127.0.0.2", "127.0.0.2"));
+    TASK_UTIL_EXPECT_TRUE(agent_b_->IsEstablished());
+
+    // Register to blue and pink instances from A.
+    agent_a_->Inet6Subscribe("blue", 1);
+    agent_a_->Inet6Subscribe("pink", 2);
+
+    // Register to blue and pink instances from B.
+    agent_b_->Inet6Subscribe("blue", 1);
+    agent_b_->Inet6Subscribe("pink", 2);
+
+    // Add route from agent A to blue instance.
+    stringstream route_a;
+    route_a << "2001:db8:85a3::8a2e:370:aaaa/128";
+    agent_a_->AddInet6Route("blue", route_a.str(), "192.168.1.1", "gre");
+    task_util::WaitForIdle();
+
+    // Verify that routes show up in both instances on Agent A.
+    TASK_UTIL_EXPECT_EQ(2, agent_a_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(1, agent_a_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(1, agent_a_->Inet6RouteCount("pink"));
+
+    // Verify that routes show up in both instances on Agent B.
+    TASK_UTIL_EXPECT_EQ(2, agent_b_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(1, agent_b_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(1, agent_b_->Inet6RouteCount("pink"));
+
+    // Verify the encap on agent A.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(), "gre",
+                                                 agent_a_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(), "gre",
+                                                 agent_a_.get()));
+
+    // Verify the encap on agent B.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(), "gre",
+                                                 agent_b_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(), "gre",
+                                                 agent_b_.get()));
+
+    // Bring down the session to agent B.
+    agent_b_->SessionDown();
+    task_util::WaitForIdle();
+    TASK_UTIL_EXPECT_EQ(2, agent_a_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(0, agent_b_->Inet6RouteCount());
+
+    // Change encap for route_a.
+    agent_a_->AddInet6Route("blue", route_a.str(), "192.168.1.1", "all_ipv6");
+    task_util::WaitForIdle();
+
+    // Bring up the session to agent B.
+    agent_b_->SessionUp();
+    agent_b_->Inet6Subscribe("blue", 1);
+    agent_b_->Inet6Subscribe("pink", 2);
+    task_util::WaitForIdle();
+    TASK_UTIL_EXPECT_EQ(2, agent_a_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(2, agent_b_->Inet6RouteCount());
+
+    // Verify that the encap has changed on agent A.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(),
+                                                 "all_ipv6", agent_a_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(),
+                                                 "all_ipv6", agent_a_.get()));
+
+    // Verify that the encap has changed on agent B.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(),
+                                                 "all_ipv6", agent_b_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(),
+                                                 "all_ipv6", agent_b_.get()));
+
+    // Delete routes.
+    agent_a_->DeleteInet6Route("blue", route_a.str());
+    task_util::WaitForIdle();
+
+    TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount("pink"));
+    TASK_UTIL_EXPECT_EQ(0, agent_b_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(0, agent_b_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(0, agent_b_->Inet6RouteCount("pink"));
+
+    // Close the sessions.
+    agent_a_->SessionDown();
+    agent_b_->SessionDown();
+}
+
+// A adds a route, then bgp peering goes down, route changes with new encap,
+// peering comes up. Check encaps.
+TEST_F(BgpXmppInet6Test2Peers, ImportExportWithEncapAddChangeBgpBounce) {
+    Configure(two_cns_connected_instances_config);
+    task_util::WaitForIdle();
+
+    // Make sure that the config got applied properly on bgp-server 1.
+    RoutingInstanceMgr *mgr_1 = bgp_server1_->routing_instance_mgr();
+    RoutingInstance *blue_ri1 = mgr_1->GetRoutingInstance("blue");
+    TASK_UTIL_ASSERT_TRUE(blue_ri1 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, blue_ri1->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, blue_ri1->GetImportList().size());
+    RoutingInstance *pink_ri1 = mgr_1->GetRoutingInstance("pink");
+    TASK_UTIL_ASSERT_TRUE(pink_ri1 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, pink_ri1->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, pink_ri1->GetImportList().size());
+
+    // Make sure that the config got applied properly on bgp-server 2.
+    RoutingInstanceMgr *mgr_2 = bgp_server2_->routing_instance_mgr();
+    RoutingInstance *blue_ri2 = mgr_2->GetRoutingInstance("blue");
+    TASK_UTIL_ASSERT_TRUE(blue_ri2 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, blue_ri2->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, blue_ri2->GetImportList().size());
+    RoutingInstance *pink_ri2 = mgr_2->GetRoutingInstance("pink");
+    TASK_UTIL_ASSERT_TRUE(pink_ri2 != NULL);
+    TASK_UTIL_EXPECT_EQ(1, pink_ri2->GetExportList().size());
+    TASK_UTIL_EXPECT_EQ(2, pink_ri2->GetImportList().size());
+
+    // Create XMPP Agent A connected to XMPP server 1.
+    agent_a_.reset(
+        new test::NetworkAgentMock(&evm_, "agent-a", xmpp_server1_->GetPort(),
+            "127.0.0.1", "127.0.0.1"));
+    TASK_UTIL_EXPECT_TRUE(agent_a_->IsEstablished());
+
+    // Create XMPP Agent B connected to XMPP server 2.
+    agent_b_.reset(
+        new test::NetworkAgentMock(&evm_, "agent-b", xmpp_server2_->GetPort(),
+            "127.0.0.2", "127.0.0.2"));
+    TASK_UTIL_EXPECT_TRUE(agent_b_->IsEstablished());
+
+    // Register to blue and pink instances from A.
+    agent_a_->Inet6Subscribe("blue", 1);
+    agent_a_->Inet6Subscribe("pink", 2);
+
+    // Register to blue and pink instances from B.
+    agent_b_->Inet6Subscribe("blue", 1);
+    agent_b_->Inet6Subscribe("pink", 2);
+
+    // Add route from agent A to blue instance.
+    stringstream route_a;
+    route_a << "2001:db8:85a3::8a2e:370:aaaa/128";
+    agent_a_->AddInet6Route("blue", route_a.str(), "192.168.1.1", "gre");
+    task_util::WaitForIdle();
+
+    // Verify that routes show up in both instances on Agent A.
+    TASK_UTIL_EXPECT_EQ(2, agent_a_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(1, agent_a_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(1, agent_a_->Inet6RouteCount("pink"));
+
+    // Verify that routes show up in both instances on Agent B.
+    TASK_UTIL_EXPECT_EQ(2, agent_b_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(1, agent_b_->Inet6RouteCount("blue"));
+    TASK_UTIL_EXPECT_EQ(1, agent_b_->Inet6RouteCount("pink"));
+
+    // Verify the encap on agent A.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(), "gre",
+                                                 agent_a_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(), "gre",
+                                                 agent_a_.get()));
+
+    // Verify the encap on agent B.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(), "gre",
+                                                 agent_b_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(), "gre",
+                                                 agent_b_.get()));
+
+    // Unconfigure the BGP session.
+    bgp_server1_->Configure(two_bgp_peers_delete_config);
+    bgp_server2_->Configure(two_bgp_peers_delete_config);
+    task_util::WaitForIdle();
+    TASK_UTIL_EXPECT_EQ(2, agent_a_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(0, agent_b_->Inet6RouteCount());
+
+    // Change encap for route_a.
+    agent_a_->AddInet6Route("blue", route_a.str(), "192.168.1.1", "all_ipv6");
+    task_util::WaitForIdle();
+
+    // Re-configure the BGP session. B should have routes now.
+    Configure(two_cns_connected_instances_config);
+    usleep(5000);
+    task_util::WaitForIdle();
+    TASK_UTIL_EXPECT_EQ(2, agent_a_->Inet6RouteCount());
+    TASK_UTIL_EXPECT_EQ(2, agent_b_->Inet6RouteCount());
+
+    // Verify that the encap has changed on agent A.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(),
+                                                 "all_ipv6", agent_a_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(),
+                                                 "all_ipv6", agent_a_.get()));
+
+    // Verify that the encap has changed on agent B.
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("blue", route_a.str(),
+                                                 "all_ipv6", agent_b_.get()));
+    TASK_UTIL_EXPECT_TRUE(VerifyRouteUpdateEncap("pink", route_a.str(),
+                                                 "all_ipv6", agent_b_.get()));
+
+    // Delete routes.
+    agent_a_->DeleteInet6Route("blue", route_a.str());
+    task_util::WaitForIdle();
+
     TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount());
     TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount("blue"));
     TASK_UTIL_EXPECT_EQ(0, agent_a_->Inet6RouteCount("pink"));
