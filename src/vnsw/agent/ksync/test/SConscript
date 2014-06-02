@@ -25,12 +25,12 @@ if sys.platform != 'darwin':
     env.Append(LIBS=['agent_test_buildinfo'])
 
     test_vnswif = env.Program(target = 'test_vnswif', source = ['test_vnswif.cc'])
-    env.Alias('src/vnsw/agent/ksync/test:test_vnswif', test_vnswif)
+    env.Alias('agent:test_vnswif', test_vnswif)
 
     ksync_suite = [test_vnswif,
                   ]
 
     test = env.TestSuite('agent-test', ksync_suite)
-    env.Alias('src/vnsw/agent:test', test)
+    env.Alias('controller/src/vnsw/agent/ksync:test', test)
     Return('ksync_suite')
 

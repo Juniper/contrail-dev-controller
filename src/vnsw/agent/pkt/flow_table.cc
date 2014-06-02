@@ -10,8 +10,9 @@
 #include <sandesh/sandesh_trace.h>
 #include <pkt/flow_table.h>
 #include <uve/flow_stats_collector.h>
-#include <ksync/flowtable_ksync.h>
 #include <ksync/ksync_init.h>
+#include <ksync/ksync_entry.h>
+#include <ksync/flowtable_ksync.h>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -29,7 +30,7 @@
 #include <netinet/udp.h>
 
 #include "route/route.h"
-#include "init/agent_param.h"
+#include "cmn/agent_param.h"
 #include "cmn/agent_cmn.h"
 #include "cmn/agent_stats.h"
 #include "oper/interface_common.h"
@@ -810,9 +811,9 @@ void FlowTable::UpdateReverseFlow(FlowEntry *flow, FlowEntry *rflow) {
 
 void FlowEntry::FillFlowInfo(FlowInfo &info) {
     info.set_flow_index(flow_handle_);
-    info.set_source_ip(Ip4Address(key_.src.ipv4).to_string());
+    info.set_source_ip(key_.src.ipv4);
     info.set_source_port(key_.src_port);
-    info.set_destination_ip(Ip4Address(key_.dst.ipv4).to_string());
+    info.set_destination_ip(key_.dst.ipv4);
     info.set_destination_port(key_.dst_port);
     info.set_protocol(key_.protocol);
     info.set_vrf(key_.vrf);
@@ -843,13 +844,11 @@ void FlowEntry::FillFlowInfo(FlowInfo &info) {
         FlowEntry *nat_flow = reverse_flow_entry_.get();
         if (nat_flow) {
             if (key_.src.ipv4 != nat_flow->key().dst.ipv4) {
-                info.set_nat_source_ip(Ip4Address(nat_flow->key().dst.ipv4).\
-                                       to_string());
+                info.set_nat_source_ip(nat_flow->key().dst.ipv4);
             }
 
             if (key_.dst.ipv4 != nat_flow->key().src.ipv4) {
-                info.set_nat_destination_ip(Ip4Address(nat_flow->key().src.ipv4).\
-                                            to_string());
+                info.set_nat_destination_ip(nat_flow->key().src.ipv4);
             }
 
             if (key_.src_port != nat_flow->key().dst_port)  {

@@ -21,6 +21,7 @@ import cgitb
 import copy
 import argparse
 import socket
+import uuid
 
 from lxml import etree
 import re
@@ -44,6 +45,7 @@ from schema_transformer.sandesh.st_introspect import ttypes as sandesh
 from ncclient import manager
 import discoveryclient.client as client
 from collections import OrderedDict
+import jsonpickle
 
 _BGP_RTGT_MAX_ID = 1 << 20
 _BGP_RTGT_ALLOC_PATH = "/id/bgp/route-targets/"
@@ -363,23 +365,20 @@ class VirtualNetworkST(DictST):
         if service_chain_list is None:
             service_chain_list = []
             self.service_chains[remote_vn] = service_chain_list
-        sc_name = "sc:" + left_vn + ":" + right_vn
-        new_service_chain = ServiceChain(sc_name, left_vn, right_vn,
+        service_chain = ServiceChain.find_or_create(left_vn, right_vn,
                                          direction, sp_list, dp_list, proto,
                                          service_list)
-        service_chain = ServiceChain.locate(sc_name, left_vn, right_vn,
-                                            direction, sp_list, dp_list, proto,
-                                            service_list)
-        if not(service_chain == new_service_chain):
+        if service_chain.service_list != service_list:
             if service_chain.created:
                 service_chain.destroy()
-                service_chain.copy(new_service_chain)
+                service_chain.service_list = service_list
                 service_chain.create()
             else:
-                service_chain.copy(new_service_chain)
+                service_chain.service_list = service_list
 
         if service_chain not in service_chain_list:
             service_chain_list.append(service_chain)
+        return service_chain.name
     # end add_service_chain
 
     def get_vns_in_project(self):
@@ -684,8 +683,9 @@ class VirtualNetworkST(DictST):
             _sandesh._logger.debug("Virtual network %s not present",
                                    left_vn_str)
             return (None, None)
-        left_ri_name = left_vn.get_service_name(
-            si_props.right_virtual_network, next_hop)
+        sc = ServiceChain.find(left_vn_str, right_vn_str, '<>',
+                               [PortType(0, -1)], [PortType(0, -1)], 'any')
+        left_ri_name = left_vn.get_service_name(sc.name, next_hop)
         return (left_vn.get_primary_routing_instance(),
                 left_vn.rinst.get(left_ri_name))
     # end _get_routing_instances_from_route
@@ -804,8 +804,8 @@ class VirtualNetworkST(DictST):
         vn_msg.send(sandesh=_sandesh)
     # end uve_send
 
-    def get_service_name(self, remote_vn_name, si_name):
-        name = "service-" + self.name + "-" + remote_vn_name + "-" + si_name
+    def get_service_name(self, sc_name, si_name):
+        name = "service-" + sc_name + "-" + si_name
         return name.replace(':', '_')
     # end get_service_name
 
@@ -869,6 +869,14 @@ class VirtualNetworkST(DictST):
             return
     # end process_analyzer
 
+    @staticmethod
+    def protocol_policy_to_acl(pproto):
+        # convert policy proto input(in str) to acl proto (num)
+        if pproto.isdigit():
+            return pproto
+        return _PROTO_STR_TO_NUM.get(pproto.lower())
+    # end protocol_policy_to_acl
+
     def policy_to_acl_rule(self, prule, dynamic):
         result_acl_rule_list = AclRuleListST(dynamic=dynamic)
         saddr_list = prule.src_addresses
@@ -876,12 +884,8 @@ class VirtualNetworkST(DictST):
         daddr_list = prule.dst_addresses
         dp_list = prule.dst_ports
 
-        # convert policy proto input(in str) to acl proto (num)
-        if prule.protocol.isdigit():
-            arule_proto = prule.protocol
-        elif prule.protocol in _PROTO_STR_TO_NUM:
-            arule_proto = _PROTO_STR_TO_NUM[prule.protocol.lower()]
-        else:
+        arule_proto = self.protocol_policy_to_acl(prule.protocol)
+        if arule_proto is None:
             # TODO log unknown protocol
             return result_acl_rule_list
 
@@ -922,16 +926,16 @@ class VirtualNetworkST(DictST):
                         continue
                     service_list = copy.deepcopy(
                         prule.action_list.apply_service)
-                    self.add_service_chain(remote_network_name, svn, dvn,
-                                           prule.direction, sp_list, dp_list,
-                                           arule_proto, service_list)
+                    sc_name = self.add_service_chain(remote_network_name, svn,
+                        dvn, prule.direction, sp_list, dp_list, arule_proto,
+                        service_list)
 
                 for sp in sp_list:
                     for dp in dp_list:
                         if prule.action_list:
                             action = copy.deepcopy(prule.action_list)
                             if (service_list and svn in [self.name, 'any']):
-                                    service_ri = self.get_service_name(dvn,
+                                    service_ri = self.get_service_name(sc_name,
                                         service_list[0])
                                     action.assign_routing_instance = \
                                         self.name + ':' + service_ri
@@ -943,6 +947,14 @@ class VirtualNetworkST(DictST):
                             if ((svn in [self.name, 'any']) or
                                     (dvn in [self.name, 'any'])):
                                 self.process_analyzer(action)
+                            if (service_list and dvn in [self.name, 'any']):
+                                    service_ri = self.get_service_name(sc_name,
+                                        service_list[-1])
+                                    action.assign_routing_instance = \
+                                        self.name +':' + service_ri
+                            else:
+                                action.assign_routing_instance = None
+
 
                         match = MatchConditionType(arule_proto,
                                                    saddr_match, sp,
@@ -956,7 +968,7 @@ class VirtualNetworkST(DictST):
                                                         saddr_match, sp)
                             raction = copy.deepcopy(action)
                             if (service_list and dvn in [self.name, 'any']):
-                                    service_ri = self.get_service_name(svn,
+                                    service_ri = self.get_service_name(sc_name,
                                         service_list[-1])
                                     raction.assign_routing_instance = \
                                         self.name + ':' + service_ri
@@ -1166,12 +1178,14 @@ class SecurityGroupST(DictST):
             saddr_match = copy.deepcopy(saddr)
             self._convert_security_group_name_to_id(saddr_match)
             if saddr.security_group == 'local':
+                saddr_match.security_group = None
                 acl_rule_list = egress_acl_rule_list
             for sp in prule.src_ports:
                 for daddr in prule.dst_addresses:
                     daddr_match = copy.deepcopy(daddr)
                     self._convert_security_group_name_to_id(daddr_match)
                     if daddr.security_group == 'local':
+                        daddr_match.security_group = None
                         acl_rule_list = ingress_acl_rule_list
                     for dp in prule.dst_ports:
                         action = ActionListType(simple_action='pass')
@@ -1276,7 +1290,17 @@ class RoutingInstanceST(object):
 
 class ServiceChain(DictST):
     _dict = {}
-
+    
+    @classmethod
+    def init(cls):
+        try:
+            for (name,columns) in cls._service_chain_uuid_cf.get_range():
+                chain = jsonpickle.decode(columns['value'])
+                cls._dict[name] = chain
+        except pycassa.NotFoundException:
+            pass
+    # end init
+    
     def __init__(self, name, left_vn, right_vn, direction, sp_list, dp_list,
                  protocol, service_list):
         self.name = name
@@ -1308,20 +1332,37 @@ class ServiceChain(DictST):
         return True
     # end __eq__
 
-    def copy(self, other):
-        self.name = other.name
-        self.left_vn = other.left_vn
-        self.right_vn = other.right_vn
-        self.direction = other.direction
-        self.sp_list = other.sp_list
-        self.dp_list = other.dp_list
-        self.service_list = other.service_list
-        self.nat_service = other.nat_service
-
-        self.protocol = other.protocol
-        self.created = other.created
-    # end copy
-
+    @classmethod
+    def find(cls, left_vn, right_vn, direction, sp_list, dp_list, protocol):
+        for sc in ServiceChain.values():
+            if (left_vn == sc.left_vn and
+                right_vn == sc.right_vn and
+                sp_list == sc.sp_list and
+                dp_list == sc.dp_list and
+                direction == sc.direction and
+                protocol == sc.protocol):
+                    return sc
+        # end for sc
+        return None
+    # end find
+    
+    @classmethod
+    def find_or_create(cls, left_vn, right_vn, direction, sp_list, dp_list,
+                       protocol, service_list):
+        sc = cls.find(left_vn, right_vn, direction, sp_list, dp_list, protocol)
+        if sc is not None:
+            return sc
+        
+        name = str(uuid.uuid4())
+        sc = ServiceChain(name, left_vn, right_vn, direction, sp_list,
+                          dp_list, protocol, service_list)
+        ServiceChain._dict[name] = sc
+        cls._service_chain_uuid_cf.insert(name,
+                                          {'value': jsonpickle.encode(sc)})
+        return sc
+    # end find_or_create
+    
+            
     def update_ipams(self, vn2_name):
         if not self.created:
             return
@@ -1335,7 +1376,7 @@ class ServiceChain(DictST):
             return
 
         for service in self.service_list:
-            service_name = vn1.get_service_name(vn2_name, service)
+            service_name = vn1.get_service_name(self.name, service)
             service_ri = vn1.locate_routing_instance(service_name, self.name)
             if service_ri is None:
                 continue
@@ -1360,8 +1401,8 @@ class ServiceChain(DictST):
         service_ri2 = vn1_obj.get_primary_routing_instance()
         first_node = True
         for service in self.service_list:
-            service_name1 = vn1_obj.get_service_name(self.right_vn, service)
-            service_name2 = vn2_obj.get_service_name(self.left_vn, service)
+            service_name1 = vn1_obj.get_service_name(self.name, service)
+            service_name2 = vn2_obj.get_service_name(self.name, service)
             service_ri1 = vn1_obj.locate_routing_instance(
                 service_name1, self.name)
             if service_ri1 is None or service_ri2 is None:
@@ -1526,48 +1567,34 @@ class ServiceChain(DictST):
         for interface in (vm_obj.get_virtual_machine_interfaces() or
                           vm_obj.get_virtual_machine_interface_back_refs()
                           or []):
-            if_obj = _vnc_lib.virtual_machine_interface_read(
-                id=interface['uuid'])
-            props = if_obj.get_virtual_machine_interface_properties()
-            if not props:
-                continue
-            interface_type = props.get_service_interface_type()
-            if not interface_type:
+            if_obj = VirtualMachineInterfaceST.get(':'.join(interface['to']))
+            if if_obj.service_interface_type not in ['left', 'right']:
                 continue
             ip_obj = None
-            ip_refs = if_obj.get_instance_ip_back_refs()
-            if (ip_refs):
+            for ip_ref in if_obj.instance_ip_set:
                 try:
-                    ip_obj = _vnc_lib.instance_ip_read(id=ip_refs[0]['uuid'])
+                    ip_obj = _vnc_lib.instance_ip_read(fq_name_str=ip_ref)
+                    break
                 except NoIdError as e:
                     _sandesh._logger.debug(
                         "NoIdError while reading ip address for interface "
                         "%s: %s", if_obj.get_fq_name_str(), str(e))
                     return False
+            else:
+                _sandesh._logger.debug(
+                        "No ip address found for interface " + if_obj.name)
+                return False
 
-            if interface_type == 'left':
-                if ip_obj:
-                    left_found = True
-                    ip_addr = ip_obj.get_instance_ip_address()
-                    service_ri1.add_service_info(vn2_obj, service, ip_addr,
-                         vn1_obj.get_primary_routing_instance(
-                             ).get_fq_name_str())
-                else:
-                    _sandesh._logger.debug(
-                        "No ip address found for interface " + if_obj.name)
-                    return False
-            if (interface_type == 'right' and self.direction == '<>' and
-                    not self.nat_service):
-                if ip_obj:
-                    right_found = True
-                    ip_addr = ip_obj.get_instance_ip_address()
-                    service_ri2.add_service_info(vn1_obj, service, ip_addr,
-                         vn2_obj.get_primary_routing_instance(
-                             ).get_fq_name_str())
-                else:
-                    _sandesh._logger.debug(
-                        "No ip address found for interface " + if_obj.name)
-                    return False
+            if if_obj.service_interface_type == 'left':
+                left_found = True
+                ip_addr = ip_obj.get_instance_ip_address()
+                service_ri1.add_service_info(vn2_obj, service, ip_addr,
+                     vn1_obj.get_primary_routing_instance().get_fq_name_str())
+            elif self.direction == '<>' and not self.nat_service:
+                right_found = True
+                ip_addr = ip_obj.get_instance_ip_address()
+                service_ri2.add_service_info(vn1_obj, service, ip_addr,
+                     vn2_obj.get_primary_routing_instance().get_fq_name_str())
         return left_found and (self.nat_service or self.direction != '<>' or
                                right_found)
     # end process_in_network_service
@@ -1582,14 +1609,13 @@ class ServiceChain(DictST):
 
         for service in self.service_list:
             if vn1_obj:
-                service_name1 = vn1_obj.get_service_name(
-                    self.right_vn, service)
+                service_name1 = vn1_obj.get_service_name(self.name, service)
                 service_ri1 = vn1_obj.rinst.get(service_name1)
                 if service_ri1 is not None:
                     vn1_obj.delete_routing_instance(service_ri1)
                     del vn1_obj.rinst[service_name1]
             if vn2_obj:
-                service_name2 = vn2_obj.get_service_name(self.left_vn, service)
+                service_name2 = vn2_obj.get_service_name(self.name, service)
                 service_ri2 = vn2_obj.rinst.get(service_name2)
                 if service_ri2 is not None:
                     vn2_obj.delete_routing_instance(service_ri2)
@@ -1599,7 +1625,32 @@ class ServiceChain(DictST):
 
     def delete(self):
         del self._dict[self.name]
+        try:
+            self._service_chain_uuid_cf.remove(self.name)
+        except pycassa.NotFoundException:
+            pass
     # end delete
+    
+    def build_introspect(self):
+        sc = sandesh.ServiceChain(sc_name=self.name)
+        sc.left_virtual_network = self.left_vn
+        sc.right_virtual_network = self.right_vn
+        sc.protocol = self.protocol
+        port_list = []
+        for sp in self.sp_list:
+            port_list.append("%s-%s"%(sp.start_port, sp.end_port))
+        sc.src_ports = ','.join(port_list)
+        port_list = []
+        for dp in self.dp_list:
+            port_list.append("%s-%s"%(dp.start_port, dp.end_port))
+        sc.dst_ports = ','.join(port_list)
+        sc.direction = self.direction
+        sc.service_list = self.service_list
+        sc.nat_service = self.nat_service
+        sc.created = self.created
+        return sc
+    # end build_introspect
+    
 # end ServiceChain
 
 
@@ -2069,6 +2120,7 @@ class VirtualMachineInterfaceST(DictST):
         self.service_interface_type = None
         self.interface_mirror = None
         self.virtual_network = None
+        self.instance_ip_set = set()
     # end __init__
     @classmethod
     
@@ -2076,6 +2128,14 @@ class VirtualMachineInterfaceST(DictST):
         if name in cls._dict:
             del cls._dict[name]
     # end delete
+    
+    def add_instance_ip(self, ip_name):
+        self.instance_ip_set.add(ip_name)
+    # end add_instance_ip
+    
+    def delete_instance_ip(self, ip_name):
+        self.instance_ip_set.discard(ip_name)
+    # end delete_instance_ip
     
     def set_service_interface_type(self, service_interface_type):
         self.service_interface_type = service_interface_type
@@ -2146,7 +2206,7 @@ class VirtualMachineInterfaceST(DictST):
             _sandesh._logger.debug("NoIdError while updating interface " +
                                    self.name)
     # end process_analyzer
-    
+
     def rebake(self):
         network_set = set()
         if self.virtual_network in VirtualNetworkST:
@@ -2156,7 +2216,13 @@ class VirtualMachineInterfaceST(DictST):
         # return all networks that refer to those policies
         if self.service_interface_type not in ['left', 'right']:
             return network_set
-        vmi_obj = _vnc_lib.virtual_machine_interface_read(fq_name_str=self.name)
+        try:
+            vmi_obj = _vnc_lib.virtual_machine_interface_read(
+                fq_name_str=self.name)
+        except NoIdError:
+            _sandesh._logger.debug("NoIdError while reading interface %s",
+                                   self.name)
+            return network_set
         vm_id = get_vm_id_from_interface(vmi_obj)
         if vm_id is None:
             return network_set
@@ -2168,8 +2234,8 @@ class VirtualMachineInterfaceST(DictST):
         try:
             si_obj = _vnc_lib.service_instance_read(id=service_instance['uuid'])
         except NoIdError:
-            _sandesh._logger.debug("NoIdError while reading service instance " +
-                                   service_instance['uuid'])
+            _sandesh._logger.debug("NoIdError while reading service instance "
+                                   + service_instance['uuid'])
             return network_set
         si_name = si_obj.get_fq_name_str()
         for policy in NetworkPolicyST.values():
@@ -2177,19 +2243,140 @@ class VirtualMachineInterfaceST(DictST):
                 if prule.action_list is not None:
                     if si_name in prule.action_list.apply_service:
                         network_set |= policy.networks_back_ref
-                    elif (prule.action_list.mirror_to and 
+                    elif (prule.action_list.mirror_to and
                           si_name == prule.action_list.mirror_to.analyzer_name):
                         (vn, _) = VirtualNetworkST.get_analyzer_vn_and_ip(
                             si_name)
                         if vn:
                             policy.analyzer_vn_set.add(vn)
                         network_set |= policy.networks_back_ref
-            #end for prule
-        #end for policy
+            # end for prule
+        # end for policy
         return network_set
-    # end rebake 
-# end VirtualMachineInterfaceST 
-    
+    # end rebake
+
+    def recreate_vrf_assign_table(self):
+        if self.service_interface_type not in ['left', 'right']:
+            return
+        vn = VirtualNetworkST.get(self.virtual_network)
+        if vn is None:
+            return
+
+        vrf_table = VrfAssignTableType()
+        for ip in self.instance_ip_set:
+            try:
+                ip_obj = _vnc_lib.instance_ip_read(fq_name_str=ip)
+            except NoIdError as e:
+                _sandesh._logger.debug(
+                    "NoIdError while reading ip address for interface %s: %s",
+                    self.name, str(e))
+                continue
+
+            address = AddressType(subnet=SubnetType(
+                ip_obj.get_instance_ip_address(), 32))
+            mc = MatchConditionType(src_address=address)
+
+            ri_name = vn.obj.get_fq_name_str() + ':' + vn._default_ri_name
+            vrf_rule = VrfAssignRuleType(match_condition=mc,
+                                         routing_instance=ri_name,
+                                         ignore_acl=False)
+            vrf_table.add_vrf_assign_rule(vrf_rule)
+
+        try:
+            vmi_obj = _vnc_lib.virtual_machine_interface_read(
+                fq_name_str=self.name)
+        except NoIdError as e:
+            _sandesh._logger.debug(
+                "NoIdError while reading virtual machine interface %s: %s",
+                self.name, str(e))
+            return
+
+        vm_id = get_vm_id_from_interface(vmi_obj)
+        try:
+            vm_obj = _vnc_lib.virtual_machine_read(id=vm_id)
+        except NoIdError as e:
+            _sandesh._logger.debug(
+                "NoIdError while reading virtual machine %s: %s",
+                vm_id, str(e))
+            return
+        vm_si_refs = vm_obj.get_service_instance_refs()
+        if not vm_si_refs:
+            return
+        try:
+            si_obj = _vnc_lib.service_instance_read(id=vm_si_refs[0]['uuid'])
+        except NoIdError:
+            _sandesh._logger.debug("NoIdError while reading service instance "
+                                   + vm_si_refs[0]['uuid'])
+            return
+
+        st_refs = si_obj.get_service_template_refs()
+        if st_refs is None:
+            return
+
+        try:
+            st_obj = _vnc_lib.service_template_read(id=st_refs[0]['uuid'])
+        except NoIdError:
+            _sandesh._logger.debug("NoIdError while reading service instance "
+                                   + st_refs[0]['uuid'])
+            return
+
+        smode = st_obj.get_service_template_properties().get_service_mode()
+        if smode not in ['in-network', 'in-network-nat']:
+            return
+
+        si_name = si_obj.get_fq_name_str()
+        for policy_name in vn.policies:
+            policy = NetworkPolicyST.get(policy_name)
+            if policy is None:
+                continue
+            policy_rule_entries = policy.obj.get_network_policy_entries()
+            if policy_rule_entries is None:
+                continue
+            for prule in policy_rule_entries.policy_rule:
+                if si_name not in prule.action_list.apply_service or []:
+                    continue
+                proto = VirtualNetworkST.protocol_policy_to_acl(prule.protocol)
+                if proto is None:
+                    continue
+                for saddr in prule.src_addresses:
+                    svn = saddr.virtual_network
+                    if svn == "local":
+                        svn = self.virtual_network
+                    for daddr in prule.dst_addresses:
+                        dvn = daddr.virtual_network
+                        if dvn == "local":
+                            dvn = self.virtual_network
+                        service_chain = ServiceChain.find(svn, dvn,
+                                                          prule.direction,
+                                                          prule.src_ports,
+                                                          prule.dst_ports,
+                                                          proto)
+                        if service_chain is None:
+                            continue
+                        ri_name = vn.obj.get_fq_name_str() + ':' + \
+                            vn.get_service_name(service_chain.name, si_name)
+                        for sp in prule.src_ports:
+                            for dp in prule.dst_ports:
+                                mc = MatchConditionType(src_port=sp,
+                                                        dst_port=dp,
+                                                        protocol=proto)
+
+                                vrf_rule = VrfAssignRuleType(
+                                    match_condition=mc,
+                                    routing_instance=ri_name,
+                                    ignore_acl=True)
+                                vrf_table.add_vrf_assign_rule(vrf_rule)
+            # end for prule
+            vmi_obj = _vnc_lib.virtual_machine_interface_read(
+                fq_name_str=self.name)
+            if (jsonpickle.encode(vrf_table) !=
+                jsonpickle.encode(vmi_obj.get_vrf_assign_table())):
+                    vmi_obj.set_vrf_assign_table(vrf_table)
+                    _vnc_lib.virtual_machine_interface_update(vmi_obj)
+    # end recreate_vrf_assign_table
+# end VirtualMachineInterfaceST
+
+
 class LogicalRouterST(DictST):
     _dict = {}
 
@@ -2201,8 +2388,8 @@ class LogicalRouterST(DictST):
         rt_ref = obj.get_route_target_refs()
         if not rt_ref:
             rtgt_num = VirtualNetworkST._rt_allocator.alloc(name)
-            rt_key = "target:%s:%d" % (VirtualNetworkST.get_autonomous_system(),
-                                       rtgt_num)
+            rt_key = "target:%s:%d" % (
+                VirtualNetworkST.get_autonomous_system(), rtgt_num)
             rtgt_obj = RouteTargetST.locate(rt_key)
             obj.set_route_target(rtgt_obj)
             _vnc_lib.logical_router_update(obj)
@@ -2270,6 +2457,7 @@ class SchemaTransformer(object):
     _RT_CF = 'route_target_table'
     _SC_IP_CF = 'service_chain_ip_address_table'
     _SERVICE_CHAIN_CF = 'service_chain_table'
+    _SERVICE_CHAIN_UUID_CF = 'service_chain_uuid_table'
 
     def __init__(self, args=None):
         global _sandesh
@@ -2280,15 +2468,17 @@ class SchemaTransformer(object):
 
         # reset zookeeper config
         if self._args.reset_config:
-            _zookeeper_client.delete_node("/id", True);
+            _zookeeper_client.delete_node("/id", True)
 
+        ServiceChain.init()
         VirtualNetworkST._vn_id_allocator = IndexAllocator(_zookeeper_client,
-                                                    _VN_ID_ALLOC_PATH,
-                                                    _VN_MAX_ID)
-        SecurityGroupST._sg_id_allocator = IndexAllocator(_zookeeper_client,
-            _SECURITY_GROUP_ID_ALLOC_PATH, _SECURITY_GROUP_MAX_ID)
-        VirtualNetworkST._rt_allocator = IndexAllocator(_zookeeper_client,
-            _BGP_RTGT_ALLOC_PATH, _BGP_RTGT_MAX_ID)
+                                                           _VN_ID_ALLOC_PATH,
+                                                           _VN_MAX_ID)
+        SecurityGroupST._sg_id_allocator = IndexAllocator(
+            _zookeeper_client, _SECURITY_GROUP_ID_ALLOC_PATH,
+            _SECURITY_GROUP_MAX_ID)
+        VirtualNetworkST._rt_allocator = IndexAllocator(
+            _zookeeper_client, _BGP_RTGT_ALLOC_PATH, _BGP_RTGT_MAX_ID)
 
         # Initialize discovery client
         self._disc = None
@@ -2300,8 +2490,12 @@ class SchemaTransformer(object):
 
         _sandesh = Sandesh()
         sandesh.VnList.handle_request = self.sandesh_vn_handle_request
-        sandesh.RoutintInstanceList.handle_request =\
+        sandesh.ServiceChainList.handle_request = \
+            self.sandesh_sc_handle_request
+        sandesh.RoutintInstanceList.handle_request = \
             self.sandesh_ri_handle_request
+        sandesh.ServiceChainList.handle_request = \
+            self.sandesh_sc_handle_request
         module = Module.SCHEMA_TRANSFORMER
         module_name = ModuleNames[module]
         node_type = Module2NodeType[module]
@@ -2309,7 +2503,8 @@ class SchemaTransformer(object):
         instance_id = INSTANCE_ID_DEFAULT
         _sandesh.init_generator(
             module_name, socket.gethostname(), node_type_name, instance_id,
-            self._args.collectors, 'to_bgp_context', int(args.http_server_port),
+            self._args.collectors, 'to_bgp_context',
+            int(args.http_server_port),
             ['cfgm_common', 'schema_transformer.sandesh'], self._disc)
         _sandesh.set_logging_params(enable_local_log=args.log_local,
                                     category=args.log_category,
@@ -2405,7 +2600,8 @@ class SchemaTransformer(object):
             # For compatibility, ignore if we can't build. In 1.0, we allowed
             # security group with direction set to '<', but it is not allowed
             # any more
-            _sandesh._logger.debug("%s: Cannot read security group entries", si_name)
+            _sandesh._logger.debug("%s: Cannot read security group entries",
+                                   si_name)
             return
         if sg:
             sg.update_policy_entries(entries)
@@ -2457,10 +2653,20 @@ class SchemaTransformer(object):
 
     def add_instance_ip_virtual_machine_interface(self, idents, meta):
         vmi_name = idents['virtual-machine-interface']
+        ip_name = idents['instance-ip']
         vmi = VirtualMachineInterfaceST.locate(vmi_name)
         if vmi is not None:
+            vmi.add_instance_ip(ip_name)
             self.current_network_set |= vmi.rebake()
-    #end add_instance_ip_virtual_machine_interface
+    # end add_instance_ip_virtual_machine_interface
+
+    def delete_instance_ip_virtual_machine_interface(self, idents, meta):
+        vmi_name = idents['virtual-machine-interface']
+        ip_name = idents['instance-ip']
+        vmi = VirtualMachineInterfaceST.get(vmi_name)
+        if vmi is not None:
+            vmi.delete_instance_ip(ip_name)
+    # end delete_instance_ip_virtual_machine_interface
 
     def add_virtual_machine_interface_properties(self, idents, meta):
         vmi_name = idents['virtual-machine-interface']
@@ -2471,7 +2677,7 @@ class SchemaTransformer(object):
             vmi.set_service_interface_type(prop.get_service_interface_type())
             self.current_network_set |= vmi.rebake()
             vmi.set_interface_mirror(prop.get_interface_mirror())
-    #end add_virtual_machine_interface_properties
+    # end add_virtual_machine_interface_properties
 
     def add_virtual_machine_service_instance(self, idents, meta):
         si_name = idents['service-instance']
@@ -2594,9 +2800,9 @@ class SchemaTransformer(object):
         si = _vnc_lib.service_instance_read(fq_name_str=si_name)
         si_props = si.get_service_instance_properties()
         left_vn_str = svc_info.get_left_vn(si.get_parent_fq_name_str(),
-            si_props.left_virtual_network)
+                                           si_props.left_virtual_network)
         right_vn_str = svc_info.get_right_vn(si.get_parent_fq_name_str(),
-            si_props.right_virtual_network)
+                                             si_props.right_virtual_network)
         if (not left_vn_str or not right_vn_str):
             _sandesh._logger.debug(
                 "%s: route table next hop service instance must "
@@ -2867,10 +3073,10 @@ class SchemaTransformer(object):
                     vmi.interface_mirror is not None and
                     vmi.interface_mirror.mirror_to is not None and
                     vmi.interface_mirror.mirror_to.analyzer_name is not None):
-                    vmi.process_analyzer()
+                        vmi.process_analyzer()
 
             # This VN could be the VN for an analyzer interface. If so, we need
-            # to create a link from all VNs containing a policy with that 
+            # to create a link from all VNs containing a policy with that
             # analyzer
             for policy in NetworkPolicyST.values():
                 policy_rule_entries = policy.obj.get_network_policy_entries()
@@ -2891,9 +3097,9 @@ class SchemaTransformer(object):
                             virtual_network.add_connection(net_name)
 
             for lr in LogicalRouterST.values():
-                 if network_name in lr.virtual_networks:
-                     for vn_name in (lr.virtual_networks - {network_name}):
-                         virtual_network.add_connection(vn_name)
+                if network_name in lr.virtual_networks:
+                    for vn_name in (lr.virtual_networks - {network_name}):
+                        virtual_network.add_connection(vn_name)
             # end for lr
 
             # Derive connectivity changes between VNs
@@ -2953,6 +3159,9 @@ class SchemaTransformer(object):
             virtual_network = VirtualNetworkST.get(network_name)
             virtual_network.uve_send()
         # end for self.current_network_set
+
+        for vmi in VirtualMachineInterfaceST.values():
+            vmi.recreate_vrf_assign_table()
     # end process_poll_result
 
     def _cassandra_init(self):
@@ -2985,7 +3194,8 @@ class SchemaTransformer(object):
             # TODO verify only EEXISTS
             print "Warning! " + str(e)
 
-        column_families = [self._RT_CF, self._SC_IP_CF, self._SERVICE_CHAIN_CF]
+        column_families = [self._RT_CF, self._SC_IP_CF, self._SERVICE_CHAIN_CF,
+                           self._SERVICE_CHAIN_UUID_CF]
         conn_pool = pycassa.ConnectionPool(
             SchemaTransformer._KEYSPACE,
             server_list=self._args.cassandra_server_list)
@@ -2998,14 +3208,17 @@ class SchemaTransformer(object):
             except pycassa.cassandra.ttypes.InvalidRequestException as e:
                 # TODO verify only EEXISTS
                 print "Warning! " + str(e)
-            result_dict[cf] = pycassa.ColumnFamily(conn_pool, cf,
-                                  read_consistency_level=rd_consistency,
-                                  write_consistency_level=wr_consistency)
+            result_dict[cf] = pycassa.ColumnFamily(
+                conn_pool, cf,
+                read_consistency_level=rd_consistency,
+                write_consistency_level=wr_consistency)
 
         VirtualNetworkST._rt_cf = result_dict[self._RT_CF]
         VirtualNetworkST._sc_ip_cf = result_dict[self._SC_IP_CF]
         VirtualNetworkST._service_chain_cf = result_dict[
             self._SERVICE_CHAIN_CF]
+        ServiceChain._service_chain_uuid_cf = result_dict[
+            self._SERVICE_CHAIN_UUID_CF]
     # end _cassandra_init
 
     def sandesh_ri_build(self, vn_name, ri_name):
@@ -3058,13 +3271,25 @@ class SchemaTransformer(object):
             vn_resp.vn_names.append(sandesh_vn)
         vn_resp.response(req.context())
     # end sandesh_vn_handle_request
+
+    def sandesh_sc_handle_request(self, req):
+        sc_resp = sandesh.ServiceChainListResp(service_chains=[])
+        if req.sc_name is None:
+            for sc in ServiceChain.values():
+                sandesh_sc = sc.build_introspect()
+                sc_resp.service_chains.append(sandesh_sc)
+        elif req.sc_name in ServiceChain:
+            sandesh_sc = ServiceChain[req.sc_name].build_introspect()
+            sc_resp.service_chains.append(sandesh_sc)
+        sc_resp.response(req.context())
+    # end sandesh_sc_handle_request
 # end class SchemaTransformer
 
 
 def launch_arc(transformer, ssrc_mapc):
     arc_mapc = arc_initialize(transformer._args, ssrc_mapc)
     while True:
-        # If not connected to zookeeper Pause the operations 
+        # If not connected to zookeeper Pause the operations
         if not _zookeeper_client.is_connected():
             time.sleep(1)
             continue
@@ -3231,9 +3456,10 @@ def parse_args(args_str):
     return args
 # end parse_args
 
+
 def run_schema_transformer(args):
     global _vnc_lib
-        
+
     # Retry till API server is up
     connected = False
     while not connected:
@@ -3244,7 +3470,7 @@ def run_schema_transformer(args):
             connected = True
         except requests.exceptions.ConnectionError:
             time.sleep(3)
-        except ResourceExhaustionError: # haproxy throws 503
+        except ResourceExhaustionError:  # haproxy throws 503
             time.sleep(3)
 
     transformer = SchemaTransformer(args)
@@ -3252,7 +3478,8 @@ def run_schema_transformer(args):
 
     gevent.joinall([ssrc_task])
 # end run_schema_transformer
-    
+
+
 def main(args_str=None):
     global _zookeeper_client
     if not args_str:
@@ -3260,8 +3487,9 @@ def main(args_str=None):
     args = parse_args(args_str)
     _zookeeper_client = ZookeeperClient("schema", args.zk_server_ip)
     _zookeeper_client.master_election("/schema-transformer", os.getpid(),
-                                  run_schema_transformer, args)
+                                      run_schema_transformer, args)
 # end main
+
 
 def server_main():
     cgitb.enable(format='text')

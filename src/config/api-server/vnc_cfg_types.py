@@ -179,8 +179,17 @@ class VirtualMachineInterfaceServer(VirtualMachineInterfaceServerGen):
 
     @classmethod
     def http_post_collection(cls, tenant_name, obj_dict, db_conn):
-        mac_addr = cls.addr_mgmt.mac_alloc(obj_dict)
-        mac_addrs_obj = MacAddressesType([mac_addr])
+        inmac = None
+        if 'virtual_machine_interface_mac_addresses' in obj_dict:
+            mc = obj_dict['virtual_machine_interface_mac_addresses']
+            if 'mac_address' in mc:
+                if len(mc['mac_address'])==1:
+                    inmac = mc['mac_address']
+        if inmac!=None:
+            mac_addrs_obj = MacAddressesType(inmac)
+        else:
+            mac_addr = cls.addr_mgmt.mac_alloc(obj_dict)
+            mac_addrs_obj = MacAddressesType([mac_addr])
         mac_addrs_json = json.dumps(
             mac_addrs_obj,
             default=lambda o: dict((k, v)
@@ -321,12 +330,11 @@ class NetworkIpamServer(NetworkIpamServerGen):
         if not read_ok:
             return (False, (500, "Internal error : IPAM is not valid"))
         old_ipam_mgmt = read_result.get('network_ipam_mgmt')
-        if not old_ipam_mgmt:
+        new_ipam_mgmt = obj_dict.get('network_ipam_mgmt')
+        if not old_ipam_mgmt or not new_ipam_mgmt:
             return True, ""
-
-        old_dns_method = old_ipam_mgmt['ipam_dns_method']
-        new_ipam_mgmt = obj_dict['network_ipam_mgmt']
-        new_dns_method = new_ipam_mgmt['ipam_dns_method']
+        old_dns_method = old_ipam_mgmt.get('ipam_dns_method')
+        new_dns_method = new_ipam_mgmt.get('ipam_dns_method')
         if not cls.is_change_allowed(old_dns_method, new_dns_method, obj_dict,
                                      db_conn):
             return (False, (409, "Cannot change DNS Method from " +

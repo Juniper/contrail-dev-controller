@@ -7,7 +7,7 @@
 #include <sandesh/sandesh.h>
 #include "base/logging.h"
 #include "cmn/agent_cmn.h"
-#include "init/agent_param.h"
+#include "cmn/agent_param.h"
 #include "discovery_agent.h"
 #include "controller/controller_init.h"
 #include "cmn/agent_cmn.h"
@@ -126,7 +126,7 @@ void DiscoveryAgentClient::DiscoverServices() {
             } 
 
             //subscribe to DNServer 
-            if (agent_cfg_->agent()->GetDnsXmppServer(0).empty()) {
+            if (agent_cfg_->agent()->GetDnsServer(0).empty()) {
                 DiscoveryAgentClient::DiscoverDNS(); 
             } 
         }

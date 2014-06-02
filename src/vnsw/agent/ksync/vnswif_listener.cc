@@ -14,8 +14,7 @@
 #include <base/logging.h>
 #include <base/util.h>
 #include <cmn/agent_cmn.h>
-#include <init/agent_param.h>
-#include <init/agent_init.h>
+#include <cmn/agent_param.h>
 #include <cfg/cfg_init.h>
 #include <oper/route_common.h>
 #include <oper/mirror_table.h>
@@ -359,7 +358,7 @@ void VnswInterfaceListener::HandleInterfaceEvent(const Event *event) {
         if (agent_->isXenMode()) {
             if (string::npos != event->interface_.find(XAPI_INTF_PREFIX)) {
                 agent_->params()->set_xen_ll_name(event->interface_);
-                agent_->init()->InitXenLinkLocalIntf();
+                agent_->InitXenLinkLocalIntf();
             }
         }
     }
@@ -390,13 +389,13 @@ void VnswInterfaceListener::ResetAddress(const Event *event) {
         return;
     }
 
-    entry->addr_ = event->addr_;
-    entry->plen_ = event->plen_;
+    entry->addr_ = Ip4Address(0);
+    entry->plen_ = 0;
 }
 
 void VnswInterfaceListener::HandleAddressEvent(const Event *event) {
     // Update address in interface table
-    if (event->event_ == Event::DEL_ADDR) {
+    if (event->event_ == Event::ADD_ADDR) {
         SetAddress(event);
     } else {
         ResetAddress(event);

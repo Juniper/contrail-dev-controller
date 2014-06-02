@@ -8,7 +8,6 @@
 #include <netinet/ether.h>
 
 class AgentParam;
-class AgentInit;
 class AgentConfig;
 class AgentStats;
 class KSync;
@@ -219,18 +218,18 @@ public:
  
     const int8_t &GetXmppDnsCfgServerIdx() {return xs_dns_idx_; };
     void SetXmppDnsCfgServer(uint8_t xs_idx) { xs_dns_idx_ = xs_idx; };
-    const std::string &GetDnsXmppServer(uint8_t idx) {
-        return xs_dns_addr_[idx]; 
+    const std::string &GetDnsServer(uint8_t idx) {
+        return dns_addr_[idx];
     }
-    void SetDnsXmppServer(const std::string &addr, uint8_t idx) {
-        xs_dns_addr_[idx] = addr;
+    void SetDnsServer(const std::string &addr, uint8_t idx) {
+        dns_addr_[idx] = addr;
     }
 
-    const uint32_t GetDnsXmppPort(uint8_t idx) {
-        return xs_dns_port_[idx]; 
+    const uint32_t GetDnsServerPort(uint8_t idx) {
+        return dns_port_[idx];
     }
-    void SetDnsXmppPort(uint32_t port, uint8_t idx) {
-        xs_dns_port_[idx] = port;
+    void SetDnsServerPort(uint32_t port, uint8_t idx) {
+        dns_port_[idx] = port;
     }
 
     /* Discovery Server, port, service-instances */
@@ -523,6 +522,12 @@ public:
     bool test_mode() const { return test_mode_; }
     void set_test_mode(bool test_mode) { test_mode_ = test_mode; }
 
+    uint32_t flow_table_size() const { return flow_table_size_; }
+    void set_flow_table_size(uint32_t count) { flow_table_size_ = count; }
+
+    bool init_done() const { return init_done_; }
+    void set_init_done(bool done) { init_done_ = done; }
+
     bool isXenMode();
 
     static Agent *GetInstance() {return singleton_;}
@@ -530,42 +535,63 @@ public:
     void Shutdown() {
     }
 
-    DiagTable *diag_table() const {
-        return diag_table_.get();
-    }
+    DiagTable *diag_table() const;
+    void set_diag_table(DiagTable *table);
+
     void CreateLifetimeManager();
     void ShutdownLifetimeManager();
     void SetAgentTaskPolicy();
 
-    void CreateModules();
+    void InitXenLinkLocalIntf();
+    void InitCollector();
     void CreateDBTables();
     void CreateDBClients();
     void CreateVrf();
     void CreateNextHops();
     void CreateInterfaces();
+    void InitPeers();
     void InitModules();
     void InitDone();
 
-    void Init(AgentParam *param, AgentInit *init);
+    void Init(AgentParam *param);
     AgentParam *params() const { return params_; }
-    AgentInit *init() const { return init_; }
-    AgentConfig *cfg() const { return cfg_.get(); }
-    CfgListener *cfg_listener() const;
-    AgentStats *stats() const { return stats_.get(); }
-    KSync *ksync() const { return ksync_.get(); }
-    AgentUve *uve() const { return uve_.get(); }
-    PktModule *pkt() const { return pkt_.get(); }
-    ServicesModule *services() const { return services_.get(); }
-    DiscoveryAgentClient *discovery_client() const;
-    VirtualGateway *vgw() const { return vgw_.get(); }
-    OperDB *oper_db() const { return oper_db_.get(); }
-    VNController *controller() const {return controller_.get();}
 
+    AgentConfig *cfg() const; 
+    void set_cfg(AgentConfig *cfg);
+
+    CfgListener *cfg_listener() const;
+
+    AgentStats *stats() const;
+    void set_stats(AgentStats *stats);
+
+    KSync *ksync() const;
+    void set_ksync(KSync *ksync);
+
+    AgentUve *uve() const;
+    void set_uve(AgentUve *uve);
+
+    PktModule *pkt() const;
+    void set_pkt(PktModule *pkt);
+
+    ServicesModule *services() const;
+    void set_services(ServicesModule *services);
+
+    DiscoveryAgentClient *discovery_client() const;
+    void set_discovery_client(DiscoveryAgentClient *client);
+
+    VirtualGateway *vgw() const;
+    void set_vgw(VirtualGateway *vgw);
+
+    OperDB *oper_db() const;
+    void set_oper_db(OperDB *oper_db);
+
+    VNController *controller() const;
+    void set_controller(VNController *val);
+
+    void CopyConfig(AgentParam *params);
 private:
-    void GetConfig();
 
     AgentParam *params_;
-    AgentInit *init_;
     std::auto_ptr<AgentConfig> cfg_;
     std::auto_ptr<AgentStats> stats_;
     std::auto_ptr<KSync> ksync_;
@@ -631,8 +657,8 @@ private:
     uint32_t xs_port_[MAX_XMPP_SERVERS];
     uint64_t xs_stime_[MAX_XMPP_SERVERS];
     int8_t xs_dns_idx_;
-    std::string xs_dns_addr_[MAX_XMPP_SERVERS];
-    uint32_t xs_dns_port_[MAX_XMPP_SERVERS];
+    std::string dns_addr_[MAX_XMPP_SERVERS];
+    uint32_t dns_port_[MAX_XMPP_SERVERS];
     std::string dss_addr_;
     uint32_t dss_port_;
     int dss_xs_instances_;
@@ -667,7 +693,12 @@ private:
     const Interface *vhost_interface_;
     bool debug_;
     bool test_mode_;
+    bool init_done_;
 
+    // Flow information
+    uint32_t flow_table_size_;
+
+    // Constants
     static const std::string config_file_;
     static const std::string log_file_;
     static const std::string null_str_;

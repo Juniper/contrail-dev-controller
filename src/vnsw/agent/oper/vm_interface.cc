@@ -29,11 +29,9 @@
 #include <vnc_cfg_types.h>
 #include <oper/agent_sandesh.h>
 #include <oper/sg.h>
-#include <ksync/interface_ksync.h>
 #include "sandesh/sandesh_trace.h"
 #include "sandesh/common/vns_types.h"
 #include "sandesh/common/vns_constants.h"
-#include <ksync/ksync_init.h>
 #include <services/dns_proto.h>
 #include <filter/acl.h>
 
@@ -372,6 +370,7 @@ bool InterfaceTable::IFNodeToReq(IFMapNode *node, DBRequest &req) {
 
     //Fill config data items
     data->cfg_name_= node->name();
+    data->admin_state_ = id_perms.enable;
 
     BuildVrfAssignRule(cfg, data);
     SgUuidList sg_list(0);
@@ -630,10 +629,15 @@ bool VmInterface::CopyIpAddress(Ip4Address &addr) {
     bool ret = false;
     InterfaceTable *table = static_cast<InterfaceTable *>(get_table());
 
+    // Support DHCP relay for fabric-ports if IP address is not configured
     do_dhcp_relay_ = (fabric_port_ && addr.to_ulong() == 0 && vrf() &&
                       vrf()->GetName() == table->agent()->GetDefaultVrf());
 
     if (do_dhcp_relay_) {
+        // Set config_seen flag on DHCP SNoop entry
+        table->DhcpSnoopSetConfigSeen(name_);
+        // IP Address not know. Get DHCP Snoop entry.
+        // Also sets the config_seen_ flag for DHCP Snoop entry
         addr = table->GetDhcpSnoopEntry(name_);
     }
 
@@ -742,6 +746,11 @@ bool VmInterface::CopyConfig(VmInterfaceConfigData *data, bool *sg_changed) {
     }
     if (mac_set_ != mac_set) {
         mac_set_ = mac_set;
+        ret = true;
+    }
+
+    if (admin_state_ != data->admin_state_) {
+        admin_state_ = data->admin_state_;
         ret = true;
     }
 
@@ -983,25 +992,6 @@ void VmInterface::GetOsParams(Agent *agent) {
     os_oper_state_ = true;
 }
 
-// Get DHCP IP address. DHCP IP is used only if IP address not specified in 
-// config. We can get DHCP IP in two ways,
-// - By snooping dhcp packets
-// - To support agent restart, the snooped address are stored in InterfaceKScan
-//   table. Query the table to find DHCP Snooped address
-bool VmInterface::GetDhcpSnoopIp(const std::string &name, Ip4Address *ip)
-    const {
-    uint32_t addr;
-    InterfaceKScan *intf = Agent::GetInstance()->ksync()->interface_scanner();
-    if (intf) {
-        if (intf->FindInterfaceKScanData(name, addr)) {
-            *ip = Ip4Address(addr);
-            return true;
-        }
-    }
-
-    return false;
-}
-
 // A VM Interface is L3 active under following conditions,
 // - If interface is deleted, it is inactive
 // - VM, VN, VRF are set
@@ -1010,6 +1000,10 @@ bool VmInterface::GetDhcpSnoopIp(const std::string &name, Ip4Address *ip)
 // - MAC address set for the interface
 bool VmInterface::IsActive() {
     if (IsDeleted()) {
+        return false;
+    }
+
+    if (!admin_state_) {
         return false;
     }
 

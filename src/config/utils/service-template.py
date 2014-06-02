@@ -5,6 +5,7 @@
 import os
 import sys
 import errno
+import pprint
 import subprocess
 import time
 import argparse
@@ -62,11 +63,16 @@ class ServiceTemplateCmd(object):
             'api_server_port': '8082',
         }
 
-        args.conf_file = '/etc/contrail/svc-monitor.conf'
-        if args.conf_file:
-            config = ConfigParser.SafeConfigParser()
-            config.read([args.conf_file])
-            global_defaults.update(dict(config.items("DEFAULTS")))
+	if not args.conf_file:
+            args.conf_file = '/etc/contrail/svc-monitor.conf'
+
+        config = ConfigParser.SafeConfigParser()
+        ret = config.read([args.conf_file])
+        if args.conf_file not in ret:
+            print "Error: Unable to read the config file %s" % args.conf_file
+            sys.exit(-1)
+
+        global_defaults.update(dict(config.items("DEFAULTS")))
 
         # Override with CLI options
         # Don't surpress add_help here so it will handle -h
@@ -91,6 +97,8 @@ class ServiceTemplateCmd(object):
         create_parser.add_argument(
             "--image_name", help="glance image name [default: vsrx]")
         create_parser.add_argument(
+            "--flavor", help="Instance flavor")
+        create_parser.add_argument(
             "--svc_scaling", action="store_true", default=False,
             help="enable service scaling [default: False]")
         create_parser.set_defaults(func=self.create_st)
@@ -99,6 +107,9 @@ class ServiceTemplateCmd(object):
         delete_parser.add_argument(
             "template_name", help="service template name")
         delete_parser.set_defaults(func=self.delete_st)
+
+        list_parser = subparsers.add_parser('list')
+        list_parser.set_defaults(func=self.list_st)
 
         self._args = parser.parse_args(remaining_argv)
     # end _parse_args
@@ -118,6 +129,8 @@ class ServiceTemplateCmd(object):
 
         svc_properties = ServiceTemplateType()
         svc_properties.set_image_name(self._args.image_name)
+        if self._args.flavor:
+            svc_properties.set_flavor(self._args.flavor)
         svc_properties.set_service_scaling(True)
         svc_properties.set_service_type(self._args.svc_type)
 
@@ -142,6 +155,12 @@ class ServiceTemplateCmd(object):
                 % (self._args.template_name)
             return
     #_delete_st
+
+    def list_st(self):
+        print "Listing service templates"
+        templates = self._vnc_lib.service_templates_list()
+        pprint.pprint(templates)
+    #_list_st
 
 # end class ServiceTemplateCmd
 

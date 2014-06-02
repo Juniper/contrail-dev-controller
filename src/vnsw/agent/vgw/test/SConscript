@@ -23,14 +23,14 @@ if sys.platform != 'darwin':
     env.Append(LIBS=['agent_test_buildinfo'])
 
     test_vgw = env.Program(target = 'test_vgw', source = ['test_vgw.cc'])
-    env.Alias('src/vnsw/agent/vgw/test:test_vgw', test_vgw)
+    env.Alias('agent:test_vgw', test_vgw)
 
     test_dynamic_vgw = env.Program(target = 'test_dynamic_vgw', source = ['test_dynamic_vgw.cc'])
-    env.Alias('src/vnsw/agent/vgw/test:test_dynamic_vgw', test_dynamic_vgw)
+    env.Alias('agent:test_dynamic_vgw', test_dynamic_vgw)
 
     vgw_suite = [test_vgw, test_dynamic_vgw]
 
 test = env.TestSuite('agent-test', vgw_suite)
-env.Alias('src/vnsw/agent:test', test)
+env.Alias('controller/src/vnsw/agent/vgw:test', test)
 Return('vgw_suite')
 

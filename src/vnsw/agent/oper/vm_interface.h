@@ -317,7 +317,6 @@ public:
     void CopySgIdList(SecurityGroupList *sg_id_list) const;
     bool NeedMplsLabel() const;
     bool IsVxlanMode() const;
-    bool GetDhcpSnoopIp(const std::string &name, Ip4Address *ip) const;
     bool SgExists(const boost::uuids::uuid &id, const SgList &sg_l);
     bool IsMirrorEnabled() const { return mirror_entry_.get() != NULL; }
     bool HasFloatingIp() const { return floating_ip_list_.list_.size() != 0; }
@@ -327,8 +326,6 @@ public:
     uint32_t GetServiceVlanLabel(const VrfEntry *vrf) const;
     uint32_t GetServiceVlanTag(const VrfEntry *vrf) const;
     const VrfEntry* GetServiceVlanVrf(uint16_t vlan_tag) const;
-    void Activate();
-    void DeActivate();
     void Delete();
     void Add();
     bool OnResyncServiceVlan(VmInterfaceConfigData *data);
@@ -609,6 +606,7 @@ struct VmInterfaceConfigData : public VmInterfaceData {
     bool layer2_forwarding_;
     bool ipv4_forwarding_;
     bool mirror_enable_;
+    bool admin_state_;
     std::string analyzer_name_;
     Interface::MirrorDirection mirror_direction_;
     VmInterface::SecurityGroupEntryList sg_list_;

@@ -36,14 +36,6 @@ class ServiceInstanceCmd(object):
                             self._args.instance_name]
         self._st_fq_name = [self._args.domain_name, self._args.template_name]
         self._domain_fq_name = [self._args.domain_name]
-
-        self._mgmt_vn_fq_name = None
-        self._left_vn_fq_name = None
-        self._right_vn_fq_name = None
-        if self._args.mgmt_vn:
-            self._mgmt_vn_fq_name = [self._args.domain_name,
-                                     self._args.proj_name,
-                                     self._args.mgmt_vn]
         if self._args.left_vn:
             self._left_vn_fq_name = [self._args.domain_name,
                                      self._args.proj_name,
@@ -52,6 +44,10 @@ class ServiceInstanceCmd(object):
             self._right_vn_fq_name = [self._args.domain_name,
                                       self._args.proj_name,
                                       self._args.right_vn]
+        if self._args.mgmt_vn:
+            self._mgmt_vn_fq_name = [self._args.domain_name,
+                                     self._args.proj_name,
+                                     self._args.mgmt_vn]
 
         self._novaclient_init()
         self._vnc_lib = VncApi('u', 'p',
@@ -80,11 +76,16 @@ class ServiceInstanceCmd(object):
             'api_server_port': '8082',
         }
 
-        args.conf_file = '/etc/contrail/svc-monitor.conf'
-        if args.conf_file:
-            config = ConfigParser.SafeConfigParser()
-            config.read([args.conf_file])
-            global_defaults.update(dict(config.items("DEFAULTS")))
+        if not args.conf_file:
+            args.conf_file = '/etc/contrail/svc-monitor.conf'
+
+        config = ConfigParser.SafeConfigParser()
+        ret = config.read([args.conf_file])
+        if args.conf_file not in ret:
+            print "Error: Unable to read the config file %s" % args.conf_file
+            sys.exit(-1)
+
+        global_defaults.update(dict(config.items("DEFAULTS")))
 
         # Override with CLI options
         # Don't surpress add_help here so it will handle -h
@@ -177,6 +178,16 @@ class ServiceInstanceCmd(object):
             except NoIdError:
                 print "Error: Right VN %s not found" % (self._right_vn_fq_name)
                 return
+        if self._args.mgmt_vn:
+            try:
+                self._vnc_lib.virtual_network_read(
+                    fq_name=self._mgmt_vn_fq_name)
+            except NoIdError:
+                print "Error: Management VN %s not found" % (self._mgmt_vn_fq_name)
+                return
+        else:
+            self._mgmt_vn_fq_name = []
+            
 
         # create si
         print "Creating service instance %s" % (self._args.instance_name)
@@ -191,9 +202,9 @@ class ServiceInstanceCmd(object):
             si_uuid = self._vnc_lib.service_instance_create(si_obj)
 
         si_prop = ServiceInstanceType(
-            left_virtual_network=self._left_vn_fq_name,
-            management_virtual_network=self._mgmt_vn_fq_name,
-            right_virtual_network=self._right_vn_fq_name)
+            left_virtual_network=':'.join(self._left_vn_fq_name),
+            management_virtual_network=':'.join(self._mgmt_vn_fq_name),
+            right_virtual_network=':'.join(self._right_vn_fq_name))
 
         # set scale out
         scale_out = ServiceScaleOutType(
