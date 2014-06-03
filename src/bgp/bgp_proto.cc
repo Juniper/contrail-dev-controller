@@ -576,28 +576,30 @@ public:
     typedef AttrSizeSet SizeSetter;
 };
 
-template<class Derived>
+template <class Derived>
 struct BgpContextSwap {
     Derived *operator()(const BgpAttribute *attr) {
         return new Derived(*attr);
     }
 };
 
-template<class C>
+template <class C>
 struct BgpAttributeVerifier {
     static bool Verifier(const C *obj, const uint8_t *data, size_t size,
                          ParseContext *context) {
         int pre = (obj->flags & BgpAttribute::ExtendedLength) ? 4 : 3;
-        if (C::kSize > 0 && (int)context->size() != C::kSize) {
+        if (C::kSize > 0 && (int) context->total_size() != C::kSize) {
+            int offset = pre + context->total_size() - context->size();
             context->SetError(BgpProto::Notification::UpdateMsgErr,
                     BgpProto::Notification::AttribLengthError,
-                    TYPE_NAME(C), data - pre, context->size() + pre);
+                    TYPE_NAME(C), data - offset, context->total_size() + pre);
             return false;
         }
         if ((obj->flags & BgpAttribute::FLAG_MASK) != C::kFlags) {
+            int offset = pre + context->total_size() - context->size();
             context->SetError(BgpProto::Notification::UpdateMsgErr,
                     BgpProto::Notification::AttribFlagsError,
-                    TYPE_NAME(C), data - pre, context->size() + pre);
+                    TYPE_NAME(C), data - offset, context->total_size() + pre);
             return false;
         }
         return true;
@@ -682,7 +684,7 @@ public:
     typedef Accessor<C, T, Member> Setter;
 };
 
-template<class C, int Size, typename T, T C::*M>
+template <class C, int Size, typename T, T C::*M>
 class BgpAttrTemplate :
     public ProtoSequence<BgpAttrTemplate<C, Size, T, M> > {
 public:

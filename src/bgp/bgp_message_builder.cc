@@ -59,12 +59,6 @@ void BgpMessage::StartReach(const RibOutAttr *roattr, const BgpRoute *route) {
         update.path_attributes.push_back(path);
     }
 
-    if (attr->pmsi_tunnel()) {
-        PmsiTunnelSpec *pmsi_spec =
-            new PmsiTunnelSpec(attr->pmsi_tunnel()->pmsi_tunnel());
-        update.path_attributes.push_back(pmsi_spec);
-    }
-
     if (attr->edge_discovery()) {
         EdgeDiscoverySpec *edspec =
             new EdgeDiscoverySpec(attr->edge_discovery()->edge_discovery());
@@ -93,6 +87,12 @@ void BgpMessage::StartReach(const RibOutAttr *roattr, const BgpRoute *route) {
             ext_comm->communities.push_back(value);
         }
         update.path_attributes.push_back(ext_comm);
+    }
+
+    if (attr->pmsi_tunnel()) {
+        PmsiTunnelSpec *pmsi_spec =
+            new PmsiTunnelSpec(attr->pmsi_tunnel()->pmsi_tunnel());
+        update.path_attributes.push_back(pmsi_spec);
     }
 
     std::vector<uint8_t> nh;
