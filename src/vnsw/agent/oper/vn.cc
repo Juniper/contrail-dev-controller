@@ -703,9 +703,9 @@ void VnTable::DelHostRouteForGw(VnEntry *vn, const VnIpam &ipam) {
 void VnTable::AddSubnetRoute(VnEntry *vn, VnIpam &ipam) {
     VrfEntry *vrf = vn->GetVrf();
     static_cast<Inet4UnicastAgentRouteTable *>(vrf->
-        GetInet4UnicastRouteTable())->AddDropRoute
+        GetInet4UnicastRouteTable())->AddSubnetRoute
         (vrf->GetName(), ipam.GetSubnetAddress(), ipam.plen, vn->GetName(),
-         true);
+         vn->GetVxLanId());
 }
 
 // Del receive route for default gw

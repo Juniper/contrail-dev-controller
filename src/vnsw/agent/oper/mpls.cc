@@ -182,6 +182,28 @@ void MplsLabel::CreateEcmpLabel(uint32_t label, const string &vrf_name,
     return;
 }
                                    
+/*
+ * Label sent to TOR/MX for ingress replication to vrouters.
+ * The NH is list of all L2 interfaces for VM
+ */
+void MplsLabel::CreateEvpnFloodLabel(uint32_t label, const string &vrf_name,
+                                     const Ip4Address &grp_addr,
+                                     const Ip4Address &src_addr) {
+    DBRequest req;
+    req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
+
+    MplsLabelKey *key = new MplsLabelKey(MplsLabel::VPORT_NH, label);
+    req.key.reset(key);
+
+    MplsLabelData *data = 
+        new MplsLabelData(vrf_name, grp_addr, src_addr, false,
+                          Composite::L2COMP);
+    req.data.reset(data);
+
+    MplsTable::GetInstance()->Enqueue(&req);
+    return;
+}
+                                   
 void MplsLabel::DeleteMcastLabelReq(const string &vrf_name, const Ip4Address &grp_addr,
                                     const Ip4Address &src_addr, uint32_t src_label) {
     DBRequest req;

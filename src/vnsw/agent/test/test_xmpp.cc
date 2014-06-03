@@ -495,7 +495,7 @@ TEST_F(AgentXmppUnitTest, Connection) {
     //Create vn,vrf,vm,vm-port and route entry in vrf1 
     CreateVmportEnv(input, 1);
     //expect subscribe message+route at the mock server
-    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 6));
+    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 7));
     client->WaitForIdle();
 
     VrfAddReq("vrf2");
@@ -551,6 +551,7 @@ TEST_F(AgentXmppUnitTest, Connection) {
                      "TestVn");
     // Route reflected to vrf1
     WAIT_FOR(1000, 10000, (bgp_peer.get()->Count() == 4));
+    WAIT_FOR(1000, 10000, (RouteFind("vrf1", Ip4Address::from_string("2.2.2.0"), 24)));
     rt = RouteGet("vrf1", Ip4Address::from_string("2.2.2.0"), 24);
     EXPECT_TRUE(rt != NULL);
     EXPECT_STREQ(rt->dest_vn_name().c_str(),"TestVn");
@@ -906,7 +907,7 @@ TEST_F(AgentXmppUnitTest, ConnectionUpDown) {
     //Create vn,vrf,vm,vm-port and route entry in vrf1 
     CreateVmportEnv(input, 1);
     //expect subscribe message+route at the mock server
-    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 6));
+    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 7));
     client->WaitForIdle();
 
     Ip4Address addr = Ip4Address::from_string("1.1.1.2");
@@ -969,7 +970,7 @@ TEST_F(AgentXmppUnitTest, ConnectionUpDown) {
 
     //expect subscribe for __default__, vrf1,route
     //at the mock server
-    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 12));
+    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 14));
 
     VxLanNetworkIdentifierMode(false);
     client->WaitForIdle();
@@ -1105,7 +1106,7 @@ TEST_F(AgentXmppUnitTest, SgList) {
     //3> Layer 2 route add
     //4> All broadcast route
     //5> Broadcast layer 2 route
-    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 6));
+    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 7));
     client->WaitForIdle();
 
     VrfAddReq("vrf2");
@@ -1211,7 +1212,7 @@ TEST_F(AgentXmppUnitTest, TransparentSISgList) {
     //Create vn,vrf,vm,vm-port and route entry in vrf1
     CreateVmportEnv(input, 1);
     //expect subscribe message+route at the mock server
-    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 6));
+    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 7));
     client->WaitForIdle();
 
     AddVrf("vrf2");
@@ -1226,7 +1227,7 @@ TEST_F(AgentXmppUnitTest, TransparentSISgList) {
             "virtual-machine-interface", "vnet1");
     client->WaitForIdle();
     //expect subscribe message+route at the mock server
-    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 8));
+    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 9));
 
     Ip4Address addr = Ip4Address::from_string("11.1.1.1");
     EXPECT_TRUE(VmPortActive(input, 0));
@@ -1305,7 +1306,7 @@ TEST_F(AgentXmppUnitTest, vxlan_peer_l2route_add) {
     //Create vn,vrf,vm,vm-port and route entry in vrf1
     CreateVmportEnv(input, 1);
     //expect subscribe message+route at the mock server
-    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 6));
+    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 7));
     client->WaitForIdle();
 
     Ip4Address addr = Ip4Address::from_string("1.1.1.2");
@@ -1401,7 +1402,7 @@ TEST_F(AgentXmppUnitTest, mpls_peer_l2route_add) {
     //Create vn,vrf,vm,vm-port and route entry in vrf1 
     CreateVmportEnv(input, 1);
     //expect subscribe message+route at the mock server
-    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 6));
+    WAIT_FOR(1000, 10000, (mock_peer.get()->Count() == 7));
     client->WaitForIdle();
 
     Ip4Address addr = Ip4Address::from_string("1.1.1.2");

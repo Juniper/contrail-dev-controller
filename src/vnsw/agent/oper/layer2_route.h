@@ -47,6 +47,7 @@ public:
                                         const string &vn_name,
                                         const Ip4Address &dip,
                                         const Ip4Address &sip,
+                                        uint32_t label,
                                         int vxlan_id);
     static void DeleteReq(const Peer *peer, const string &vrf_name,
                           const struct ether_addr &mac,
@@ -106,7 +107,7 @@ class Layer2RouteKey : public AgentRouteKey {
 public:
     Layer2RouteKey(const Peer *peer, const string &vrf_name, 
                    const struct ether_addr &mac) :
-        AgentRouteKey(peer, vrf_name), dmac_(mac) {
+        AgentRouteKey(peer, vrf_name), dmac_(mac), plen_(0) {
     }
     Layer2RouteKey(const Peer *peer, const string &vrf_name, 
                    const struct ether_addr &mac, const Ip4Address &vm_ip,
@@ -114,7 +115,7 @@ public:
         AgentRouteKey(peer, vrf_name), dmac_(mac), vm_ip_(vm_ip), plen_(plen) {
     }
     Layer2RouteKey(const Peer *peer, const string &vrf_name) : 
-        AgentRouteKey(peer, vrf_name) { 
+        AgentRouteKey(peer, vrf_name), plen_(0) {
             dmac_ = *ether_aton("FF:FF:FF:FF:FF:FF");
     }
     virtual ~Layer2RouteKey() { }

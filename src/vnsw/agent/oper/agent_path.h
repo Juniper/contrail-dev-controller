@@ -311,10 +311,11 @@ public:
                    const Ip4Address &grp_addr,
                    const string &vn_name, 
                    const string &vrf_name,
+                   uint32_t label,
                    int vxlan_id,
                    COMPOSITETYPE type) :
         AgentRouteData(true), src_addr_(src_addr), grp_addr_(grp_addr),
-        vn_name_(vn_name), vrf_name_(vrf_name), vxlan_id_(vxlan_id),
+        vn_name_(vn_name), vrf_name_(vrf_name), label_(label), vxlan_id_(vxlan_id),
         comp_type_(type) {
     }
     virtual ~MulticastRoute() { }
@@ -326,9 +327,23 @@ private:
     Ip4Address grp_addr_;
     string vn_name_;
     string vrf_name_;
+    uint32_t label_;
     int vxlan_id_;
     COMPOSITETYPE comp_type_;
     DISALLOW_COPY_AND_ASSIGN(MulticastRoute);
+};
+
+class SubnetRoute : public MulticastRoute {
+public:
+    SubnetRoute(const string &vrf_name, const string &vn_name,
+                const Ip4Address &dst_addr,
+                const Ip4Address &src_addr,
+                int vxlan_id);
+    virtual ~SubnetRoute() {}
+    virtual string ToString() const {return "subnet route";}
+
+private:
+    DISALLOW_COPY_AND_ASSIGN(SubnetRoute);
 };
 
 class ReceiveRoute : public AgentRouteData {
@@ -389,15 +404,13 @@ private:
 
 class DropRoute : public AgentRouteData {
 public:
-    DropRoute(const string &vn_name, bool is_subnet_discard) :
-        AgentRouteData(false), vn_(vn_name),
-        is_subnet_discard_(is_subnet_discard){ }
+    DropRoute(const string &vn_name) :
+        AgentRouteData(false), vn_(vn_name) { }
     virtual ~DropRoute() { }
     virtual bool AddChangePath(Agent *agent, AgentPath *path);
     virtual string ToString() const {return "drop";}
 private:
     string vn_;
-    bool is_subnet_discard_;
     DISALLOW_COPY_AND_ASSIGN(DropRoute);
 };
 #endif // vnsw_agent_path_hpp

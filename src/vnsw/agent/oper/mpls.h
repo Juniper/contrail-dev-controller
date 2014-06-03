@@ -50,6 +50,9 @@ public:
                                     uint32_t src_label, COMPOSITETYPE type);
     static void CreateEcmpLabel(uint32_t label, const std::string &vrf_name,
                                 const Ip4Address &addr, uint8_t plen);
+    static void CreateEvpnFloodLabel(uint32_t label, const string &vrf_name,
+                                     const Ip4Address &grp_addr,
+                                     const Ip4Address &src_addr); 
     static void DeleteMcastLabelReq(const string &vrf_name, 
                                     const Ip4Address &grp_addr,
                                     const Ip4Address &src_addr, 

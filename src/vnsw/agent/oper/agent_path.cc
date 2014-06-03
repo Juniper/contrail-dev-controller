@@ -82,9 +82,14 @@ bool AgentPath::RebakeAllTunnelNHinCompositeNH(const AgentRoute *sync_route,
     TunnelType::Type new_tunnel_type;
     //Only MPLS types are supported for multicast
     if (sync_route->is_multicast()) {
-        new_tunnel_type = TunnelType::ComputeType(TunnelType::MplsType());
-        if (new_tunnel_type == TunnelType::VXLAN)
-            new_tunnel_type = TunnelType::MPLS_GRE;
+        if (cnh->CompositeType() == Composite::EVPN) {
+            new_tunnel_type = TunnelType::ComputeType(TunnelType::AllType());
+        } else {
+            new_tunnel_type = TunnelType::ComputeType(TunnelType::MplsType());
+            if (new_tunnel_type == TunnelType::VXLAN) {
+                new_tunnel_type = TunnelType::MPLS_GRE;
+            }
+        }
     } else {
         new_tunnel_type = TunnelType::ComputeType(tunnel_bmap_);              
     }        
@@ -339,11 +344,6 @@ bool InetInterfaceRoute::AddChangePath(Agent *agent, AgentPath *path) {
 bool DropRoute::AddChangePath(Agent *agent, AgentPath *path) {
     bool ret = false;
 
-    if (path->is_subnet_discard() != is_subnet_discard_) {
-        path->set_is_subnet_discard(is_subnet_discard_);
-        ret = true;
-    }
-
     if (path->dest_vn_name() != vn_) {
         path->set_dest_vn_name(vn_);
         ret = true;
@@ -553,7 +553,17 @@ bool MulticastRoute::AddChangePath(Agent *agent, AgentPath *path) {
     path->set_dest_vn_name(vn_name_);
     path->set_unresolved(false);
     path->set_vxlan_id(vxlan_id_);
+    path->set_label(label_);
     ret = true;
+
+    if (nh && (nh->GetType() == NextHop::COMPOSITE)) {
+        const CompositeNH *cnh = static_cast<const CompositeNH *>(nh);
+        if (cnh->CompositeType() == Composite::EVPN) {
+            path->set_is_subnet_discard(true);
+        } else {
+            path->set_is_subnet_discard(false);
+        }
+    }
 
     if (path->ChangeNH(agent, nh) == true)
         ret = true;
@@ -569,6 +579,16 @@ bool PathPreferenceData::AddChangePath(Agent *agent, AgentPath *path) {
         ret = true;
     }
     return ret;
+}
+
+// Subnet Route route data
+SubnetRoute::SubnetRoute(const string &vrf_name,
+                         const string &vn_name,
+                         const Ip4Address &dst_addr,
+                         const Ip4Address &src_addr,
+                         int vxlan_id) :
+    MulticastRoute(src_addr, dst_addr, vn_name, vrf_name, 0, vxlan_id,
+                   Composite::EVPN) {
 }
 
 ///////////////////////////////////////////////

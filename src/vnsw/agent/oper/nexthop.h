@@ -955,7 +955,10 @@ struct Composite {
         L2COMP,
         L3COMP,
         MULTIPROTO,
-        ECMP
+        ECMP,
+        L2INTERFACE,
+        L3INTERFACE,
+        EVPN
     };
 };
 

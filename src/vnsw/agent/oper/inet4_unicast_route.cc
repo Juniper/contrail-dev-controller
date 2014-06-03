@@ -11,7 +11,9 @@
 #include <oper/vrf.h>
 #include <oper/tunnel_nh.h>
 #include <oper/mpls.h>
+#include <oper/vxlan.h>
 #include <oper/mirror_table.h>
+#include <oper/multicast.h>
 #include <controller/controller_export.h>
 #include <controller/controller_peer.h>
 #include <oper/agent_sandesh.h>
@@ -702,7 +704,9 @@ Inet4UnicastAgentRouteTable::AddSubnetBroadcastRoute(const Peer *peer,
     req.key.reset(new Inet4UnicastRouteKey(peer, vrf_name, grp_addr, 32));
 
     MulticastRoute *data = new MulticastRoute(src_addr, grp_addr,
-                                              vn_name, vrf_name, 0,
+                                              vn_name, vrf_name,
+                                              MplsTable::kInvalidLabel,
+                                              VxLanTable::kInvalidvxlan_id,
                                               Composite::L3COMP);
     req.data.reset(data);
     UnicastTableEnqueue(Agent::GetInstance(), vrf_name, &req);
@@ -891,14 +895,13 @@ Inet4UnicastAgentRouteTable::AddVHostSubnetRecvRoute(const Peer *peer,
 void Inet4UnicastAgentRouteTable::AddDropRoute(const string &vm_vrf,
                                                const Ip4Address &addr,
                                                uint8_t plen,
-                                               const string &vn_name,
-                                               bool is_subnet_discard) {
+                                               const string &vn_name) {
     Agent *agent = Agent::GetInstance();
     DBRequest req(DBRequest::DB_ENTRY_ADD_CHANGE);
     req.key.reset(new Inet4UnicastRouteKey(agent->local_peer(), vm_vrf,
                                            GetIp4SubnetAddress(addr, plen),
                                            plen));
-    req.data.reset(new DropRoute(vn_name, is_subnet_discard));
+    req.data.reset(new DropRoute(vn_name));
     UnicastTableEnqueue(agent, vm_vrf, &req);
 }
 
@@ -937,5 +940,27 @@ Inet4UnicastAgentRouteTable::AddGatewayRouteReq(const string &vrf_name,
                                                 const string &vn_name) {
     DBRequest req;
     AddGatewayRouteInternal(&req, vrf_name, dst_addr, plen, gw_ip, vn_name);
+    UnicastTableEnqueue(Agent::GetInstance(), vrf_name, &req);
+}
+
+void
+Inet4UnicastAgentRouteTable::AddSubnetRoute(const string &vrf_name,
+                                            const Ip4Address &dst_addr,
+                                            uint8_t plen,
+                                            const string &vn_name,
+                                            uint32_t vxlan_id) {
+    MulticastHandler::GetInstance()->CreateEvpnCompositeNH(vrf_name);
+
+    DBRequest req;
+    req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
+    req.key.reset(new Inet4UnicastRouteKey(Agent::GetInstance()->local_peer(),
+                                            vrf_name, dst_addr, plen));
+    boost::system::error_code ec;
+    Ip4Address nh_dst_addr = IpAddress::from_string("255.255.255.255",
+                                                    ec).to_v4();
+    Ip4Address nh_src_addr = IpAddress::from_string("0.0.0.0",
+                                                    ec).to_v4();
+    req.data.reset(new SubnetRoute(vrf_name, vn_name, nh_dst_addr, nh_src_addr,
+                                   vxlan_id));
     UnicastTableEnqueue(Agent::GetInstance(), vrf_name, &req);
 }

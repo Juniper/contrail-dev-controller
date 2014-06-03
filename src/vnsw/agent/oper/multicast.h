@@ -47,27 +47,23 @@ public:
                          const Ip4Address &grp_addr,
                          const std::string &vn_name,
                          bool multi_proto_support) :
-        vrf_name_(vrf_name), grp_address_(grp_addr), 
-        vn_name_(vn_name), multi_proto_support_(multi_proto_support),
-        layer2_forwarding_(true), ipv4_forwarding_(false), vxlan_id_(0), 
-        peer_identifier_(0) {
+        vrf_name_(vrf_name), grp_address_(grp_addr), vn_name_(vn_name),
+        src_mpls_label_(0), evpn_mpls_label_(0), vxlan_id_(0), 
+        multi_proto_support_(multi_proto_support), layer2_forwarding_(true),
+        ipv4_forwarding_(false), peer_identifier_(0), deleted_(false) {
         boost::system::error_code ec;
         src_address_ =  IpAddress::from_string("0.0.0.0", ec).to_v4();
-        src_mpls_label_ = 0;
         local_olist_.clear();
-        deleted_ = false;
     };     
     MulticastGroupObject(const std::string &vrf_name, 
                          const Ip4Address &grp_addr,
                          const Ip4Address &src_addr,
                          bool multi_proto_support) : 
-        vrf_name_(vrf_name), grp_address_(grp_addr), 
-        src_address_(src_addr), multi_proto_support_(multi_proto_support),
-        layer2_forwarding_(true), ipv4_forwarding_(false), vxlan_id_(0),
-        peer_identifier_(0) {
-        src_mpls_label_ = 0;
+        vrf_name_(vrf_name), grp_address_(grp_addr), src_address_(src_addr),
+        src_mpls_label_(0), evpn_mpls_label_(0), vxlan_id_(0), 
+        multi_proto_support_(multi_proto_support), layer2_forwarding_(true),
+        ipv4_forwarding_(false), peer_identifier_(0), deleted_(false) {
         local_olist_.clear();
-        deleted_ = false;
     };     
     virtual ~MulticastGroupObject() { };
 
@@ -79,6 +75,9 @@ public:
 
     void SetSourceMPLSLabel(uint32_t label); 
     uint32_t GetSourceMPLSLabel() const { return src_mpls_label_; };
+
+    uint32_t evpn_mpls_label() const {return evpn_mpls_label_;}
+    void set_evpn_mpls_label(uint32_t label) {evpn_mpls_label_ = label;}
 
     //Add local member is local VM in server.
     bool AddLocalMember(const uuid &intf_uuid) { 
@@ -108,10 +107,25 @@ public:
         tunnel_olist_.push_back(OlistTunnelEntry(label, dip, bmap));
     };
 
+    TunnelOlist &GetEvpnOlist() { return evpn_olist_; };
+    //Add remote server and label in fabric olist
+    void AddMemberInEvpnOlist(uint32_t label, const Ip4Address &dip,
+                              TunnelType::TypeBmap bmap) {
+        evpn_olist_.push_back(OlistTunnelEntry(label, dip, bmap));
+    };
+    
+    void AddMemberInOlist(TunnelOlist &olist, uint32_t label, 
+                          const Ip4Address &dip,
+                          TunnelType::TypeBmap bmap) {
+        olist.push_back(OlistTunnelEntry(label, dip, bmap));
+    };
+
     //Labels for server + server list + ingress source label
     bool ModifyFabricMembers(const TunnelOlist &fabric_olist, 
                              uint64_t peer_identifier, bool delete_op,
                              uint32_t label);
+    bool ModifyEvpnMembers(const TunnelOlist &fabric_olist, 
+                           uint64_t peer_identifier, bool delete_op);
     void FlushAllPeerInfo(uint64_t peer_identifier);
 
     //Gets
@@ -136,19 +150,24 @@ public:
     uint64_t peer_identifier() {return peer_identifier_;}
 
 private:
+    bool ModifyOlistMembers(const TunnelOlist &new_olist, TunnelOlist &obj_olist,
+                            uint64_t peer_identifier, bool delete_op);
+
     std::string vrf_name_;
     Ip4Address grp_address_;
     std::string vn_name_;
     Ip4Address src_address_;
     uint32_t src_mpls_label_;
-    std::list<uuid> local_olist_; /* UUID of local i/f */
+    uint32_t evpn_mpls_label_;
+    int vxlan_id_;
     TunnelOlist tunnel_olist_;
-    bool deleted_;
+    TunnelOlist evpn_olist_;
     bool multi_proto_support_;
     bool layer2_forwarding_;
     bool ipv4_forwarding_;
-    int vxlan_id_;
     uint64_t peer_identifier_;
+    bool deleted_;
+    std::list<uuid> local_olist_; /* UUID of local i/f */
 
     friend class MulticastHandler;
     DISALLOW_COPY_AND_ASSIGN(MulticastGroupObject);
@@ -168,6 +187,12 @@ public:
                                     uint32_t source_label,
                                     const TunnelOlist &olist,
                                     uint64_t peer_identifier = 0);
+    /* Called as a result of XMPP message received with OLIST of 
+     * evpn endpoints with mpls or vxlan encap
+     */
+    static void ModifyEvpnMembers(const std::string &vrf_name, 
+                                  const TunnelOlist &olist,
+                                  uint64_t peer_identifier = 0);
     //Registered for VN notification
     static void ModifyVN(DBTablePartBase *partition, DBEntryBase *e);
     //Registered for VM notification
@@ -190,9 +215,12 @@ public:
     static void Shutdown();
     //Multicast obj list addition deletion
     MulticastGroupObject *FindFloodGroupObject(const std::string &vrf_name);
+    MulticastGroupObject *FindActiveGroupObject(const std::string &vrf_name,
+                                                const Ip4Address &dip);
     MulticastGroupObject *FindGroupObject(const std::string &vrf_name,
                                           const Ip4Address &dip);
     bool FlushPeerInfo(uint64_t peer_sequence);
+    void CreateEvpnCompositeNH(const string &vrf_name);
 
     void Terminate();
 
@@ -208,7 +236,10 @@ private:
     };
 
     //Notification to propagate subnh in compnh list change
+    void AddChangeEvpnCompositeNH(const string &vrf_name, MulticastGroupObject *);
     void AddChangeFabricCompositeNH(MulticastGroupObject *);
+    void AddChangeInterfaceCompositeNH(MulticastGroupObject *,
+                                       uint8_t type, Composite::Type comp_type);
     //Delete teh route and mpls label for the object
     void DeleteRouteandMPLS(MulticastGroupObject *);
 
@@ -260,12 +291,11 @@ private:
     void AddL2BroadcastRoute(const std::string &vrf_name, 
                              const std::string &vn_name,
                              const Ip4Address &addr,
-                             int vxlan_id);
+                             uint32_t label, int vxlan_id);
     void AddBroadcastRoute(const std::string &vrf_name, 
                            const std::string &vn_name,
                            const Ip4Address &addr);
-    void DeleteBroadcastRoute(const std::string &vrf_name, 
-                              const Ip4Address &addr);
+    void DeleteBroadcast(const std::string &vrf_name, const Ip4Address &addr);
 
     //Subnet rt add /delete
     void AddSubnetRoute(const std::string &vrf_name, 

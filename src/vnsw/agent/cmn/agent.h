@@ -716,6 +716,7 @@ private:
     bool debug_;
     bool test_mode_;
     bool init_done_;
+    bool simulate_evpn_tor_;
 
     // Flow information
     uint32_t flow_table_size_;
