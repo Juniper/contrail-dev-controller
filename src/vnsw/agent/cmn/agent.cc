@@ -215,6 +215,7 @@ void Agent::CopyConfig(AgentParam *params) {
         TunnelType::SetDefaultType(TunnelType::MPLS_GRE);
 
     headless_agent_mode_ = params_->headless_mode();
+    simulate_evpn_tor_ = params->simulate_evpn_tor();
     debug_ = params_->debug();
     test_mode_ = params_->test_mode();
 }
@@ -359,7 +360,7 @@ Agent::Agent() :
     mirror_src_udp_port_(0), lifetime_manager_(NULL), 
     ksync_sync_mode_(true), mgmt_ip_(""),
     vxlan_network_identifier_mode_(AUTOMATIC), headless_agent_mode_(false), 
-    debug_(false), test_mode_(false), init_done_(false) {
+    simulate_evpn_tor_(false), debug_(false), test_mode_(false), init_done_(false) {
 
     assert(singleton_ == NULL);
     singleton_ = this;

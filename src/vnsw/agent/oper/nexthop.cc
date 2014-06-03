@@ -485,11 +485,14 @@ void InterfaceNH::DeleteL2InterfaceNH(const uuid &intf_uuid) {
 void InterfaceNH::CreateMulticastVmInterfaceNH(const uuid &intf_uuid,
                                                const struct ether_addr &dmac,
                                                const string &vrf_name) {
-    AddInterfaceNH(intf_uuid, dmac, InterfaceNHFlags::MULTICAST, false, vrf_name);
+    AddInterfaceNH(intf_uuid, dmac, (InterfaceNHFlags::INET4 |
+                                     InterfaceNHFlags::MULTICAST), false,
+                   vrf_name);
 }
 
 void InterfaceNH::DeleteMulticastVmInterfaceNH(const uuid &intf_uuid) {
-    DeleteNH(intf_uuid, false, InterfaceNHFlags::MULTICAST);
+    DeleteNH(intf_uuid, false, (InterfaceNHFlags::MULTICAST |
+                                InterfaceNHFlags::INET4));
 }
 
 void InterfaceNH::DeleteNH(const uuid &intf_uuid, bool policy,
@@ -1556,24 +1559,80 @@ static void FillComponentNextHop(const CompositeNH *comp_nh,
     }
 }
 
-static void FillFabricCompositeNextHop(const CompositeNH *comp_nh,
-                                   FabricCompositeData &data) 
+static void FillMulticastCompositeNextHop(const CompositeNH *comp_nh,
+                                          Composite::Type comp_type,
+                                          MulticastCompositeData &data) 
 {
+    std::vector<McastData> data_list;                      
     std::stringstream str;
-    str << "Fabric  Composite, subnh count : " 
-        << comp_nh->ComponentNHCount();
-    data.set_type(str.str());
+
+    switch (comp_type) {
+    case Composite::EVPN: {
+        str << "EVPN Composite, subnh count : " << comp_nh->
+            ComponentNHCount();
+        data.set_type(str.str());
+        break;
+    }    
+    case Composite::FABRIC: {
+        str << "Fabric  Composite, subnh count : " << comp_nh->
+            ComponentNHCount();
+        data.set_type(str.str());
+        break;
+    }    
+    case Composite::L2INTERFACE: {
+        str << "L2 interface Composite, subnh count : " << comp_nh->
+            ComponentNHCount();
+        data.set_type(str.str());
+        break;
+    }    
+    case Composite::L3INTERFACE: {
+        str << "L3 interface Composite, subnh count : " << comp_nh->
+            ComponentNHCount();
+        data.set_type(str.str());
+        break;
+    }    
+    default: {
+        return;
+    }
+    }
+
+    if (comp_nh->ComponentNHCount() == 0)
+        return;
+
     data.set_sip(comp_nh->GetSrcAddr().to_string());
     data.set_dip(comp_nh->GetGrpAddr().to_string());
     if (comp_nh->ComponentNHCount() == 0)
         return;
-    std::vector<McastData> data_list;                      
     FillComponentNextHop(comp_nh, data_list);                          
     data.set_mc_list(data_list);
 }
 
+static void FillOlistComposites(const CompositeNH *comp_nh,
+                                MulticastFamilyCompositeData &data,
+                                Composite::Type intf_comp_type) {
+    CompositeNH::ComponentNHList::const_iterator it = comp_nh->begin();
+
+    while (it != comp_nh->end()) {
+        ComponentNH *component_nh = *it;
+        const CompositeNH *sub_cnh = 
+            static_cast<const CompositeNH *>(component_nh->GetNH());
+        MulticastCompositeData comp_data;
+        FillMulticastCompositeNextHop(sub_cnh, sub_cnh->CompositeType(),
+                                      comp_data);
+
+        if (sub_cnh->CompositeType() == Composite::FABRIC) {
+            data.set_fabric_comp(comp_data); 
+        } else if (sub_cnh->CompositeType() == Composite::EVPN) {
+            data.set_evpn_comp(comp_data); 
+        } else if (sub_cnh->CompositeType() == intf_comp_type) {
+            data.set_interface_comp(comp_data); 
+        }
+        it++;
+    }
+}
+
 static void FillL2CompositeNextHop(const CompositeNH *comp_nh,
-                                   L2CompositeData &data) 
+                                   MulticastFamilyCompositeData &data) 
 {
     std::stringstream str;
     str << "L2 Composite, subnh count : " 
@@ -1583,21 +1642,11 @@ static void FillL2CompositeNextHop(const CompositeNH *comp_nh,
     data.set_dip(comp_nh->GetGrpAddr().to_string());
     if (comp_nh->ComponentNHCount() == 0)
         return;
-    CompositeNH::ComponentNHList::const_iterator it = comp_nh->begin();
-    ComponentNH *component_nh = *it;
-    
-    const CompositeNH *sub_cnh = 
-        static_cast<const CompositeNH *>(component_nh->GetNH());
-    FabricCompositeData fab_data;
-    FillFabricCompositeNextHop(sub_cnh, fab_data);
-    data.set_fabric_comp(fab_data); 
-    std::vector<McastData> data_list;                      
-    FillComponentNextHop(comp_nh, data_list);                          
-    data.set_mc_list(data_list);
+    FillOlistComposites(comp_nh, data, Composite::L2INTERFACE); 
 }
 
 static void FillL3CompositeNextHop(const CompositeNH *comp_nh,
-                                   L3CompositeData &data) 
+                                   MulticastFamilyCompositeData &data) 
 {
     std::stringstream str;
     str << "L3 Composite, subnh count : " 
@@ -1607,17 +1656,7 @@ static void FillL3CompositeNextHop(const CompositeNH *comp_nh,
     data.set_dip(comp_nh->GetGrpAddr().to_string());
     if (comp_nh->ComponentNHCount() == 0)
         return;
-    CompositeNH::ComponentNHList::const_iterator it = comp_nh->begin();
-    ComponentNH *component_nh = *it;
-    
-    const CompositeNH *sub_cnh = 
-        static_cast<const CompositeNH *>(component_nh->GetNH());
-    FabricCompositeData fab_data;
-    FillFabricCompositeNextHop(sub_cnh, fab_data);
-    data.set_fabric_comp(fab_data); 
-    std::vector<McastData> data_list;                      
-    FillComponentNextHop(comp_nh, data_list);                          
-    data.set_mc_list(data_list);
+    FillOlistComposites(comp_nh, data, Composite::L3INTERFACE); 
 }
 
 static void FillMultiProtoCompositeNextHop(const CompositeNH *comp_nh,
@@ -1640,12 +1679,12 @@ static void FillMultiProtoCompositeNextHop(const CompositeNH *comp_nh,
         const CompositeNH *sub_cnh = 
             static_cast<const CompositeNH *>(component_nh->GetNH());
         if (sub_cnh->CompositeType() == Composite::L2COMP) {
-            L2CompositeData l2_data;
+            MulticastFamilyCompositeData l2_data;
             FillL2CompositeNextHop(sub_cnh, l2_data);
             data.set_l2_comp(l2_data);
         }
         if (sub_cnh->CompositeType() == Composite::L3COMP) {
-            L3CompositeData l3_data;
+            MulticastFamilyCompositeData l3_data;
             FillL3CompositeNextHop(sub_cnh, l3_data);
             data.set_l3_comp(l3_data);
         }
@@ -1657,14 +1696,25 @@ static void ExpandCompositeNextHop(const CompositeNH *comp_nh,
 {
     stringstream comp_str;
     switch (comp_nh->CompositeType()) {
+    case Composite::EVPN: {
+        comp_str << "evpn Composite"  << " sub nh count: " 
+            << comp_nh->ComponentNHCount();
+        data.set_type(comp_str.str());
+        if (comp_nh->ComponentNHCount() == 0)
+            break;
+        MulticastCompositeData evpn_data;
+        FillMulticastCompositeNextHop(comp_nh, Composite::EVPN, evpn_data);
+        data.set_evpn_comp(evpn_data); 
+        break;
+    }
     case Composite::FABRIC: {
         comp_str << "fabric Composite"  << " sub nh count: " 
             << comp_nh->ComponentNHCount();
         data.set_type(comp_str.str());
         if (comp_nh->ComponentNHCount() == 0)
             break;
-        FabricCompositeData fab_data;
-        FillFabricCompositeNextHop(comp_nh, fab_data);
+        MulticastCompositeData fab_data;
+        FillMulticastCompositeNextHop(comp_nh, Composite::FABRIC, fab_data);
         data.set_fabric_comp(fab_data); 
         break;
     }    
@@ -1674,17 +1724,10 @@ static void ExpandCompositeNextHop(const CompositeNH *comp_nh,
         data.set_type(comp_str.str());
         if (comp_nh->ComponentNHCount() == 0)
             break;
-        CompositeNH::ComponentNHList::const_iterator it = comp_nh->begin();
-        ComponentNH *component_nh = *it;
     
-        const CompositeNH *sub_cnh = 
-            static_cast<const CompositeNH *>(component_nh->GetNH());
-        FabricCompositeData fab_data;
-        FillFabricCompositeNextHop(sub_cnh, fab_data);
-        data.set_fabric_comp(fab_data); 
-        std::vector<McastData> data_list;                      
-        FillComponentNextHop(comp_nh, data_list);                          
-        data.set_mc_list(data_list);
+        MulticastFamilyCompositeData l3_data;
+        FillL3CompositeNextHop(comp_nh, l3_data);
+        data.set_l3_comp(l3_data);
         break;
     }    
     case Composite::L2COMP: {
@@ -1693,14 +1736,33 @@ static void ExpandCompositeNextHop(const CompositeNH *comp_nh,
         data.set_type(comp_str.str());
         if (comp_nh->ComponentNHCount() == 0)
             break;
-        CompositeNH::ComponentNHList::const_iterator it = comp_nh->begin();
-        ComponentNH *component_nh = *it;
     
-        const CompositeNH *sub_cnh = 
-            static_cast<const CompositeNH *>(component_nh->GetNH());
-        FabricCompositeData fab_data;
-        FillFabricCompositeNextHop(sub_cnh, fab_data);
-        data.set_fabric_comp(fab_data); 
+        MulticastFamilyCompositeData l2_data;
+        FillL2CompositeNextHop(comp_nh, l2_data);
+        data.set_l2_comp(l2_data);
+        break;
+    }    
+    case Composite::L2INTERFACE: {
+        comp_str << "L2 Interface Composite"  << " sub nh count: " 
+            << comp_nh->ComponentNHCount();
+        data.set_type(comp_str.str());
+        if (comp_nh->ComponentNHCount() == 0)
+            break;
+        data.set_sip(comp_nh->GetSrcAddr().to_string());
+        data.set_dip(comp_nh->GetGrpAddr().to_string());
+        std::vector<McastData> data_list;                      
+        FillComponentNextHop(comp_nh, data_list);                          
+        data.set_mc_list(data_list);
+        break;
+    }    
+    case Composite::L3INTERFACE: {
+        comp_str << "L3 Interface Composite"  << " sub nh count: " 
+            << comp_nh->ComponentNHCount();
+        data.set_type(comp_str.str());
+        if (comp_nh->ComponentNHCount() == 0)
+            break;
+        data.set_sip(comp_nh->GetSrcAddr().to_string());
+        data.set_dip(comp_nh->GetGrpAddr().to_string());
         std::vector<McastData> data_list;                      
         FillComponentNextHop(comp_nh, data_list);                          
         data.set_mc_list(data_list);
@@ -1908,4 +1970,3 @@ void NhListReq::HandleRequest() const {
     AgentNhSandesh *sand = new AgentNhSandesh(context());
     sand->DoSandesh();
 }
-

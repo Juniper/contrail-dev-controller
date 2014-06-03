@@ -381,9 +381,10 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_1) {
     EXPECT_TRUE(flood_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     EXPECT_TRUE(subnet_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
-    //Fabric COMP + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    //Fabric COMP + EVPN comp + Interface COMP
+    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
     cnh = ((CompositeNH *) flood_rt->GetActiveNextHop());
+    //Fabric COMP + Interface COMP
     EXPECT_TRUE(cnh->ComponentNHCount() == 2);
     cnh = ((CompositeNH *) subnet_rt->GetActiveNextHop());
     EXPECT_TRUE(cnh->ComponentNHCount() == 2);
@@ -404,8 +405,8 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_1) {
     EXPECT_TRUE(l2_uc_rt->GetActiveNextHop()->GetType() == NextHop::INTERFACE);
     EXPECT_TRUE(l2_flood_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
-    //Fabric COMP + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    //Fabric COMP + Interface COMP + EVPN comp NH
+    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
 
     //Move to l2_l3 mode
     ModifyForwardingModeVn("vn1", 1, "l2_l3");
@@ -426,9 +427,10 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_1) {
     EXPECT_TRUE(flood_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     EXPECT_TRUE(subnet_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
-    //Fabric COMP + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    //Fabric COMP + EVPN comp + Interface COMP
+    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
     cnh = ((CompositeNH *) flood_rt->GetActiveNextHop());
+    //Fabric COMP + Interface COMP
     EXPECT_TRUE(cnh->ComponentNHCount() == 2);
     cnh = ((CompositeNH *) subnet_rt->GetActiveNextHop());
     EXPECT_TRUE(cnh->ComponentNHCount() == 2);
@@ -496,8 +498,8 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_2) {
     EXPECT_TRUE(l2_uc_rt->GetActiveNextHop()->GetType() == NextHop::INTERFACE);
     EXPECT_TRUE(l2_flood_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
-    //Fabric COMP + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    //Fabric COMP + EVPN comp + Interface COMP
+    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
 
     //Move to l2_l3 mode
     ModifyForwardingModeVn("vn1", 1, "l2_l3");
@@ -518,8 +520,9 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_2) {
     EXPECT_TRUE(flood_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     EXPECT_TRUE(subnet_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
-    //Fabric COMP + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    //Fabric COMP + EVPN comp + Interface COMP
+    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
     cnh = ((CompositeNH *) flood_rt->GetActiveNextHop());
     EXPECT_TRUE(cnh->ComponentNHCount() == 2);
     cnh = ((CompositeNH *) subnet_rt->GetActiveNextHop());
@@ -541,8 +544,8 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_2) {
     EXPECT_TRUE(l2_uc_rt->GetActiveNextHop()->GetType() == NextHop::INTERFACE);
     EXPECT_TRUE(l2_flood_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
-    //Fabric COMP + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    //Fabric COMP + EVPN comp + Interface COMP
+    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
     client->Reset();
 
     DelIPAM("vn1"); 

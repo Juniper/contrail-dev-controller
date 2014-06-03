@@ -345,6 +345,7 @@ public:
         return vxlan_network_identifier_mode_;
     }
     bool headless_agent_mode() const {return headless_agent_mode_;}
+    bool simulate_evpn_tor() const {return simulate_evpn_tor_;}
 
     void SetInterfaceTable(InterfaceTable *table) {
          intf_table_ = table;
@@ -690,6 +691,7 @@ private:
     static Agent *singleton_;
     VxLanNetworkIdentifierMode vxlan_network_identifier_mode_;
     bool headless_agent_mode_;
+    bool simulate_evpn_tor_;
     const Interface *vhost_interface_;
     bool debug_;
     bool test_mode_;

@@ -115,27 +115,20 @@ struct McastData {
     6: optional i16 vlan_tag
 }
 
-struct FabricCompositeData {
+struct MulticastCompositeData {
     1: string type;
     2: optional string sip;
     3: optional string dip;
     4: optional list <McastData> mc_list;  //Multicast sub nh list
 }
 
-struct L2CompositeData {
+struct MulticastFamilyCompositeData {
     1: string type;
     2: optional string sip;
     3: optional string dip;
-    4: optional FabricCompositeData fabric_comp;  //Multicast sub nh list
-    5: optional list <McastData> mc_list;  //Multicast sub nh list
-}
-
-struct L3CompositeData {
-    1: string type;
-    2: optional string sip;
-    3: optional string dip;
-    4: optional FabricCompositeData fabric_comp;  //Multicast sub nh list
-    5: optional list <McastData> mc_list;  //Multicast sub nh list
+    4: optional MulticastCompositeData fabric_comp;  //Multicast sub nh list
+    5: optional MulticastCompositeData evpn_comp;  //Multicast sub nh list
+    6: optional MulticastCompositeData interface_comp;  //Multicast sub nh list
 }
 
 struct NhSandeshData {
@@ -156,9 +149,11 @@ struct NhSandeshData {
    15: optional i16 vlan_tag;         // VLAN Tag for the interface
    16: optional string tunnel_type;   // Tunnel type : MPLSoGRE, MPLSoUDP, ...
    17: optional string local_ecmp;    //Is Nexthop for local ecmp 
-   18: optional FabricCompositeData fabric_comp;  //Multicast sub nh list
-   19: optional L2CompositeData l2_comp;  //Multicast sub nh list
-   20: optional L3CompositeData l3_comp;  //Multicast sub nh list
+   18: optional MulticastCompositeData fabric_comp;  //Multicast sub nh list
+   19: optional MulticastFamilyCompositeData l2_comp;  //Multicast sub nh list
+   20: optional MulticastFamilyCompositeData l3_comp;  //Multicast sub nh list
+   21: optional MulticastCompositeData interface_comp;  //Multicast sub nh list
+   22: optional MulticastCompositeData evpn_comp;  //Multicast sub nh list
 }
 
 struct PathSandeshData {

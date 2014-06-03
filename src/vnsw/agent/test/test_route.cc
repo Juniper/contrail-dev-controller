@@ -267,12 +267,19 @@ TEST_F(RouteTest, SubnetRoute_1) {
     EXPECT_TRUE(rt1 != NULL);
     EXPECT_TRUE(rt2 != NULL);
     EXPECT_TRUE(rt3 != NULL);
-    EXPECT_TRUE(rt1->GetActiveNextHop()->GetType() == NextHop::DISCARD);
-    EXPECT_TRUE(rt2->GetActiveNextHop()->GetType() == NextHop::DISCARD);
-    EXPECT_TRUE(rt3->GetActiveNextHop()->GetType() == NextHop::DISCARD);
+    EXPECT_TRUE(rt1->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
+    EXPECT_TRUE(rt2->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
+    EXPECT_TRUE(rt3->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     EXPECT_TRUE(rt1->IsRPFInvalid());
     EXPECT_TRUE(rt2->IsRPFInvalid());
     EXPECT_TRUE(rt3->IsRPFInvalid());
+
+    const CompositeNH *cnh1 = static_cast<const CompositeNH *>(rt1->GetActiveNextHop());
+    const CompositeNH *cnh2 = static_cast<const CompositeNH *>(rt2->GetActiveNextHop());
+    const CompositeNH *cnh3 = static_cast<const CompositeNH *>(rt3->GetActiveNextHop());
+    EXPECT_TRUE(cnh1->CompositeType() == Composite::EVPN);
+    EXPECT_TRUE(cnh2->CompositeType() == Composite::EVPN);
+    EXPECT_TRUE(cnh3->CompositeType() == Composite::EVPN);
 
     //Call for sandesh
     Inet4UcRouteReq *uc_list_req = new Inet4UcRouteReq();
@@ -324,9 +331,9 @@ TEST_F(RouteTest, SubnetRoute_2) {
     EXPECT_TRUE(rt1 != NULL);
     EXPECT_TRUE(rt2 != NULL);
     EXPECT_TRUE(rt3 != NULL);
-    EXPECT_TRUE(rt1->GetActiveNextHop()->GetType() == NextHop::DISCARD);
-    EXPECT_TRUE(rt2->GetActiveNextHop()->GetType() == NextHop::DISCARD);
-    EXPECT_TRUE(rt3->GetActiveNextHop()->GetType() == NextHop::DISCARD);
+    EXPECT_TRUE(rt1->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
+    EXPECT_TRUE(rt2->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
+    EXPECT_TRUE(rt3->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     EXPECT_TRUE(rt1->IsRPFInvalid());
     EXPECT_TRUE(rt2->IsRPFInvalid());
     EXPECT_TRUE(rt3->IsRPFInvalid());
@@ -340,7 +347,7 @@ TEST_F(RouteTest, SubnetRoute_2) {
     EXPECT_TRUE(rt1 == NULL);
     EXPECT_TRUE(rt2 != NULL);
     EXPECT_TRUE(rt3 == NULL);
-    EXPECT_TRUE(rt2->GetActiveNextHop()->GetType() == NextHop::DISCARD);
+    EXPECT_TRUE(rt2->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     EXPECT_TRUE(rt2->IsRPFInvalid());
 
     AddIPAM("vn1", ipam_info_3, 1);
@@ -362,7 +369,7 @@ TEST_F(RouteTest, SubnetRoute_2) {
     EXPECT_TRUE(rt1 != NULL);
     EXPECT_TRUE(rt2 == NULL);
     EXPECT_TRUE(rt3 == NULL);
-    EXPECT_TRUE(rt1->GetActiveNextHop()->GetType() == NextHop::DISCARD);
+    EXPECT_TRUE(rt1->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
 
     client->Reset();
     DelIPAM("vn1");
