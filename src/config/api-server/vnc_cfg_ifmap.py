@@ -10,6 +10,7 @@ from gevent import ssl, monkey
 monkey.patch_all()
 import gevent
 import gevent.event
+import gevent.pool
 import sys
 import time
 from pprint import pformat
@@ -808,14 +809,18 @@ class VncCassandraClient(VncCassandraClientGen):
             return None
     # end subnet_delete
 
-    def walk(self, fn):
+    def walk(self, fn, workers=1):
         walk_results = []
-        for obj_uuid, _ in self._obj_uuid_cf.get_range():
-            obj_cols_iter = self._obj_uuid_cf.xget(obj_uuid)
-            obj_cols = dict((k, v) for k, v in obj_cols_iter)
-            result = fn(obj_uuid, obj_cols)
+
+        pool = gevent.pool.Pool(size=workers)
+        iterator = self._obj_uuid_cf.get_range()
+
+        def worker(args):
+            result = fn(*args)
             if result:
+                # [].append is thread-safe.
                 walk_results.append(result)
+        pool.map(worker, iterator)
 
         return walk_results
     # end walk
@@ -1006,12 +1011,16 @@ class VncZkClient(object):
         self._subnet_allocators = {}
     # end __init__
 
-    def create_subnet_allocator(self, subnet, first, last):
+    def create_subnet_allocator(self, subnet, subnet_alloc_list,
+                                addr_from_start):
         # TODO handle subnet resizing change, ignore for now
         if subnet not in self._subnet_allocators:
+            if addr_from_start is None:
+                addr_from_start = False
             self._subnet_allocators[subnet] = IndexAllocator(
                 self._zk_client, self._SUBNET_PATH+'/'+subnet+'/',
-                size=last-first, start_idx=first, reverse=True)
+                size=0, start_idx=0, reverse=not addr_from_start,
+                alloc_list=subnet_alloc_list)
     # end create_subnet_allocator
 
     def delete_subnet_allocator(self, subnet):
@@ -1104,9 +1113,9 @@ class VncDbClient(object):
                                   reset_config)
     # end __init__
 
-    def db_resync(self):
+    def db_resync(self, workers=1):
         # Read contents from cassandra and publish to ifmap
-        self._cassandra_db.walk(self._dbe_resync)
+        self._cassandra_db.walk(self._dbe_resync, workers=workers)
         self._db_resync_done.set()
     # end db_resync
 
@@ -1251,9 +1260,8 @@ class VncDbClient(object):
                 ok = self.set_uuid(obj_type, obj_dict, uuid.UUID(uuid_requested), False)
             else:
                 (ok, obj_uuid) = self._alloc_set_uuid(obj_type, obj_dict)
-        except ResourceExistsError:
-            return (409, '' + pformat(obj_dict['fq_name']) +
-                ' already exists with uuid: ' + obj_dict['uuid'])
+        except ResourceExistsError as e:
+            return (409, str(e))
 
         parent_type = obj_dict.get('parent_type', None)
         method_name = obj_type.replace('-', '_')
@@ -1388,8 +1396,10 @@ class VncDbClient(object):
         self._zk_db.subnet_free_req(subnet, addr)
     # end subnet_free_req
 
-    def subnet_create_allocator(self, subnet, first, last):
-        self._zk_db.create_subnet_allocator(subnet, first, last)
+    def subnet_create_allocator(self, subnet, subnet_alloc_list,
+                                addr_from_start):
+        self._zk_db.create_subnet_allocator(subnet, subnet_alloc_list,
+                                            addr_from_start)
     # end subnet_create_allocator
 
     def subnet_delete_allocator(self, subnet):

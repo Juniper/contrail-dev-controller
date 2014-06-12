@@ -26,7 +26,6 @@
 
 #include <cmn/agent_cmn.h>
 #include <cmn/agent_factory.h>
-#include <cmn/agent_stats.h>
 #include <cfg/cfg_init.h>
 #include <cfg/cfg_mirror.h>
 #include <cfg/discovery_agent.h>
@@ -46,57 +45,12 @@
 #include <kstate/kstate.h>
 #include <pkt/proto.h>
 #include <pkt/proto_handler.h>
+#include <pkt/agent_stats.h>
 #include <diag/diag.h>
 #include <vgw/cfg_vgw.h>
 #include <vgw/vgw.h>
 
 #include "test_agent_init.h"
-/****************************************************************************
- * Cleanup routines on shutdown
-****************************************************************************/
-void TestAgentInit::DeleteRoutes() {
-    Inet4UnicastAgentRouteTable *uc_rt_table =
-        agent_->GetDefaultInet4UnicastRouteTable();
-
-    uc_rt_table->DeleteReq(agent_->local_peer(), agent_->GetDefaultVrf(),
-                           agent_->GetGatewayId(), 32);
-}
-
-void TestAgentInit::DeleteNextHops() {
-    agent_->nexthop_table()->Delete(new DiscardNHKey());
-    agent_->nexthop_table()->Delete(new ResolveNHKey());
-    agent_->nexthop_table()->set_discard_nh(NULL);
-
-    NextHopKey *key = new InterfaceNHKey
-        (new PacketInterfaceKey(nil_uuid(), agent_->GetHostInterfaceName()),
-         false, InterfaceNHFlags::INET4);
-    agent_->GetNextHopTable()->Delete(key);
-}
-
-void TestAgentInit::DeleteVrfs() {
-    agent_->GetVrfTable()->DeleteStaticVrf(agent_->GetDefaultVrf());
-}
-
-void TestAgentInit::DeleteInterfaces() {
-    PacketInterface::DeleteReq(agent_->GetInterfaceTable(),
-                               agent_->GetHostInterfaceName());
-    agent_->set_vhost_interface(NULL);
-    InetInterface::DeleteReq(agent_->GetInterfaceTable(),
-                             agent_->vhost_interface_name());
-    PhysicalInterface::DeleteReq(agent_->GetInterfaceTable(),
-                                 agent_->GetIpFabricItfName());
-
-    if (!params_->isVmwareMode())
-        return;
-    PhysicalInterface::DeleteReq(agent_->GetInterfaceTable(),
-                                 params_->vmware_physical_port());
-}
-
-void TestAgentInit::Shutdown() {
-    agent_->cfg()->Shutdown();
-    agent_->diag_table()->Shutdown();
-}
-
 /****************************************************************************
  * Initialization routines
 ****************************************************************************/
@@ -131,10 +85,12 @@ void TestAgentInit::CreateModules() {
     agent_->set_uve(AgentObjectFactory::Create<AgentUve>(
                     agent_, AgentUve::kBandwidthInterval));
     agent_->set_ksync(AgentObjectFactory::Create<KSync>(agent_));
-    agent_->set_pkt(new PktModule(agent_));
+    pkt_.reset(new PktModule(agent_));
+    agent_->set_pkt(pkt_.get());
 
-    agent_->set_services(new ServicesModule(agent_,
-                                            params_->metadata_shared_secret()));
+    services_.reset(new ServicesModule(agent_,
+                                       params_->metadata_shared_secret()));
+    agent_->set_services(services_.get());
     if (vgw_enable_) {
         agent_->set_vgw(new VirtualGateway(agent_));
     }
@@ -143,11 +99,24 @@ void TestAgentInit::CreateModules() {
 }
 
 void TestAgentInit::CreateDBTables() {
-    agent_->CreateDBTables();
+    if (agent_->cfg()) {
+        agent_->cfg()->CreateDBTables(agent_->GetDB());
+    }
+
+    if (agent_->oper_db()) {
+        agent_->oper_db()->CreateDBTables(agent_->GetDB());
+    }
 }
 
-void TestAgentInit::CreateDBClients() {
-    agent_->CreateDBClients();
+void TestAgentInit::RegisterDBClients() {
+    if (agent_->cfg()) {
+        agent_->cfg()->RegisterDBClients(agent_->GetDB());
+    }
+
+    if (agent_->oper_db()) {
+        agent_->oper_db()->RegisterDBClients();
+    }
+
     if (agent_->uve()) {
         agent_->uve()->RegisterDBClients();
     }
@@ -166,7 +135,13 @@ void TestAgentInit::InitPeers() {
 }
 
 void TestAgentInit::InitModules() {
-    agent_->InitModules();
+    if (agent_->cfg()) {
+        agent_->cfg()->Init();
+    }
+
+    if (agent_->oper_db()) {
+        agent_->oper_db()->Init();
+    }
 
     if (agent_->ksync()) {
         agent_->ksync()->Init(create_vhost_);
@@ -222,12 +197,12 @@ void TestAgentInit::CreateNextHops() {
 void TestAgentInit::CreateInterfaces() {
     InterfaceTable *table = agent_->GetInterfaceTable();
 
+    PhysicalInterface::Create(table, params_->eth_port(),
+                              agent_->GetDefaultVrf());
     InetInterface::Create(table, params_->vhost_name(), InetInterface::VHOST,
                           agent_->GetDefaultVrf(), params_->vhost_addr(),
                           params_->vhost_plen(), params_->vhost_gw(),
-                          agent_->GetDefaultVrf());
-    PhysicalInterface::Create(table, params_->eth_port(),
-                              agent_->GetDefaultVrf());
+                          params_->eth_port(), agent_->GetDefaultVrf());
     agent_->InitXenLinkLocalIntf();
     InitVmwareInterface();
 
@@ -270,7 +245,8 @@ void TestAgentInit::InitDone() {
 
     // Diag module needs PktModule
     if (agent_->pkt()) {
-        agent_->set_diag_table(new DiagTable(agent_));
+        diag_table_.reset(new DiagTable(agent_));
+        agent_->set_diag_table(diag_table_.get());
     }
 
     if (create_vhost_) {
@@ -302,7 +278,7 @@ bool TestAgentInit::Run() {
     InitPeers();
     CreateModules();
     CreateDBTables();
-    CreateDBClients();
+    RegisterDBClients();
     InitModules();
     CreateVrf();
     CreateNextHops();
@@ -353,3 +329,87 @@ void TestAgentInit::Start() {
     trigger_->Set();
     return;
 }
+
+/****************************************************************************
+ * Cleanup routines on shutdown
+****************************************************************************/
+DBTableWalker *TestAgentInit::DeleteNextHops() {
+    agent_->nexthop_table()->Delete(new DiscardNHKey());
+    agent_->nexthop_table()->Delete(new ResolveNHKey());
+    agent_->nexthop_table()->set_discard_nh(NULL);
+
+    NextHopKey *key = new InterfaceNHKey
+        (new PacketInterfaceKey(nil_uuid(), agent_->GetHostInterfaceName()),
+         false, InterfaceNHFlags::INET4);
+    agent_->GetNextHopTable()->Delete(key);
+    return agent_->GetNextHopTable()->Flush();
+}
+
+DBTableWalker *TestAgentInit::DeleteInterfaces() {
+    PacketInterface::DeleteReq(agent_->GetInterfaceTable(),
+                               agent_->GetHostInterfaceName());
+    agent_->set_vhost_interface(NULL);
+    InetInterface::DeleteReq(agent_->GetInterfaceTable(),
+                             agent_->vhost_interface_name());
+    PhysicalInterface::DeleteReq(agent_->GetInterfaceTable(),
+                                 agent_->GetIpFabricItfName());
+
+    if (!params_->isVmwareMode()) {
+        PhysicalInterface::DeleteReq(agent_->GetInterfaceTable(),
+                                     params_->vmware_physical_port());
+    }
+    return agent_->GetInterfaceTable()->Flush();
+}
+
+DBTableWalker *TestAgentInit::DeleteVms() {
+    return agent_->GetVmTable()->Flush();
+}
+
+DBTableWalker *TestAgentInit::DeleteVns() {
+    return agent_->GetVnTable()->Flush();
+}
+
+DBTableWalker *TestAgentInit::DeleteVrfs() {
+    agent_->GetVrfTable()->DeleteStaticVrf(agent_->GetDefaultVrf());
+    return agent_->GetVrfTable()->Flush();
+}
+
+DBTableWalker *TestAgentInit::DeleteSecurityGroups() {
+    return agent_->GetSgTable()->Flush();
+}
+
+DBTableWalker *TestAgentInit::DeleteAcls() {
+    return agent_->GetAclTable()->Flush();
+}
+
+void TestAgentInit::Shutdown() {
+    agent_->cfg()->Shutdown();
+    agent_->diag_table()->Shutdown();
+}
+
+// Shutdown IO channel to controller+DNS and Packet interface
+void TestAgentInit::IoShutdown() {
+    agent_->controller()->DisConnect();
+
+    if (agent_->pkt())
+        agent_->pkt()->IoShutdown();
+
+    if (agent_->services())
+        agent_->services()->IoShutdown();
+}
+
+void TestAgentInit::FlushFlows() {
+    if (agent_->pkt())
+        agent_->pkt()->FlushFlows();
+}
+
+void TestAgentInit::ServicesShutdown() {
+    if (agent_->services())
+        agent_->services()->Shutdown();
+}
+
+void TestAgentInit::DeleteRoutes() {
+    if (agent_->oper_db())
+        agent_->oper_db()->DeleteRoutes();
+}
+

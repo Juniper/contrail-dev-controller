@@ -9,7 +9,6 @@
 #include <netinet/ip_icmp.h>
 
 #include "cmn/agent_cmn.h"
-#include "cmn/agent_stats.h"
 #include "oper/interface_common.h"
 #include "oper/nexthop.h"
 #include "oper/route_common.h"
@@ -21,6 +20,7 @@
 #include "pkt/flow_table.h"
 #include "pkt/pkt_types.h"
 #include "pkt/pkt_init.h"
+#include "pkt/agent_stats.h"
 
 #include "vr_types.h"
 #include "vr_defs.h"
@@ -59,10 +59,13 @@ PktHandler::PktHandler(Agent *agent, const std::string &if_name,
 }
 
 PktHandler::~PktHandler() {
-    tap_interface_->Shutdown();
 }
 
 void PktHandler::Init() {
+}
+
+void PktHandler::IoShutdown() {
+    tap_interface_->IoShutdown();
 }
 
 void PktHandler::Shutdown() {
@@ -78,7 +81,6 @@ const unsigned char *PktHandler::mac_address() {
 
 void PktHandler::CreateInterfaces(const std::string &if_name) {
     PacketInterface::Create(agent_->GetInterfaceTable(), if_name);
-    InterfaceNH::CreatePacketInterfaceNh(if_name);
 }
 
 // Send packet to tap interface
@@ -207,6 +209,7 @@ uint8_t *PktHandler::ParseAgentHdr(PktInfo *pkt_info) {
     pkt_info->agent_hdr.vrf = ntohs(agent->hdr_vrf);
     pkt_info->agent_hdr.cmd = ntohs(agent->hdr_cmd);
     pkt_info->agent_hdr.cmd_param = ntohl(agent->hdr_cmd_param);
+    pkt_info->agent_hdr.nh = ntohl(agent->hdr_nh);
     pkt += sizeof(agent_hdr);
     return pkt;
 }

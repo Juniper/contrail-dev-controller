@@ -299,12 +299,29 @@ uint32_t Interface::vrf_id() const {
     return vrf_->vrf_id();
 }
 
+void InterfaceTable::set_update_floatingip_cb(UpdateFloatingIpFn fn) {
+    update_floatingip_cb_ = fn;
+}
+
+const InterfaceTable::UpdateFloatingIpFn &InterfaceTable::update_floatingip_cb()
+    const { 
+    return update_floatingip_cb_;
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // Pkt Interface routines
 /////////////////////////////////////////////////////////////////////////////
 DBEntryBase::KeyPtr PacketInterface::GetDBRequestKey() const {
     InterfaceKey *key = new PacketInterfaceKey(uuid_, name_);
     return DBEntryBase::KeyPtr(key);
+}
+
+void PacketInterface::PostAdd() {
+    InterfaceNH::CreatePacketInterfaceNh(name_);
+}
+
+void PacketInterface::Delete() {
+    flow_key_nh_= NULL;
 }
 
 // Enqueue DBRequest to create a Pkt Interface
@@ -459,6 +476,7 @@ void InterfaceTable::AuditDhcpSnoopTable() {
         }
     }
 }
+
 /////////////////////////////////////////////////////////////////////////////
 // Sandesh routines
 /////////////////////////////////////////////////////////////////////////////
@@ -497,6 +515,9 @@ void Interface::SetItfSandeshData(ItfSandeshData &data) const {
     }
     data.set_label(label_);
     data.set_l2_label(l2_label_);
+    if (flow_key_nh()) {
+        data.set_flow_key_idx(flow_key_nh()->id());
+    }
 
     switch (type_) {
     case Interface::PHYSICAL:

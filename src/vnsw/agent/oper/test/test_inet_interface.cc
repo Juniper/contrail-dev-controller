@@ -107,8 +107,8 @@ static void AddInterface(InetInterfaceTest *t, const char *ifname,
                          const char *ip, int plen, const char *gw) {
     InetInterface::CreateReq(t->interface_table_, ifname, sub_type, vrf,
                              Ip4Address::from_string(ip), plen,
-                             Ip4Address::from_string(gw), "TEST");
-
+                             Ip4Address::from_string(gw),
+                             client->param()->eth_port(), "TEST");
 }
 
 static void DelInterface(InetInterfaceTest *t, const char *ifname,
@@ -117,17 +117,17 @@ static void DelInterface(InetInterfaceTest *t, const char *ifname,
 
     if (strcmp(vrf, VRF_VHOST) == 0){
         t->vhost_rt_table_->DeleteReq(t->peer_, vrf,
-                                      Ip4Address::from_string(gw), 32);
+                                      Ip4Address::from_string(gw), 32, NULL);
     }
 
     if (strcmp(vrf, VRF_LL) == 0){
         t->ll_rt_table_->DeleteReq(t->peer_, vrf, Ip4Address::from_string(gw),
-                                   32);
+                                   32, NULL);
     }
 
     if (strcmp(vrf, VRF_GW) == 0){
         t->gw_rt_table_->DeleteReq(t->peer_, vrf, Ip4Address::from_string(gw),
-                                   32);
+                                   32, NULL);
     }
 
 }
@@ -293,10 +293,8 @@ int main(int argc, char **argv) {
     client = TestInit(init_file, ksync_init, false, false, false);
 
     int ret = RUN_ALL_TESTS();
-
-    usleep(10000);
     client->WaitForIdle();
-    usleep(10000);
-
+    TestShutdown();
+    delete client;
     return ret;
 }

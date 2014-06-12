@@ -167,7 +167,7 @@ void MulticastHandler::DeleteSubnetRoute(const std::string &vrf_name,
 {
     MCTRACE(Log, "delete subnet route ", vrf_name, addr.to_string(), 0);
     Inet4UnicastAgentRouteTable::DeleteReq(Agent::GetInstance()->local_vm_peer(), 
-                                           vrf_name, addr, 32);
+                                           vrf_name, addr, 32, NULL);
     MulticastGroupObject *subnet_broadcast = 
         this->FindGroupObject(vrf_name, addr);
     if (subnet_broadcast != NULL) {
@@ -206,11 +206,6 @@ void MulticastHandler::DeleteVnIPAM(const VnEntry *vn)
         DeleteSubnetRoute(GetAssociatedVrfForVn(vn->GetUuid()),
                           broadcast_addr);
 
-        /*
-        Inet4UcRouteTable::DeleteReq(Agent::GetInstance()->local_vm_peer(), 
-                                     GetAssociatedVrfForVn(vn->GetUuid()), 
-                                     broadcast_addr, 32);
-                                     */
         //Erase will give the next object 
         it = ipam_list.erase(it);
     }

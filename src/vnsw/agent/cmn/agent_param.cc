@@ -335,7 +335,11 @@ void AgentParam::ParseDefaultSection() {
     if (!GetValueFromTree<string>(log_file_, "DEFAULT.log_file")) {
         log_file_ = Agent::DefaultLogFile();
     }
-    GetValueFromTree<string>(log_category_, "DEFAULT.log_category");
+
+    if (!GetValueFromTree<string>(log_category_, "DEFAULT.log_category")) {
+        log_category_ = "*";
+    }
+
     unsigned int log_local = 0, debug_logging = 0;
     if (opt_uint = tree_.get_optional<unsigned int>("DEFAULT.log_local")) {
         log_local = opt_uint.get();
@@ -375,7 +379,7 @@ void AgentParam::ParseFlows() {
 }
 
 void AgentParam::ParseHeadlessMode() {
-    if (!GetValueFromTree<bool>(headless_mode_, "DEFAULT.headless")) {
+    if (!GetValueFromTree<bool>(headless_mode_, "DEFAULT.headless_mode")) {
         headless_mode_ = false;
     }
 }
@@ -452,7 +456,7 @@ void AgentParam::ParseDefaultSectionArguments
     GetOptValue<string>(var_map, host_name_, "DEFAULT.hostname");
     GetOptValue<uint16_t>(var_map, http_server_port_, 
                           "DEFAULT.http_server_port");
-    GetOptValue<string>(var_map, log_category_, "DEFAULT.log-category");
+    GetOptValue<string>(var_map, log_category_, "DEFAULT.log_category");
     GetOptValue<string>(var_map, log_file_, "DEFAULT.log_file");
     GetOptValue<string>(var_map, log_level_, "DEFAULT.log_level");
     if (var_map.count("DEFAULT.log_local")) {
@@ -549,11 +553,11 @@ void AgentParam::InitFromArguments
 // linklocal_system_flows + kMaxOtherOpenFds files
 void AgentParam::ComputeFlowLimits() {
     if (max_vm_flows_ > 100) {
-        LOG(DEBUG, "Updating flows configuration max-vm-flows to : 100%");
+        cout << "Updating flows configuration max-vm-flows to : 100%\n";
         max_vm_flows_ = 100;
     }
     if (max_vm_flows_ < 0) {
-        LOG(DEBUG, "Updating flows configuration max-vm-flows to : 0%");
+        cout << "Updating flows configuration max-vm-flows to : 0%\n";
         max_vm_flows_ = 0;
     }
 
@@ -725,8 +729,10 @@ void AgentParam::set_test_mode(bool mode) {
 
 AgentParam::AgentParam(Agent *agent) :
         vhost_(), eth_port_(), xmpp_instance_count_(), xmpp_server_1_(),
-        xmpp_server_2_(), dns_server_1_(), dns_server_2_(), dns_port_1_(),
-        dns_port_2_(), dss_server_(), mgmt_ip_(), mode_(MODE_KVM), xen_ll_(),
+        xmpp_server_2_(), dns_server_1_(), dns_server_2_(),
+        dns_port_1_(ContrailPorts::DnsServerPort),
+        dns_port_2_(ContrailPorts::DnsServerPort),
+        dss_server_(), mgmt_ip_(), mode_(MODE_KVM), xen_ll_(),
         tunnel_type_(), metadata_shared_secret_(), max_vm_flows_(),
         linklocal_system_flows_(), linklocal_vm_flows_(),
         flow_cache_timeout_(), config_file_(), program_name_(),
