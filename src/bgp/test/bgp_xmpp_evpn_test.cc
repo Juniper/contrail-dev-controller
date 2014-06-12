@@ -2535,66 +2535,12 @@ TEST_F(BgpXmppEvpnTest2, ConnectedInstances) {
     agent_b_->SessionDown();
 }
 
-static const char *config_template_mcast_1 = "\
-<config>\
-    <bgp-router name=\'X\'>\
-        <identifier>192.168.0.1</identifier>\
-        <address>127.0.0.1</address>\
-    </bgp-router>\
-    <virtual-network name='blue'>\
-        <network-id>1</network-id>\
-    </virtual-network>\
-    <routing-instance name='blue'>\
-        <virtual-network>blue</virtual-network>\
-        <vrf-target>target:1:1</vrf-target>\
-    </routing-instance>\
-</config>\
-";
-
-//
-// Single Control Node X.
-//
-class BgpXmppEvpnMcastTest1 : public ::testing::Test {
+class BgpXmppEvpnMcastTestBase : public ::testing::Test {
 protected:
 
-    BgpXmppEvpnMcastTest1() : thread_(&evm_) {
+    BgpXmppEvpnMcastTestBase() : thread_(&evm_) {
         mx_params_.edge_replication_not_supported = true;
         bcast_mac_ = string("ff:ff:ff:ff:ff:ff,0.0.0.0/32");
-    }
-
-    virtual void SetUp() {
-        bs_x_.reset(new BgpServerTest(&evm_, "X"));
-        xs_x_ = new XmppServer(&evm_, test::XmppDocumentMock::kControlNodeJID);
-        bs_x_->session_manager()->Initialize(0);
-        LOG(DEBUG, "Created server at port: " <<
-            bs_x_->session_manager()->GetPort());
-        xs_x_->Initialize(0, false);
-        bgp_channel_manager_.reset(
-            new BgpXmppChannelManagerMock(xs_x_, bs_x_.get()));
-        thread_.Start();
-        task_util::WaitForIdle();
-    }
-
-    virtual void TearDown() {
-        xs_x_->Shutdown();
-        task_util::WaitForIdle();
-        bs_x_->Shutdown();
-        task_util::WaitForIdle();
-        bgp_channel_manager_.reset();
-        TcpServerManager::DeleteServer(xs_x_);
-        xs_x_ = NULL;
-        DeleteAgents();
-        DeleteMxs();
-        evm_.Shutdown();
-        thread_.Join();
-        task_util::WaitForIdle();
-        STLDeleteValues(&agents_);
-        STLDeleteValues(&mxs_);
-    }
-
-    void Configure() {
-        bs_x_->Configure(config_template_mcast_1);
-        task_util::WaitForIdle();
     }
 
     bool VerifyVrouterInOList(test::NetworkAgentMock *vrouter, bool is_mx,
@@ -2686,14 +2632,23 @@ protected:
         return true;
     }
 
-    void CreateAgents() {
+    void CreateAgents(bool split) {
         for (int idx = 0; idx < 2; ++idx) {
             char name[32];
             snprintf(name, sizeof(name), "agent-%d", idx);
             char local_addr[32];
             snprintf(local_addr, sizeof(local_addr), "127.0.0.1%d", idx);
+            string remote_addr;
+            int port;
+            if (split) {
+                remote_addr = (idx % 2 == 0) ? "127.0.0.1" : "127.0.0.2";
+                port = (idx % 2 == 0) ? xs_x_->GetPort() : xs_y_->GetPort();
+            } else {
+                remote_addr = "127.0.0.1";
+                port = xs_x_->GetPort();
+            }
             test::NetworkAgentMock *agent = new test::NetworkAgentMock(
-                &evm_, name, xs_x_->GetPort(), local_addr);
+                &evm_, name, port, local_addr, remote_addr);
             agents_.push_back(agent);
             TASK_UTIL_EXPECT_TRUE(agent->IsEstablished());
         }
@@ -2762,14 +2717,23 @@ protected:
         }
     }
 
-    void CreateMxs() {
+    void CreateMxs(bool split) {
         for (int idx = 0; idx < 2; ++idx) {
             char name[32];
             snprintf(name, sizeof(name), "mx-%d", idx);
             char local_addr[32];
             snprintf(local_addr, sizeof(local_addr), "127.0.0.2%d", idx);
+            string remote_addr;
+            int port;
+            if (split) {
+                remote_addr = (idx % 2 == 0) ? "127.0.0.1" : "127.0.0.2";
+                port = (idx % 2 == 0) ? xs_x_->GetPort() : xs_y_->GetPort();
+            } else {
+                remote_addr = "127.0.0.1";
+                port = xs_x_->GetPort();
+            }
             test::NetworkAgentMock *mx = new test::NetworkAgentMock(
-                &evm_, name, xs_x_->GetPort(), local_addr);
+                &evm_, name, port, local_addr, remote_addr);
             mxs_.push_back(mx);
             TASK_UTIL_EXPECT_TRUE(mx->IsEstablished());
         }
@@ -2857,18 +2821,79 @@ protected:
     EventManager evm_;
     ServerThread thread_;
     BgpServerTestPtr bs_x_;
+    BgpServerTestPtr bs_y_;
     XmppServer *xs_x_;
+    XmppServer *xs_y_;
+    boost::scoped_ptr<BgpXmppChannelManagerMock> bgp_channel_manager_x_;
+    boost::scoped_ptr<BgpXmppChannelManagerMock> bgp_channel_manager_y_;
     vector<test::NetworkAgentMock *> agents_;
     vector<test::NetworkAgentMock *> mxs_;
-    boost::scoped_ptr<BgpXmppChannelManagerMock> bgp_channel_manager_;
     test::RouteParams mx_params_;
     string bcast_mac_;
 };
 
+static const char *config_template_mcast_1 = "\
+<config>\
+    <bgp-router name=\'X\'>\
+        <identifier>192.168.0.1</identifier>\
+        <address>127.0.0.1</address>\
+    </bgp-router>\
+    <virtual-network name='blue'>\
+        <network-id>1</network-id>\
+    </virtual-network>\
+    <routing-instance name='blue'>\
+        <virtual-network>blue</virtual-network>\
+        <vrf-target>target:1:1</vrf-target>\
+    </routing-instance>\
+</config>\
+";
+
+//
+// 1 Control Node X.
+//
+class BgpXmppEvpnMcastTest1 : public BgpXmppEvpnMcastTestBase {
+protected:
+
+    virtual void SetUp() {
+        bs_x_.reset(new BgpServerTest(&evm_, "X"));
+        xs_x_ = new XmppServer(&evm_, test::XmppDocumentMock::kControlNodeJID);
+        bs_x_->session_manager()->Initialize(0);
+        LOG(DEBUG, "Created server at port: " <<
+            bs_x_->session_manager()->GetPort());
+        xs_x_->Initialize(0, false);
+        bgp_channel_manager_x_.reset(
+            new BgpXmppChannelManagerMock(xs_x_, bs_x_.get()));
+        thread_.Start();
+        task_util::WaitForIdle();
+    }
+
+    virtual void TearDown() {
+        xs_x_->Shutdown();
+        task_util::WaitForIdle();
+        bs_x_->Shutdown();
+        task_util::WaitForIdle();
+        bgp_channel_manager_x_.reset();
+        TcpServerManager::DeleteServer(xs_x_);
+        xs_x_ = NULL;
+        DeleteAgents();
+        DeleteMxs();
+        evm_.Shutdown();
+        thread_.Join();
+        task_util::WaitForIdle();
+        STLDeleteValues(&agents_);
+        STLDeleteValues(&mxs_);
+    }
+
+    void Configure() {
+        bs_x_->Configure(config_template_mcast_1);
+        task_util::WaitForIdle();
+    }
+};
+
 TEST_F(BgpXmppEvpnMcastTest1, Basic1) {
     Configure();
-    CreateAgents();
-    CreateMxs();
+    CreateAgents(false);
+    CreateMxs(false);
     SubscribeAgents();
     SubscribeMxs();
 
@@ -2885,8 +2910,8 @@ TEST_F(BgpXmppEvpnMcastTest1, Basic1) {
 
 TEST_F(BgpXmppEvpnMcastTest1, Basic2) {
     Configure();
-    CreateAgents();
-    CreateMxs();
+    CreateAgents(false);
+    CreateMxs(false);
     SubscribeAgents();
     SubscribeMxs();
 
@@ -2895,8 +2920,222 @@ TEST_F(BgpXmppEvpnMcastTest1, Basic2) {
     VerifyAllAgentsOlist();
     VerifyAllMxsOlist();
 
+    DelAllMxsBroadcastMacRoute();
+    DelAllAgentsBroadcastMacRoute();
+    UnsubscribeAgents();
+    UnsubscribeMxs();
+}
+
+TEST_F(BgpXmppEvpnMcastTest1, Basic3) {
+    Configure();
+
+    CreateAgents(false);
+    SubscribeAgents();
+    AddAllAgentsBroadcastMacRoute();
+
+    CreateMxs(false);
+    SubscribeMxs();
+    AddAllMxsBroadcastMacRoute();
+
+    VerifyAllAgentsOlist();
+    VerifyAllMxsOlist();
+
     DelAllAgentsBroadcastMacRoute();
     DelAllMxsBroadcastMacRoute();
+    UnsubscribeAgents();
+    UnsubscribeMxs();
+}
+
+TEST_F(BgpXmppEvpnMcastTest1, Basic4) {
+    Configure();
+
+    CreateMxs(false);
+    SubscribeMxs();
+    AddAllMxsBroadcastMacRoute();
+
+    CreateAgents(false);
+    SubscribeAgents();
+    AddAllAgentsBroadcastMacRoute();
+
+    VerifyAllAgentsOlist();
+    VerifyAllMxsOlist();
+
+    DelAllMxsBroadcastMacRoute();
+    DelAllAgentsBroadcastMacRoute();
+    UnsubscribeAgents();
+    UnsubscribeMxs();
+}
+
+static const char *config_template_mcast_2 = "\
+<config>\
+    <bgp-router name=\'X\'>\
+        <identifier>192.168.0.1</identifier>\
+        <address>127.0.0.1</address>\
+        <port>%d</port>\
+        <session to=\'Y\'>\
+            <address-families>\
+                <family>e-vpn</family>\
+            </address-families>\
+        </session>\
+    </bgp-router>\
+    <bgp-router name=\'Y\'>\
+        <identifier>192.168.0.2</identifier>\
+        <address>127.0.0.1</address>\
+        <port>%d</port>\
+        <session to=\'X\'>\
+            <address-families>\
+                <family>e-vpn</family>\
+            </address-families>\
+        </session>\
+    </bgp-router>\
+    <routing-instance name='blue'>\
+        <vrf-target>target:1:1</vrf-target>\
+    </routing-instance>\
+</config>\
+";
+
+//
+// 2 Control Nodes X and Y.
+//
+class BgpXmppEvpnMcastTest2 : public BgpXmppEvpnMcastTestBase {
+protected:
+
+    virtual void SetUp() {
+        bs_x_.reset(new BgpServerTest(&evm_, "X"));
+        xs_x_ = new XmppServer(&evm_, test::XmppDocumentMock::kControlNodeJID);
+        bs_x_->session_manager()->Initialize(0);
+        LOG(DEBUG, "Created server at port: " <<
+            bs_x_->session_manager()->GetPort());
+        xs_x_->Initialize(0, false);
+        bgp_channel_manager_x_.reset(
+            new BgpXmppChannelManagerMock(xs_x_, bs_x_.get()));
+
+        bs_y_.reset(new BgpServerTest(&evm_, "Y"));
+        xs_y_ = new XmppServer(&evm_, test::XmppDocumentMock::kControlNodeJID);
+        bs_y_->session_manager()->Initialize(0);
+        LOG(DEBUG, "Created server at port: " <<
+            bs_y_->session_manager()->GetPort());
+        xs_y_->Initialize(0, false);
+        bgp_channel_manager_y_.reset(
+            new BgpXmppChannelManagerMock(xs_y_, bs_y_.get()));
+
+        thread_.Start();
+        task_util::WaitForIdle();
+    }
+
+    virtual void TearDown() {
+        xs_x_->Shutdown();
+        task_util::WaitForIdle();
+        bs_x_->Shutdown();
+        task_util::WaitForIdle();
+        bgp_channel_manager_x_.reset();
+        TcpServerManager::DeleteServer(xs_x_);
+        xs_x_ = NULL;
+
+        xs_y_->Shutdown();
+        task_util::WaitForIdle();
+        bs_y_->Shutdown();
+        task_util::WaitForIdle();
+        bgp_channel_manager_y_.reset();
+        TcpServerManager::DeleteServer(xs_y_);
+        xs_y_ = NULL;
+
+        DeleteAgents();
+        DeleteMxs();
+        evm_.Shutdown();
+        thread_.Join();
+        task_util::WaitForIdle();
+        STLDeleteValues(&agents_);
+        STLDeleteValues(&mxs_);
+    }
+
+    void Configure() {
+        char config[8192];
+        snprintf(config, sizeof(config), config_template_mcast_2,
+            bs_x_->session_manager()->GetPort(),
+            bs_y_->session_manager()->GetPort());
+        bs_x_->Configure(config);
+        bs_y_->Configure(config);
+        task_util::WaitForIdle();
+    }
+};
+
+TEST_F(BgpXmppEvpnMcastTest2, Noop) {
+    Configure();
+}
+
+TEST_F(BgpXmppEvpnMcastTest2, Basic1) {
+    Configure();
+    CreateAgents(true);
+    CreateMxs(true);
+    SubscribeAgents();
+    SubscribeMxs();
+
+    AddAllAgentsBroadcastMacRoute();
+    AddAllMxsBroadcastMacRoute();
+    VerifyAllAgentsOlist();
+    VerifyAllMxsOlist();
+
+    DelAllAgentsBroadcastMacRoute();
+    DelAllMxsBroadcastMacRoute();
+    UnsubscribeAgents();
+    UnsubscribeMxs();
+}
+
+TEST_F(BgpXmppEvpnMcastTest2, Basic2) {
+    Configure();
+    CreateAgents(true);
+    CreateMxs(true);
+    SubscribeAgents();
+    SubscribeMxs();
+
+    AddAllMxsBroadcastMacRoute();
+    AddAllAgentsBroadcastMacRoute();
+    VerifyAllAgentsOlist();
+    VerifyAllMxsOlist();
+
+    DelAllMxsBroadcastMacRoute();
+    DelAllAgentsBroadcastMacRoute();
+    UnsubscribeAgents();
+    UnsubscribeMxs();
+}
+
+TEST_F(BgpXmppEvpnMcastTest2, Basic3) {
+    Configure();
+
+    CreateAgents(true);
+    SubscribeAgents();
+    AddAllAgentsBroadcastMacRoute();
+
+    CreateMxs(true);
+    SubscribeMxs();
+    AddAllMxsBroadcastMacRoute();
+
+    VerifyAllAgentsOlist();
+    VerifyAllMxsOlist();
+
+    DelAllAgentsBroadcastMacRoute();
+    DelAllMxsBroadcastMacRoute();
+    UnsubscribeAgents();
+    UnsubscribeMxs();
+}
+
+TEST_F(BgpXmppEvpnMcastTest2, Basic4) {
+    Configure();
+
+    CreateMxs(true);
+    SubscribeMxs();
+    AddAllMxsBroadcastMacRoute();
+
+    CreateAgents(true);
+    SubscribeAgents();
+    AddAllAgentsBroadcastMacRoute();
+
+    VerifyAllAgentsOlist();
+    VerifyAllMxsOlist();
+
+    DelAllMxsBroadcastMacRoute();
+    DelAllAgentsBroadcastMacRoute();
     UnsubscribeAgents();
     UnsubscribeMxs();
 }
