@@ -127,11 +127,10 @@ static const char *config_template = "\
 </config>\
 ";
 
-class BgpEvpnManagerTest : public ::testing::Test {
+class BgpEvpnManagerTest : public ::testing::TestWithParam<uint32_t> {
 protected:
     typedef boost::shared_ptr<UpdateInfo> UpdateInfoPtr;
 
-    static const uint32_t kTag = 0;
     static const int kVrfId = 1;
     static const int kVnIndex = 1;
 
@@ -216,7 +215,7 @@ protected:
         bool include_xmpp) {
         ConcurrencyScope scope("db::DBTable");
         RouteDistinguisher rd(peer->address().to_ulong(), kVrfId);
-        EvpnPrefix prefix(rd, kTag, MacAddress::kBroadcastAddress, IpAddress());
+        EvpnPrefix prefix(rd, tag_, MacAddress::kBroadcastAddress, IpAddress());
         EvpnTable::RequestKey key(prefix, peer);
         EvpnRoute *rt = dynamic_cast<EvpnRoute *>(blue_->Find(&key));
         if (rt == NULL)
@@ -257,7 +256,7 @@ protected:
     bool VerifyPeerNoUpdateInfo(PeerMock *peer) {
         ConcurrencyScope scope("db::DBTable");
         RouteDistinguisher rd(peer->address().to_ulong(), kVrfId);
-        EvpnPrefix prefix(rd, kTag, MacAddress::kBroadcastAddress, IpAddress());
+        EvpnPrefix prefix(rd, tag_, MacAddress::kBroadcastAddress, IpAddress());
         EvpnTable::RequestKey key(prefix, peer);
         EvpnRoute *rt = dynamic_cast<EvpnRoute *>(blue_->Find(&key));
         if (rt == NULL)
@@ -325,7 +324,7 @@ protected:
         uint32_t label = 0) {
         EXPECT_TRUE(peer->IsXmppPeer());
         RouteDistinguisher rd(peer->address().to_ulong(), kVrfId);
-        EvpnPrefix prefix(rd, kTag, MacAddress::kBroadcastAddress, IpAddress());
+        EvpnPrefix prefix(rd, tag_, MacAddress::kBroadcastAddress, IpAddress());
 
         BgpAttrSpec attr_spec;
         ExtCommunitySpec ext_comm;
@@ -382,7 +381,7 @@ protected:
     void DelXmppPeerBroadcastMacRoute(PeerMock *peer) {
         EXPECT_TRUE(peer->IsXmppPeer());
         RouteDistinguisher rd(peer->address().to_ulong(), kVrfId);
-        EvpnPrefix prefix(rd, kTag, MacAddress::kBroadcastAddress, IpAddress());
+        EvpnPrefix prefix(rd, tag_, MacAddress::kBroadcastAddress, IpAddress());
 
         DBRequest delReq;
         delReq.key.reset(new EvpnTable::RequestKey(prefix, peer));
@@ -400,7 +399,7 @@ protected:
     void VerifyXmppPeerInclusiveMulticastRoute(PeerMock *peer) {
         EXPECT_TRUE(peer->IsXmppPeer());
         RouteDistinguisher rd(peer->address().to_ulong(), kVrfId);
-        EvpnPrefix prefix(rd, kTag, peer->address());
+        EvpnPrefix prefix(rd, tag_, peer->address());
         EvpnTable::RequestKey key(prefix, peer);
         TASK_UTIL_EXPECT_TRUE(master_->Find(&key) != NULL);
         EvpnRoute *rt = dynamic_cast<EvpnRoute *>(master_->Find(&key));
@@ -433,7 +432,7 @@ protected:
     void VerifyXmppPeerNoInclusiveMulticastRoute(PeerMock *peer) {
         EXPECT_TRUE(peer->IsXmppPeer());
         RouteDistinguisher rd(peer->address().to_ulong(), kVrfId);
-        EvpnPrefix prefix(rd, kTag, peer->address());
+        EvpnPrefix prefix(rd, tag_, peer->address());
         EvpnTable::RequestKey key(prefix, peer);
         TASK_UTIL_EXPECT_TRUE(blue_->Find(&key) == NULL);
     }
@@ -578,7 +577,7 @@ protected:
         string rtarget_str = "target:64512:1") {
         EXPECT_FALSE(peer->IsXmppPeer());
         RouteDistinguisher rd(peer->address().to_ulong(), kVrfId);
-        EvpnPrefix prefix(rd, kTag, peer->address());
+        EvpnPrefix prefix(rd, tag_, peer->address());
 
         BgpAttrSpec attr_spec;
         ExtCommunitySpec ext_comm;
@@ -636,7 +635,7 @@ protected:
     void DelBgpPeerInclusiveMulticastRoute(PeerMock *peer) {
         EXPECT_FALSE(peer->IsXmppPeer());
         RouteDistinguisher rd(peer->address().to_ulong(), kVrfId);
-        EvpnPrefix prefix(rd, kTag, peer->address());
+        EvpnPrefix prefix(rd, tag_, peer->address());
 
         DBRequest delReq;
         delReq.key.reset(new EvpnTable::RequestKey(prefix, peer));
@@ -669,7 +668,7 @@ protected:
     void AddBgpPeerBroadcastMacRoute(PeerMock *peer) {
         EXPECT_FALSE(peer->IsXmppPeer());
         RouteDistinguisher rd(peer->address().to_ulong(), kVrfId);
-        EvpnPrefix prefix(rd, kTag, MacAddress::kBroadcastAddress, IpAddress());
+        EvpnPrefix prefix(rd, tag_, MacAddress::kBroadcastAddress, IpAddress());
 
         BgpAttrSpec attr_spec;
         ExtCommunitySpec ext_comm;
@@ -724,7 +723,7 @@ protected:
     void DelBgpPeerBroadcastMacRoute(PeerMock *peer) {
         EXPECT_FALSE(peer->IsXmppPeer());
         RouteDistinguisher rd(peer->address().to_ulong(), kVrfId);
-        EvpnPrefix prefix(rd, kTag, MacAddress::kBroadcastAddress, IpAddress());
+        EvpnPrefix prefix(rd, tag_, MacAddress::kBroadcastAddress, IpAddress());
 
         DBRequest delReq;
         delReq.key.reset(new EvpnTable::RequestKey(prefix, peer));
@@ -775,12 +774,14 @@ protected:
         }
     }
 
-    size_t GetPartitionLocalSize(int part_id) {
+    size_t GetPartitionLocalSize(uint32_t tag) {
+        int part_id = 0;
         EvpnManagerPartition *partition = blue_manager_->partitions_[part_id];
         return partition->local_mcast_node_list_.size();
     }
 
-    size_t GetPartitionRemoteSize(int part_id) {
+    size_t GetPartitionRemoteSize(uint32_t tag) {
+        int part_id = 0;
         EvpnManagerPartition *partition = blue_manager_->partitions_[part_id];
         return partition->remote_mcast_node_list_.size();
     }
@@ -794,28 +795,29 @@ protected:
     boost::scoped_ptr<RibOut> blue_ribout_;
     vector<PeerMock *> bgp_peers_;
     vector<PeerMock *> xmpp_peers_;
+    uint32_t tag_;
 };
 
 // Add Broadcast MAC routes from all XMPP peers.
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
 // Add Inclusive Multicast route from all BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, Basic1) {
+TEST_P(BgpEvpnManagerTest, Basic1) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -823,25 +825,25 @@ TEST_F(BgpEvpnManagerTest, Basic1) {
 // Add Broadcast MAC routes from all XMPP peers.
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, Basic2) {
+TEST_P(BgpEvpnManagerTest, Basic2) {
     AddAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(bgp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(bgp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
 
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(bgp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(bgp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
 }
@@ -851,29 +853,29 @@ TEST_F(BgpEvpnManagerTest, Basic2) {
 // Add Broadcast MAC routes from all BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all BGP peers.
-TEST_F(BgpEvpnManagerTest, Basic3) {
+TEST_P(BgpEvpnManagerTest, Basic3) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     VerifyAllBgpPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
     VerifyAllBgpPeersAllUpdateInfo();
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     VerifyAllBgpPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -882,29 +884,29 @@ TEST_F(BgpEvpnManagerTest, Basic3) {
 // Add Broadcast MAC routes from all XMPP peers.
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, Basic4) {
+TEST_P(BgpEvpnManagerTest, Basic4) {
     VerifyAllBgpPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllBgpPeersBgpUpdateInfo();
-    TASK_UTIL_EXPECT_EQ(bgp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(bgp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(bgp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(bgp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllXmppPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     VerifyAllBgpPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -914,28 +916,28 @@ TEST_F(BgpEvpnManagerTest, Basic4) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Add Inclusive Multicast route from even BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, AddBgpPeers1) {
+TEST_P(BgpEvpnManagerTest, AddBgpPeers1) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddOddBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() / 2 + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersOddUpdateInfo();
 
     AddEvenBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -945,28 +947,28 @@ TEST_F(BgpEvpnManagerTest, AddBgpPeers1) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Add Broadcast MAC route from even BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, AddBgpPeers2) {
+TEST_P(BgpEvpnManagerTest, AddBgpPeers2) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddOddBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() / 2 + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersOddUpdateInfo();
 
     AddEvenBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -976,28 +978,28 @@ TEST_F(BgpEvpnManagerTest, AddBgpPeers2) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Delete Inclusive Multicast route from odd BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, DelBgpPeers1) {
+TEST_P(BgpEvpnManagerTest, DelBgpPeers1) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     DelOddBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() / 2 + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersEvenUpdateInfo();
 
     DelEvenBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1007,28 +1009,28 @@ TEST_F(BgpEvpnManagerTest, DelBgpPeers1) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Delete Broadcast MAC route from odd BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, DelBgpPeers2) {
+TEST_P(BgpEvpnManagerTest, DelBgpPeers2) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     DelOddBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() / 2 + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersEvenUpdateInfo();
 
     DelEvenBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1040,15 +1042,15 @@ TEST_F(BgpEvpnManagerTest, DelBgpPeers2) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change encap in Inclusive Multicast route from all BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap1) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEncap1) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     vector<string> encap;
@@ -1058,7 +1060,7 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap1) {
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     encap.clear();
     encap.push_back("udp");
@@ -1066,14 +1068,14 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap1) {
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1085,15 +1087,15 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap1) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change encap in Inclusive Multicast route from even BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap2) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEncap2) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     vector<string> encap;
@@ -1103,7 +1105,7 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap2) {
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     encap.clear();
     encap.push_back("udp");
@@ -1111,14 +1113,14 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap2) {
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1130,17 +1132,17 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap2) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change encap in Broadcast MAC route from all BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap3) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEncap3) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     vector<string> encap;
@@ -1150,9 +1152,9 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap3) {
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     encap.clear();
     encap.push_back("udp");
@@ -1160,17 +1162,17 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap3) {
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1182,17 +1184,17 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap3) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change encap in Broadcast MAC route from even BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap4) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEncap4) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     vector<string> encap;
@@ -1202,9 +1204,9 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap4) {
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     encap.clear();
     encap.push_back("udp");
@@ -1212,17 +1214,17 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap4) {
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1234,35 +1236,35 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncap4) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change label in Inclusive Multicast route from all BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersLabel1) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersLabel1) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     ChangeAllBgpPeersLabel();
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     ChangeAllBgpPeersLabel();
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1274,35 +1276,35 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersLabel1) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change label in Inclusive Multicast route from odd BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersLabel2) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersLabel2) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     ChangeEvenBgpPeersLabel();
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     ChangeOddBgpPeersLabel();
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1314,42 +1316,42 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersLabel2) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change label in Broadcast MAC route from all BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersLabel3) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersLabel3) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     ChangeAllBgpPeersLabel();
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     ChangeAllBgpPeersLabel();
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1361,42 +1363,42 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersLabel3) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change label in Broadcast MAC route from odd BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersLabel4) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersLabel4) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     ChangeEvenBgpPeersLabel();
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     ChangeOddBgpPeersLabel();
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1408,15 +1410,15 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersLabel4) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change encap and label in Inclusive Multicast route from all BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel1) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel1) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     vector<string> encap;
@@ -1426,7 +1428,7 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel1) {
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     encap.push_back("gre");
     ChangeAllBgpPeersEncap(encap);
@@ -1434,14 +1436,14 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel1) {
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1453,15 +1455,15 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel1) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change encap and label in Inclusive Multicast route from even BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel2) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel2) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     vector<string> encap;
@@ -1471,7 +1473,7 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel2) {
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     encap.push_back("gre");
     ChangeEvenBgpPeersEncap(encap);
@@ -1479,14 +1481,14 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel2) {
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1498,17 +1500,17 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel2) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change encap and label in Broadcast MAC route from all BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel3) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel3) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     vector<string> encap;
@@ -1518,9 +1520,9 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel3) {
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     encap.push_back("gre");
     ChangeAllBgpPeersEncap(encap);
@@ -1528,17 +1530,17 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel3) {
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1550,17 +1552,17 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel3) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change encap and label in Broadcast MAC route from even BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel4) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel4) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     vector<string> encap;
@@ -1570,9 +1572,9 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel4) {
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     encap.push_back("gre");
     ChangeEvenBgpPeersEncap(encap);
@@ -1580,17 +1582,17 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel4) {
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(xmpp_peers_.size() + bgp_peers_.size(),
-        GetPartitionLocalSize(kTag));
+        GetPartitionLocalSize(tag_));
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1602,35 +1604,35 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEncapAndLabel4) {
 // Verify no UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Toggle edge rep support in Inclusive Multicast route from all BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported1) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported1) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     ChangeAllBgpPeersEdgeReplicationSupported();
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     ChangeAllBgpPeersEdgeReplicationSupported();
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1644,41 +1646,41 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported1) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Toggle edge rep support in Inclusive Multicast route from even BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported2) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported2) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     ChangeOddBgpPeersEdgeReplicationSupported();
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersEvenUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     ChangeOddBgpPeersEdgeReplicationSupported();
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     ChangeEvenBgpPeersEdgeReplicationSupported();
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersOddUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1690,35 +1692,35 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported2) {
 // Verify no UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Toggle edge rep support in Broadcast MAC route from all BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported3) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported3) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     ChangeAllBgpPeersEdgeReplicationSupported();
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     ChangeAllBgpPeersEdgeReplicationSupported();
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1732,41 +1734,41 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported3) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Toggle edge rep support in Broadcast MAC route from even BGP peers.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported4) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported4) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     ChangeOddBgpPeersEdgeReplicationSupported();
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersEvenUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     ChangeOddBgpPeersEdgeReplicationSupported();
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     ChangeEvenBgpPeersEdgeReplicationSupported();
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersOddUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1778,15 +1780,15 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersEdgeReplicationSupported4) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change address in Inclusive Multicast route from all BGP peers - del + add.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress1) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersAddress1) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     DelAllBgpPeersInclusiveMulticastRoute();
@@ -1794,21 +1796,21 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress1) {
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersInclusiveMulticastRoute();
     ChangeAllBgpPeersAddress("40.1.1");
     AddAllBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1820,15 +1822,15 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress1) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change address in Inclusive Multicast route from even BGP peers - del + add.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress2) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersAddress2) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersInclusiveMulticastRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     DelOddBgpPeersInclusiveMulticastRoute();
@@ -1836,21 +1838,21 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress2) {
     AddOddBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelEvenBgpPeersInclusiveMulticastRoute();
     ChangeEvenBgpPeersAddress("40.1.1");
     AddEvenBgpPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersInclusiveMulticastRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1862,15 +1864,15 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress2) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change address in Broadcast MAC route from all BGP peers - del + add.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress3) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersAddress3) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     DelAllBgpPeersBroadcastMacRoute();
@@ -1878,21 +1880,21 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress3) {
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersBroadcastMacRoute();
     ChangeAllBgpPeersAddress("40.1.1");
     AddAllBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1904,15 +1906,15 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress3) {
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
 // Change address in Broadcast MAC route from even BGP peers - del + add.
 // Verify UpdateInfo for Broadcast MAC routes from all XMPP peers.
-TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress4) {
+TEST_P(BgpEvpnManagerTest, ChangeBgpPeersAddress4) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
     AddAllBgpPeersBroadcastMacRoute();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersAllUpdateInfo();
 
     DelOddBgpPeersBroadcastMacRoute();
@@ -1920,21 +1922,21 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress4) {
     AddOddBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelEvenBgpPeersBroadcastMacRoute();
     ChangeEvenBgpPeersAddress("40.1.1");
     AddEvenBgpPeersBroadcastMacRoute();
     VerifyAllXmppPeersAllUpdateInfo();
     TASK_UTIL_EXPECT_EQ(bgp_peers_.size() + xmpp_peers_.size(),
-        GetPartitionRemoteSize(kTag));
+        GetPartitionRemoteSize(tag_));
 
     DelAllBgpPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoUpdateInfo();
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionRemoteSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1946,9 +1948,9 @@ TEST_F(BgpEvpnManagerTest, ChangeBgpPeersAddress4) {
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
 // Change encap in Broadcast MAC route from all XMPP peers.
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
-TEST_F(BgpEvpnManagerTest, ChangeXmppPeersEncap1) {
+TEST_P(BgpEvpnManagerTest, ChangeXmppPeersEncap1) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
 
@@ -1957,18 +1959,18 @@ TEST_F(BgpEvpnManagerTest, ChangeXmppPeersEncap1) {
     encap.push_back("udp");
     ChangeAllXmppPeersEncap(encap);
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     encap.clear();
     encap.push_back("udp");
     ChangeAllXmppPeersEncap(encap);
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -1980,9 +1982,9 @@ TEST_F(BgpEvpnManagerTest, ChangeXmppPeersEncap1) {
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
 // Change encap in Broadcast MAC route from even XMPP peers.
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
-TEST_F(BgpEvpnManagerTest, ChangeXmppPeersEncap2) {
+TEST_P(BgpEvpnManagerTest, ChangeXmppPeersEncap2) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
 
@@ -1992,16 +1994,16 @@ TEST_F(BgpEvpnManagerTest, ChangeXmppPeersEncap2) {
 
     ChangeOddXmppPeersEncap(encap);
     AddOddXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     ChangeEvenXmppPeersEncap(encap);
     AddEvenXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -2013,24 +2015,24 @@ TEST_F(BgpEvpnManagerTest, ChangeXmppPeersEncap2) {
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
 // Change label in Broadcast MAC route from all XMPP peers.
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
-TEST_F(BgpEvpnManagerTest, ChangeXmppPeersLabel1) {
+TEST_P(BgpEvpnManagerTest, ChangeXmppPeersLabel1) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
 
     ChangeAllXmppPeersLabel();
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     ChangeAllXmppPeersLabel();
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -2043,24 +2045,24 @@ TEST_F(BgpEvpnManagerTest, ChangeXmppPeersLabel1) {
 
 // Change label in Broadcast MAC route from odd XMPP peers.
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
-TEST_F(BgpEvpnManagerTest, ChangeXmppPeersLabel2) {
+TEST_P(BgpEvpnManagerTest, ChangeXmppPeersLabel2) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
 
     ChangeEvenXmppPeersLabel();
     AddEvenXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     ChangeOddXmppPeersLabel();
     AddOddXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -2072,9 +2074,9 @@ TEST_F(BgpEvpnManagerTest, ChangeXmppPeersLabel2) {
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
 // Change encap and label in Broadcast MAC route from all XMPP peers.
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
-TEST_F(BgpEvpnManagerTest, ChangeXmppPeersEncapAndLabel1) {
+TEST_P(BgpEvpnManagerTest, ChangeXmppPeersEncapAndLabel1) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
 
@@ -2083,18 +2085,18 @@ TEST_F(BgpEvpnManagerTest, ChangeXmppPeersEncapAndLabel1) {
     ChangeAllXmppPeersEncap(encap);
     ChangeAllXmppPeersLabel();
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     encap.push_back("gre");
     ChangeAllXmppPeersEncap(encap);
     ChangeAllXmppPeersLabel();
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
 
@@ -2106,9 +2108,9 @@ TEST_F(BgpEvpnManagerTest, ChangeXmppPeersEncapAndLabel1) {
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
 // Change encap and label in Broadcast MAC route from all XMPP peers.
 // Verify generated Inclusive Multicast routes in bgp.evpn.0.
-TEST_F(BgpEvpnManagerTest, ChangeXmppPeersEncapAndLabel2) {
+TEST_P(BgpEvpnManagerTest, ChangeXmppPeersEncapAndLabel2) {
     AddAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
     VerifyAllXmppPeersNoUpdateInfo();
 
@@ -2118,19 +2120,21 @@ TEST_F(BgpEvpnManagerTest, ChangeXmppPeersEncapAndLabel2) {
     ChangeOddXmppPeersEncap(encap);
     ChangeOddXmppPeersLabel();
     AddOddXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     ChangeEvenXmppPeersEncap(encap);
     ChangeEvenXmppPeersLabel();
     AddEvenXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(xmpp_peers_.size(), GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersInclusiveMulticastRoute();
 
     DelAllXmppPeersBroadcastMacRoute();
-    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(kTag));
+    TASK_UTIL_EXPECT_EQ(0, GetPartitionLocalSize(tag_));
     VerifyAllXmppPeersNoInclusiveMulticastRoute();
 }
+
+INSTANTIATE_TEST_CASE_P(Default, BgpEvpnManagerTest, ::testing::Values(0, 4094));
 
 class TestEnvironment : public ::testing::Environment {
     virtual ~TestEnvironment() { }
