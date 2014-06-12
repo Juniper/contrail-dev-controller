@@ -97,14 +97,18 @@ else:
     lib_rtarget = Dir('../../rtarget').path + '/librtarget.a'
     env.Prepend(LINKFLAGS = ['-Wl,-force_load,' + lib_rtarget])
 
-evpn_table_test = env.UnitTest('evpn_table_test', ['evpn_table_test.cc'])
-env.Alias('src/bgp/evpn:evpn_table_test', evpn_table_test)
-
 evpn_prefix_test = env.UnitTest('evpn_prefix_test', ['evpn_prefix_test.cc'])
 env.Alias('src/bgp/evpn:evpn_prefix_test', evpn_prefix_test)
 
+evpn_route_test = env.UnitTest('evpn_route_test', ['evpn_route_test.cc'])
+env.Alias('src/bgp/evpn:evpn_route_test', evpn_route_test)
+
+evpn_table_test = env.UnitTest('evpn_table_test', ['evpn_table_test.cc'])
+env.Alias('src/bgp/evpn:evpn_table_test', evpn_table_test)
+
 test_suite = [
     evpn_prefix_test,
+    evpn_route_test,
     evpn_table_test,
 ]
 

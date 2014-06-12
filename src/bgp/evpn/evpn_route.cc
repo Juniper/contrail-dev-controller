@@ -566,7 +566,11 @@ string EvpnPrefix::ToString() const {
 }
 
 string EvpnPrefix::ToXmppIdString() const {
-    string str = mac_addr_.ToString() + "," + ip_address_.to_string() + "/" +
+    string str;
+    if (tag_ != 0)
+        str += integerToString(tag_) + "-";
+    str += mac_addr_.ToString();
+    str += "," + ip_address_.to_string() + "/" +
         integerToString(ip_address_length());
     return str;
 }

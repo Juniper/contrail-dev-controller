@@ -220,6 +220,7 @@ void BgpXmppMessage::AddEnetReach(const BgpRoute *route, const RibOutAttr *roatt
     EvpnRoute *evpn_route =
         static_cast<EvpnRoute *>(const_cast<BgpRoute *>(route));
     const EvpnPrefix &evpn_prefix = evpn_route->GetPrefix();
+    item.entry.nlri.ethernet_tag = evpn_prefix.tag();
     item.entry.nlri.mac = evpn_prefix.mac_addr().ToString();
     item.entry.nlri.address = evpn_prefix.ip_address().to_string() + "/" +
         integerToString(evpn_prefix.ip_address_length());

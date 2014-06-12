@@ -1132,7 +1132,9 @@ void BgpXmppChannel::ProcessEnetItem(string vrf_name,
     } else {
         rd = RouteDistinguisher::null_rd;
     }
-    EvpnPrefix evpn_prefix(rd, mac_addr, ip_prefix.ip4_addr());
+
+    uint32_t ethernet_tag = item.entry.nlri.ethernet_tag;
+    EvpnPrefix evpn_prefix(rd, ethernet_tag, mac_addr, ip_prefix.ip4_addr());
 
     EvpnTable::RequestData::NextHops nexthops;
     DBRequest req;
