@@ -111,6 +111,7 @@ void Layer2AgentRouteTable::AddLayer2BroadcastRoute(const string &vrf_name,
                                                     const string &vn_name,
                                                     const Ip4Address &dip,
                                                     const Ip4Address &sip,
+                                                    uint32_t label,
                                                     int vxlan_id) {
     DBRequest req;
     req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
@@ -119,7 +120,8 @@ void Layer2AgentRouteTable::AddLayer2BroadcastRoute(const string &vrf_name,
         new Layer2RouteKey(Agent::GetInstance()->local_vm_peer(), vrf_name);
     req.key.reset(key);
 
-    MulticastRoute *data = new MulticastRoute(sip, dip, vn_name, vrf_name, vxlan_id,
+    MulticastRoute *data = new MulticastRoute(sip, dip, vn_name, vrf_name,
+                                              label, vxlan_id,
                                               Composite::L2COMP); 
     req.data.reset(data);
     Layer2TableEnqueue(Agent::GetInstance(), vrf_name, &req);
