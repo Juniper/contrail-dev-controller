@@ -1186,13 +1186,84 @@ bool VlanNhFind(int id, uint16_t tag) {
     return (nh != NULL);
 }
 
+bool Layer2TunnelRouteAdd(const Peer *peer, const string &vm_vrf, 
+                          TunnelType::TypeBmap bmap, const Ip4Address &server_ip,
+                          uint32_t label, struct ether_addr &remote_vm_mac,
+                          const Ip4Address &vm_addr, uint8_t plen) {
+    ControllerVmRoute *data =
+        ControllerVmRoute::MakeControllerVmRoute(peer,
+                              Agent::GetInstance()->GetDefaultVrf(),
+                              Agent::GetInstance()->GetRouterId(),
+                              vm_vrf, server_ip,
+                              bmap, label, "", SecurityGroupList());
+    Layer2AgentRouteTable::AddRemoteVmRouteReq(peer, vm_vrf, remote_vm_mac,
+                                        vm_addr, plen, data);
+    return true;
+}
+
+bool Layer2TunnelRouteAdd(const Peer *peer, const string &vm_vrf, 
+                          TunnelType::TypeBmap bmap, const char *server_ip,
+                          uint32_t label, struct ether_addr &remote_vm_mac,
+                          const char *vm_addr, uint8_t plen) {
+    boost::system::error_code ec;
+    Layer2TunnelRouteAdd(peer, vm_vrf, bmap,
+                        Ip4Address::from_string(server_ip, ec), label, remote_vm_mac,
+                         Ip4Address::from_string(vm_addr, ec), plen);
+}
+
+bool EcmpTunnelRouteAdd(const Peer *peer, const string &vrf_name, const Ip4Address &vm_ip,
+                       uint8_t plen, std::vector<ComponentNHData> &comp_nh_list,
+                       bool local_ecmp, const string &vn_name, const SecurityGroupList &sg) {
+    DBRequest nh_req(DBRequest::DB_ENTRY_ADD_CHANGE);
+    nh_req.key.reset(new CompositeNHKey(vrf_name, vm_ip, plen,
+                                        false));
+
+    CompositeNH::CreateCompositeNH(vrf_name, vm_ip, false, comp_nh_list);
+    nh_req.data.reset(new CompositeNHData(comp_nh_list,
+                                          CompositeNHData::REPLACE));
+    ControllerEcmpRoute *data =
+        new ControllerEcmpRoute(peer, vm_ip, plen, vn_name, -1, false, vrf_name, sg, nh_req);
+    Inet4UnicastAgentRouteTable::AddRemoteVmRouteReq(peer, vrf_name, vm_ip, plen, data);
+}
+
+bool Inet4TunnelRouteAdd(const Peer *peer, const string &vm_vrf, const Ip4Address &vm_addr,
+                         uint8_t plen, const Ip4Address &server_ip, TunnelType::TypeBmap bmap,
+                         uint32_t label, const string &dest_vn_name,
+                         const SecurityGroupList &sg) {
+    ControllerVmRoute *data =
+        ControllerVmRoute::MakeControllerVmRoute(peer,
+                              Agent::GetInstance()->GetDefaultVrf(),
+                              Agent::GetInstance()->GetRouterId(),
+                              vm_vrf, server_ip,
+                              bmap, label, dest_vn_name, sg);
+    Inet4UnicastAgentRouteTable::AddRemoteVmRouteReq(peer, vm_vrf,
+                                        vm_addr, plen, data);
+    return true;
+}
+
+bool Inet4TunnelRouteAdd(const Peer *peer, const string &vm_vrf, char *vm_addr,
+                         uint8_t plen, char *server_ip, TunnelType::TypeBmap bmap,
+                         uint32_t label, const string &dest_vn_name,
+                         const SecurityGroupList &sg) {
+    boost::system::error_code ec;
+    Inet4TunnelRouteAdd(peer, vm_vrf, Ip4Address::from_string(vm_addr, ec), plen,
+                        Ip4Address::from_string(server_ip, ec), bmap, label,
+                        dest_vn_name, sg);
+}
+
 bool TunnelRouteAdd(const char *server, const char *vmip, const char *vm_vrf,
                     int label, const char *vn, TunnelType::TypeBmap bmap) {
     boost::system::error_code ec;
+    ControllerVmRoute *data =
+        ControllerVmRoute::MakeControllerVmRoute(bgp_peer_,
+                              Agent::GetInstance()->GetDefaultVrf(),
+                              Agent::GetInstance()->GetRouterId(),
+                              vm_vrf, Ip4Address::from_string(server, ec),
+                              TunnelType::AllType(), label, "",
+                              SecurityGroupList());
     Inet4UnicastAgentRouteTable::AddRemoteVmRouteReq(bgp_peer_, vm_vrf,
                                         Ip4Address::from_string(vmip, ec),
-                                        32, Ip4Address::from_string(server, ec),
-                                        bmap, label, vn, SecurityGroupList());
+                                        32, data);
     return true;
 }
 
@@ -1404,8 +1475,10 @@ void DelOperDBAcl(int id) {
     Agent::GetInstance()->GetAclTable()->Enqueue(&req);
 }
 
-void AddSg(const char *name, int id) {
-    AddNode("security-group", name, id);
+void AddSg(const char *name, int id, int sg_id) {
+    char buff[128];
+    sprintf(buff, "<security-group-id>%d</security-group-id>", sg_id);
+    AddNode("security-group", name, id, buff);
 }
 
 void AddFloatingIp(const char *name, int id, const char *addr) {
@@ -1647,6 +1720,19 @@ void send_icmp(int fd, uint8_t smac, uint8_t dmac, uint32_t sip, uint32_t dip) {
     usleep(3*1000);
 }
 
+uint32_t GetFlowKeyNH(int id) {
+    uuid intf_uuid = MakeUuid(id);
+    VmInterfaceKey key(AgentKey::RESYNC, intf_uuid, "");
+    const Interface *intf = static_cast<const Interface *>(
+            Agent::GetInstance()->GetInterfaceTable()->FindActiveEntry(&key));
+    return intf->flow_key_nh()->id();
+}
+
+uint32_t GetFlowkeyNH(char *name) {
+    InetInterface *intf = InetInterfaceGet(name);
+    return intf->flow_key_nh()->id();
+}
+
 bool FlowStats(FlowIp *input, int id, uint32_t bytes, uint32_t pkts) {
     VrfEntry *vrf;
     VrfKey vrf_key(input[id].vrf);
@@ -1657,7 +1743,7 @@ bool FlowStats(FlowIp *input, int id, uint32_t bytes, uint32_t pkts) {
 
     key.src_port = 0;
     key.dst_port = 0;
-    key.vrf = vrf->vrf_id();
+    key.nh = id;
     key.src.ipv4 = input[id].sip;
     key.dst.ipv4 = input[id].dip;
     key.protocol = IPPROTO_ICMP; 
@@ -1972,7 +2058,7 @@ void FlushFlowTable() {
 }
 
 bool FlowDelete(const string &vrf_name, const char *sip, const char *dip,
-                uint8_t proto, uint16_t sport, uint16_t dport) {
+                uint8_t proto, uint16_t sport, uint16_t dport, int nh_id) {
 
     FlowTable *table = Agent::GetInstance()->pkt()->flow_table();
     VrfEntry *vrf = Agent::GetInstance()->GetVrfTable()->FindVrfFromName(vrf_name);
@@ -1981,7 +2067,7 @@ bool FlowDelete(const string &vrf_name, const char *sip, const char *dip,
         return false;
 
     FlowKey key;
-    key.vrf = vrf->vrf_id();
+    key.nh = nh_id;
     key.src.ipv4 = ntohl(inet_addr(sip));
     key.dst.ipv4 = ntohl(inet_addr(dip));
     key.src_port = sport;
@@ -1997,10 +2083,10 @@ bool FlowDelete(const string &vrf_name, const char *sip, const char *dip,
 }
 
 bool FlowFail(int vrf_id, const char *sip, const char *dip,
-              uint8_t proto, uint16_t sport, uint16_t dport) {
+              uint8_t proto, uint16_t sport, uint16_t dport, int nh_id) {
     FlowTable *table = Agent::GetInstance()->pkt()->flow_table();
     FlowKey key;
-    key.vrf = vrf_id;
+    key.nh = nh_id;
     key.src.ipv4 = ntohl(inet_addr(sip));
     key.dst.ipv4 = ntohl(inet_addr(dip));
     key.src_port = sport;
@@ -2018,21 +2104,22 @@ bool FlowFail(int vrf_id, const char *sip, const char *dip,
 }
 
 bool FlowFail(const string &vrf_name, const char *sip, const char *dip,
-              uint8_t proto, uint16_t sport, uint16_t dport) {
+              uint8_t proto, uint16_t sport, uint16_t dport, int nh_id) {
 
     VrfEntry *vrf = Agent::GetInstance()->GetVrfTable()->FindVrfFromName(vrf_name);
     EXPECT_TRUE(vrf != NULL);
     if (vrf == NULL)
         return false;
 
-    return FlowFail(vrf->vrf_id(), sip, dip, proto, sport, dport);
+    return FlowFail(vrf->vrf_id(), sip, dip, proto, sport, dport, nh_id);
 }
 
 bool FlowGetNat(const string &vrf_name, const char *sip, const char *dip,
                 uint8_t proto, uint16_t sport, uint16_t dport,
                 std::string svn, std::string dvn, uint32_t hash_id,
                 const char *nat_vrf, const char *nat_sip,
-                const char *nat_dip, uint16_t nat_sport, int16_t nat_dport) {
+                const char *nat_dip, uint16_t nat_sport, int16_t nat_dport,
+                int nh_id, int nat_nh_id) {
 
     FlowTable *table = Agent::GetInstance()->pkt()->flow_table();
     VrfEntry *vrf = Agent::GetInstance()->GetVrfTable()->FindVrfFromName(vrf_name);
@@ -2041,7 +2128,7 @@ bool FlowGetNat(const string &vrf_name, const char *sip, const char *dip,
         return false;
 
     FlowKey key;
-    key.vrf = vrf->vrf_id();
+    key.nh = nh_id;
     key.src.ipv4 = ntohl(inet_addr(sip));
     key.dst.ipv4 = ntohl(inet_addr(dip));
     key.src_port = sport;
@@ -2081,7 +2168,7 @@ bool FlowGetNat(const string &vrf_name, const char *sip, const char *dip,
     if (vrf == NULL)
         return false;
 
-    key.vrf = vrf->vrf_id();
+    key.nh = nat_nh_id;
     key.src.ipv4 = ntohl(inet_addr(nat_dip));
     key.dst.ipv4 = ntohl(inet_addr(nat_sip));
     key.src_port = nat_dport;
@@ -2108,10 +2195,10 @@ bool FlowGetNat(const string &vrf_name, const char *sip, const char *dip,
 }
 
 FlowEntry* FlowGet(int vrf_id, std::string sip, std::string dip, uint8_t proto,
-                   uint16_t sport, uint16_t dport) {
+                   uint16_t sport, uint16_t dport, int nh_id) {
     FlowTable *table = Agent::GetInstance()->pkt()->flow_table();
     FlowKey key;
-    key.vrf = vrf_id;
+    key.nh = nh_id;
     key.src.ipv4 = ntohl(inet_addr(sip.c_str()));
     key.dst.ipv4 = ntohl(inet_addr(dip.c_str()));
     key.src_port = sport;
@@ -2124,10 +2211,10 @@ FlowEntry* FlowGet(int vrf_id, std::string sip, std::string dip, uint8_t proto,
 
 bool FlowGet(int vrf_id, const char *sip, const char *dip, uint8_t proto, 
              uint16_t sport, uint16_t dport, bool short_flow, int hash_id,
-             int reverse_hash_id) {
+             int reverse_hash_id, int nh_id, int reverse_nh_id) {
     FlowTable *table = Agent::GetInstance()->pkt()->flow_table();
     FlowKey key;
-    key.vrf = vrf_id;
+    key.nh = nh_id;
     key.src.ipv4 = ntohl(inet_addr(sip));
     key.dst.ipv4 = ntohl(inet_addr(dip));
     key.src_port = sport;
@@ -2160,8 +2247,7 @@ bool FlowGet(int vrf_id, const char *sip, const char *dip, uint8_t proto,
         if (entry->is_flags_set(FlowEntry::NatFlow) == true)
             ret = false;
 
-        EXPECT_EQ(entry->key().vrf, rev->key().vrf);
-        if (entry->key().vrf != rev->key().vrf)
+        if (reverse_nh_id != rev->key().nh)
             ret = false;
 
         EXPECT_EQ(entry->key().protocol, rev->key().protocol);
@@ -2197,7 +2283,8 @@ bool FlowGet(int vrf_id, const char *sip, const char *dip, uint8_t proto,
 
 bool FlowGet(const string &vrf_name, const char *sip, const char *dip,
              uint8_t proto, uint16_t sport, uint16_t dport, bool rflow,
-             std::string svn, std::string dvn, uint32_t hash_id, int rflow_vrf) {
+             std::string svn, std::string dvn, uint32_t hash_id, int nh_id,
+             int rev_nh_id) {
 
     FlowTable *table = Agent::GetInstance()->pkt()->flow_table();
     VrfEntry *vrf = Agent::GetInstance()->GetVrfTable()->FindVrfFromName(vrf_name);
@@ -2206,7 +2293,7 @@ bool FlowGet(const string &vrf_name, const char *sip, const char *dip,
         return false;
 
     FlowKey key;
-    key.vrf = vrf->vrf_id();
+    key.nh = nh_id;
     key.src.ipv4 = ntohl(inet_addr(sip));
     key.dst.ipv4 = ntohl(inet_addr(dip));
     key.src_port = sport;
@@ -2237,6 +2324,7 @@ bool FlowGet(const string &vrf_name, const char *sip, const char *dip,
     }
 
     if (rflow) {
+        key.nh = rev_nh_id;
         key.src.ipv4 = ntohl(inet_addr(dip));
         key.dst.ipv4 = ntohl(inet_addr(sip));
         key.src_port = dport;
@@ -2260,12 +2348,11 @@ bool FlowGet(const string &vrf_name, const char *sip, const char *dip,
         if (entry->is_flags_set(FlowEntry::NatFlow) == true)
             ret = false;
 
-        if (rflow_vrf == -1) {
-            EXPECT_EQ(entry->key().vrf, rev->key().vrf);
-            if (entry->key().vrf != rev->key().vrf)
-                ret = false;
+        if (rev_nh_id != -1) {
+            EXPECT_EQ(rev_nh_id, rev->key().nh);
+            ret = false;
         } else {
-            EXPECT_EQ((uint32_t) rflow_vrf, rev->key().vrf);
+            //EXPECT_EQ((uint32_t) rflow_vrf, rev->key().vrf);
         }
 
         EXPECT_EQ(entry->key().protocol, rev->key().protocol);
@@ -2288,11 +2375,11 @@ bool FlowGet(const string &vrf_name, const char *sip, const char *dip,
 bool FlowGet(const string &vrf_name, const char *sip, const char *dip,
              uint8_t proto, uint16_t sport, uint16_t dport, bool rflow,
              std::string svn, std::string dvn, uint32_t hash_id, bool fwd, 
-             bool nat, int rflow_vrf) {
+             bool nat, int nh_id, int rev_nh_id) {
 
     bool flow_fwd = false;
     bool ret = FlowGet(vrf_name, sip, dip, proto, sport, dport, rflow,
-                    svn, dvn, hash_id, rflow_vrf);
+                       svn, dvn, hash_id, nh_id, rev_nh_id);
 
     FlowTable *table = Agent::GetInstance()->pkt()->flow_table();
     VrfEntry *vrf = Agent::GetInstance()->GetVrfTable()->FindVrfFromName(vrf_name);
@@ -2301,7 +2388,7 @@ bool FlowGet(const string &vrf_name, const char *sip, const char *dip,
         return false;
 
     FlowKey key;
-    key.vrf = vrf->vrf_id();
+    key.nh = nh_id;
     key.src.ipv4 = ntohl(inet_addr(sip));
     key.dst.ipv4 = ntohl(inet_addr(dip));
     key.src_port = sport;
@@ -2332,7 +2419,7 @@ bool FlowGet(const string &vrf_name, const char *sip, const char *dip,
 
 bool FlowStatsMatch(const string &vrf_name, const char *sip,
                     const char *dip, uint8_t proto, uint16_t sport, 
-                    uint16_t dport, uint64_t pkts, uint64_t bytes) {
+                    uint16_t dport, uint64_t pkts, uint64_t bytes, int nh_id) {
 
     FlowTable *table = Agent::GetInstance()->pkt()->flow_table();
     VrfEntry *vrf = Agent::GetInstance()->GetVrfTable()->FindVrfFromName(vrf_name);
@@ -2341,7 +2428,7 @@ bool FlowStatsMatch(const string &vrf_name, const char *sip,
         return false;
 
     FlowKey key;
-    key.vrf = vrf->vrf_id();
+    key.nh = nh_id;
     key.src.ipv4 = ntohl(inet_addr(sip));
     key.dst.ipv4 = ntohl(inet_addr(dip));
     key.src_port = sport;
@@ -2364,7 +2451,8 @@ bool FlowStatsMatch(const string &vrf_name, const char *sip,
 bool FindFlow(const string &vrf_name, const char *sip, const char *dip,
               uint8_t proto, uint16_t sport, uint16_t dport, bool nat,
               const string &nat_vrf_name, const char *nat_sip,
-              const char *nat_dip, uint16_t nat_sport, uint16_t nat_dport) {
+              const char *nat_dip, uint16_t nat_sport, uint16_t nat_dport,
+              int fwd_nh_id, int rev_nh_id) {
 
     FlowTable *table = Agent::GetInstance()->pkt()->flow_table();
     VrfEntry *vrf = Agent::GetInstance()->GetVrfTable()->FindVrfFromName(vrf_name);
@@ -2373,7 +2461,7 @@ bool FindFlow(const string &vrf_name, const char *sip, const char *dip,
         return false;
 
     FlowKey key;
-    key.vrf = vrf->vrf_id();
+    key.nh = fwd_nh_id;
     key.src.ipv4 = ntohl(inet_addr(sip));
     key.dst.ipv4 = ntohl(inet_addr(dip));
     key.src_port = sport;
@@ -2399,7 +2487,7 @@ bool FindFlow(const string &vrf_name, const char *sip, const char *dip,
     if (nat_vrf == NULL)
         return false;
 
-    key.vrf = nat_vrf->vrf_id();
+    key.nh = rev_nh_id;
     key.src.ipv4 = ntohl(inet_addr(nat_dip));
     key.dst.ipv4 = ntohl(inet_addr(nat_sip));
     key.src_port = nat_dport;
@@ -2491,7 +2579,8 @@ PktGen *TxMplsPacketUtil(int ifindex, const char *out_sip,
                             int proto, int hash_idx) {
     PktGen *pkt = new PktGen();
     pkt->AddEthHdr("00:00:00:00:00:01", "00:00:00:00:00:02", 0x800);
-    pkt->AddAgentHdr(ifindex, AGENT_TRAP_FLOW_MISS, hash_idx, MplsToVrfId(label));
+    pkt->AddAgentHdr(ifindex, AGENT_TRAP_FLOW_MISS, hash_idx, MplsToVrfId(label),
+                     label);
     pkt->AddEthHdr("00:00:00:00:00:01", "00:00:00:00:00:02", 0x800);
     pkt->AddIpHdr(out_sip, out_dip, IPPROTO_GRE);
     pkt->AddGreHdr();
@@ -2514,7 +2603,8 @@ PktGen *TxMplsTcpPacketUtil(int ifindex, const char *out_sip,
                             int sport, int dport, int hash_idx) {
     PktGen *pkt = new PktGen();
     pkt->AddEthHdr("00:00:00:00:00:01", "00:00:00:00:00:02", 0x800);
-    pkt->AddAgentHdr(ifindex, AGENT_TRAP_FLOW_MISS, hash_idx, MplsToVrfId(label));
+    pkt->AddAgentHdr(ifindex, AGENT_TRAP_FLOW_MISS, hash_idx, MplsToVrfId(label),
+                     label);
     pkt->AddEthHdr("00:00:00:00:00:01", "00:00:00:00:00:02", 0x800);
     pkt->AddIpHdr(out_sip, out_dip, IPPROTO_GRE);
     pkt->AddGreHdr();
@@ -2656,9 +2746,12 @@ bool VmPortServiceVlanCount(int id, unsigned int count) {
 BgpPeer *CreateBgpPeer(const Ip4Address &addr, std::string name) {
     XmppChannelMock *xmpp_channel = new XmppChannelMock();
     AgentXmppChannel *channel;
+    Agent::GetInstance()->SetXmppServer(addr.to_string(), 0);
     channel = new AgentXmppChannel(Agent::GetInstance(), xmpp_channel, 
                                    "XMPP Server", "", 0);
-    return (new BgpPeer(addr, name, channel, -1));
+    AgentXmppChannel::HandleAgentXmppClientChannelEvent(channel, xmps::READY);
+    client->WaitForIdle();
+    return channel->bgp_peer_id();
 }
 
 void DeleteBgpPeer(Peer *peer) {
@@ -2666,10 +2759,19 @@ void DeleteBgpPeer(Peer *peer) {
     if (!bgp_peer)
         return;
 
-    if (bgp_peer->GetBgpXmppPeer()) {
-        if (bgp_peer->GetBgpXmppPeer()->GetXmppChannel())
-            delete bgp_peer->GetBgpXmppPeer()->GetXmppChannel();
-
-    }
-    delete bgp_peer;
+    AgentXmppChannel *channel = bgp_peer->GetBgpXmppPeer();
+    AgentXmppChannel::HandleAgentXmppClientChannelEvent(channel, xmps::NOT_READY);
+    client->WaitForIdle();
+    TaskScheduler::GetInstance()->Stop();
+    Agent::GetInstance()->controller()->unicast_cleanup_timer().cleanup_timer_->
+        Fire();
+    Agent::GetInstance()->controller()->multicast_cleanup_timer().cleanup_timer_->
+        Fire();
+    Agent::GetInstance()->controller()->config_cleanup_timer().cleanup_timer_->
+        Fire();
+    TaskScheduler::GetInstance()->Start();
+    client->WaitForIdle();
+    Agent::GetInstance()->controller()->Cleanup();
+    client->WaitForIdle();
+    delete channel;
 }

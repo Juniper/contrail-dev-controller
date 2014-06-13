@@ -57,6 +57,7 @@ from cfgm_common.uve.vrouter.ttypes import VRLog
 from sandesh_common.vns.ttypes import Module, NodeType
 from sandesh_common.vns.constants import ModuleNames, Module2NodeType, NodeTypeNames, INSTANCE_ID_DEFAULT
 from provision_defaults import Provision
+from vnc_quota import *
 from gen.resource_xsd import *
 from gen.resource_common import *
 from gen.resource_server import *
@@ -175,6 +176,8 @@ class VncApiServer(VncApiServerGen):
         # Type overrides from generated code
         self._resource_classes['floating-ip'] = vnc_cfg_types.FloatingIpServer
         self._resource_classes['instance-ip'] = vnc_cfg_types.InstanceIpServer
+        self._resource_classes['logical-router'] = vnc_cfg_types.LogicalRouterServer
+        self._resource_classes['security-group'] = vnc_cfg_types.SecurityGroupServer
         self._resource_classes['virtual-machine-interface'] = \
             vnc_cfg_types.VirtualMachineInterfaceServer
         self._resource_classes['virtual-network'] = \
@@ -194,6 +197,8 @@ class VncApiServer(VncApiServerGen):
         self._resource_classes[
             'floating-ip-pool'].generate_default_instance = False
         self._resource_classes['instance-ip'].generate_default_instance = False
+        self._resource_classes['logical-router'].generate_default_instance = False
+        self._resource_classes['security-group'].generate_default_instance = False
         self._resource_classes[
             'virtual-machine'].generate_default_instance = False
         self._resource_classes[
@@ -283,6 +288,8 @@ class VncApiServer(VncApiServerGen):
 
         # Address Management interface
         addr_mgmt = vnc_addr_mgmt.AddrMgmt(self)
+        vnc_cfg_types.LogicalRouterServer.addr_mgmt = addr_mgmt
+        vnc_cfg_types.SecurityGroupServer.addr_mgmt = addr_mgmt
         vnc_cfg_types.VirtualMachineInterfaceServer.addr_mgmt = addr_mgmt
         vnc_cfg_types.FloatingIpServer.addr_mgmt = addr_mgmt
         vnc_cfg_types.InstanceIpServer.addr_mgmt = addr_mgmt
@@ -577,6 +584,7 @@ class VncApiServer(VncApiServerGen):
             'rabbit_user': 'guest',
             'rabbit_password': 'guest',
             'rabbit_vhost': None,
+            'resync_workers': 10,
         }
         # ssl options
         secopts = {
@@ -610,6 +618,13 @@ class VncApiServer(VncApiServerGen):
                     secopts.update(dict(config.items("SECURITY")))
             if 'KEYSTONE' in config.sections():
                 ksopts.update(dict(config.items("KEYSTONE")))
+            if 'QUOTA' in config.sections():
+                for (k, v) in config.items("QUOTA"):
+                    try:
+                        if str(k) != 'admin_token':
+                            QuotaHelper.default_quota[str(k)] = int(v)
+                    except ValueError:
+                        pass
 
         # Override with CLI options
         # Don't surpress add_help here so it will handle -h
@@ -709,6 +724,9 @@ class VncApiServer(VncApiServerGen):
         parser.add_argument(
             "--rabbit_password",
             help="password for rabbit")
+        parser.add_argument(
+            "--resync_workers",
+            help="Number of workers used to rsync VNC from database")
         self._args = parser.parse_args(remaining_argv)
         self._args.config_sections = config
         if type(self._args.cassandra_server_list) is str:
@@ -818,7 +836,7 @@ class VncApiServer(VncApiServerGen):
         self._create_singleton_entry(
             RoutingInstance('__link_local__', link_local_vn))
 
-        self._db_conn.db_resync()
+        self._db_conn.db_resync(workers=self._args.resync_workers)
         try:
             self._extension_mgrs['resync'].map(self._resync_projects)
         except Exception as e:

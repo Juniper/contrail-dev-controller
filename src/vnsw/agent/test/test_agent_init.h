@@ -26,12 +26,15 @@ public:
     bool Run();
     void Start();
     void Shutdown();
+    void IoShutdown();
+    void FlushFlows();
+    void ServicesShutdown();
 
     void InitLogging();
     void InitCollector();
     void CreateModules();
     void CreateDBTables();
-    void CreateDBClients();
+    void RegisterDBClients();
     void InitModules();
     void InitPeers();
     void CreateVrf();
@@ -44,9 +47,13 @@ public:
               const boost::program_options::variables_map &var_map);
     void InitVmwareInterface();
     void DeleteRoutes();
-    void DeleteNextHops();
-    void DeleteVrfs();
-    void DeleteInterfaces();
+    DBTableWalker *DeleteInterfaces();
+    DBTableWalker *DeleteVms();
+    DBTableWalker *DeleteVns();
+    DBTableWalker *DeleteVrfs();
+    DBTableWalker *DeleteNextHops();
+    DBTableWalker *DeleteSecurityGroups();
+    DBTableWalker *DeleteAcls();
 
     bool ksync_enable() const { return ksync_enable_; }
     bool services_enable() const { return services_enable_; }
@@ -76,6 +83,9 @@ private:
     bool router_id_dep_enable_;
 
     std::auto_ptr<TaskTrigger> trigger_;
+    std::auto_ptr<DiagTable> diag_table_;
+    std::auto_ptr<ServicesModule> services_;
+    std::auto_ptr<PktModule> pkt_;
     DISALLOW_COPY_AND_ASSIGN(TestAgentInit);
 };
 

@@ -32,7 +32,6 @@
 #include "sandesh/sandesh_trace.h"
 #include "sandesh/common/vns_types.h"
 #include "sandesh/common/vns_constants.h"
-#include <services/dns_proto.h>
 #include <filter/acl.h>
 
 using namespace std;
@@ -390,11 +389,15 @@ bool InterfaceTable::IFNodeToReq(IFMapNode *node, DBRequest &req) {
                     (adj_node->GetObject());
             assert(sg_cfg);
             autogen::IdPermsType id_perms = sg_cfg->id_perms();
-            uuid sg_uuid = nil_uuid();
-            CfgUuidSet(id_perms.uuid.uuid_mslong, id_perms.uuid.uuid_lslong,
-                       sg_uuid);
-            data->sg_list_.list_.insert
-                (VmInterface::SecurityGroupEntry(sg_uuid));
+            uint32_t sg_id = SgTable::kInvalidSgId;
+            stringToInteger(sg_cfg->id(), sg_id);
+            if (sg_id != SgTable::kInvalidSgId) {
+                uuid sg_uuid = nil_uuid();
+                CfgUuidSet(id_perms.uuid.uuid_mslong, id_perms.uuid.uuid_lslong,
+                           sg_uuid);
+                data->sg_list_.list_.insert
+                    (VmInterface::SecurityGroupEntry(sg_uuid));
+            }
         }
 
         if (adj_node->table() == agent_->cfg()->cfg_vn_table()) {
@@ -1011,6 +1014,11 @@ bool VmInterface::IsActive() {
         return false;
     }
 
+    if (vlan_id_ != VmInterface::kInvalidVlanId) {
+       return true;
+    }
+
+
     if (os_index_ == kInvalidIndex)
         return false;
 
@@ -1201,8 +1209,17 @@ void VmInterface::UpdateL2NextHop(bool old_l2_active) {
 
 void VmInterface::UpdateL3NextHop(bool old_ipv4_active) {
     if (L3Activated(old_ipv4_active)) {
+        InterfaceTable *table = static_cast<InterfaceTable *>(get_table());
+        Agent *agent = table->agent();
+
         struct ether_addr *addrp = ether_aton(vm_mac_.c_str());
         InterfaceNH::CreateL3VmInterfaceNH(GetUuid(), *addrp, vrf_->GetName());
+        InterfaceNHKey key(new VmInterfaceKey(AgentKey::ADD_DEL_CHANGE,
+                                              GetUuid(), ""), true,
+                                              InterfaceNHFlags::INET4);
+        flow_key_nh_ = static_cast<const NextHop *>(
+                agent->nexthop_table()->FindActiveEntry(&key));
+        assert(flow_key_nh_);
     }
 }
 
@@ -1215,6 +1232,7 @@ void VmInterface::DeleteL2NextHop(bool old_l2_active) {
 void VmInterface::DeleteL3NextHop(bool old_l3_active) {
     if (L3Deactivated(old_l3_active)) {
         InterfaceNH::DeleteL3InterfaceNH(GetUuid());
+        flow_key_nh_ = NULL;
     }
 }
 
@@ -1658,11 +1676,8 @@ void VmInterface::FloatingIp::Activate(VmInterface *interface,
     }
 
     interface->AddRoute(vrf_.get()->GetName(), floating_ip_, 32, true);
-    Agent *agent = static_cast<InterfaceTable *>
-        (interface->get_table())->agent();
-    DnsProto *dns = agent->GetDnsProto();
-    if (dns) {
-        dns->UpdateDnsEntry(interface, vn_.get(), floating_ip_, false);
+    if (table->update_floatingip_cb().empty() == false) {
+        table->update_floatingip_cb()(interface, vn_.get(), floating_ip_, false);
     }
 
     installed_ = true;
@@ -1673,11 +1688,10 @@ void VmInterface::FloatingIp::DeActivate(VmInterface *interface) const {
         return;
 
     interface->DeleteRoute(vrf_.get()->GetName(), floating_ip_, 32);
-    Agent *agent = static_cast<InterfaceTable *>
-        (interface->get_table())->agent();
-    DnsProto *dns = agent->GetDnsProto();
-    if (dns) {
-        dns->UpdateDnsEntry(interface, vn_.get(), floating_ip_, true);
+    InterfaceTable *table =
+        static_cast<InterfaceTable *>(interface->get_table());
+    if (table->update_floatingip_cb().empty() == false) {
+        table->update_floatingip_cb()(interface, vn_.get(), floating_ip_, true);
     }
     installed_ = false;
 }
@@ -1932,7 +1946,7 @@ uint32_t VmInterface::GetServiceVlanLabel(const VrfEntry *vrf) const {
         }
         it++;
     }
-    return label_;
+    return 0;
 }
 
 uint32_t VmInterface::GetServiceVlanTag(const VrfEntry *vrf) const {

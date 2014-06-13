@@ -71,7 +71,8 @@ public:
         assert(flow0);
         flow1 = VmInterfaceGet(input[1].intf_id);
         assert(flow1);
-        peer_ = CreateBgpPeer(Ip4Address(1), "BGP Peer 1");
+        // TODO Create xmpp channel and attach bgp peer
+        //peer_ = CreateBgpPeer(Ip4Address(1), "BGP Peer 1");
     }
 
     void FlowTearDown() {
@@ -82,7 +83,8 @@ public:
         client->PortDelNotifyWait(2);
         EXPECT_FALSE(VmPortFind(input, 0));
         EXPECT_FALSE(VmPortFind(input, 1));
-        DeleteBgpPeer(peer_);
+        // TODO Create xmpp channel and attach bgp peer
+        // DeleteBgpPeer(peer_);
     }
 
     void AclAdd(int id) {
@@ -101,9 +103,8 @@ public:
         boost::system::error_code ec;
         Ip4Address addr = Ip4Address::from_string(remote_vm, ec);
         Ip4Address gw = Ip4Address::from_string(serv, ec);
-        Agent::GetInstance()->GetDefaultInet4UnicastRouteTable()->AddRemoteVmRouteReq
-            (peer_, vrf, addr, 32, gw, TunnelType::AllType(), label, vn,
-             SecurityGroupList());
+        Inet4TunnelRouteAdd(peer_, vrf, addr, 32, gw, TunnelType::AllType(), label, vn,
+                            SecurityGroupList());
         client->WaitForIdle(2);
         WAIT_FOR(1000, 500, (RouteFind(vrf, addr, 32) == true));
     }
@@ -113,7 +114,7 @@ public:
         Ip4Address addr = Ip4Address::from_string(ip, ec);
         Agent::Agent::GetInstance()->
             GetDefaultInet4UnicastRouteTable()->DeleteReq(peer_, 
-                vrf, addr, 32);
+                vrf, addr, 32, NULL);
         client->WaitForIdle();
         WAIT_FOR(1000, 1, (RouteFind(vrf, addr, 32) == false));
     }
@@ -788,11 +789,119 @@ TEST_F(UveVnUveTest, VnVrfAssoDisassoc_1) {
     vnut->ClearCount();
 }
 
+//Only for Xen platform, LinkLocal Vn will be created in agent. Verify
+//interface add/delete for LinkLocal Vn results in correct VN UVEs to be sent
+TEST_F(UveVnUveTest, LinkLocalVn_Xen) {
+    struct PortInfo input[] = {
+        {"vnet1", 1, "1.1.1.1", "00:00:00:01:01:01", 1, 1},
+    };
+
+    Agent *agent = Agent::GetInstance();
+    VnUveTableTest *vnut = static_cast<VnUveTableTest *>
+        (agent->uve()->vn_uve_table());
+    //Add VN
+    util_.VnAddByName(agent->GetLinkLocalVnName().c_str(), input[0].vn_id);
+    EXPECT_EQ(1U, vnut->send_count());
+
+    UveVirtualNetworkAgent *uve1 =  vnut->VnUveObject(agent->GetLinkLocalVnName());
+    EXPECT_EQ(0U, uve1->get_virtualmachine_list().size());
+    EXPECT_EQ(0U, uve1->get_interface_list().size());
+
+    // Nova Port add message
+    util_.NovaPortAdd(input);
+
+    // Config Port add
+    util_.ConfigPortAdd(input);
+
+    //Verify that the port is inactive
+    EXPECT_TRUE(VmPortInactive(input, 0));
+
+    //Since the port is inactive, verify that no additional VN UVE send has
+    //happened since port addition
+    EXPECT_EQ(1U, vnut->send_count());
+
+    //Add necessary objects and links to make vm-intf active
+    util_.VmAdd(input[0].vm_id);
+    util_.VrfAdd(input[0].vn_id);
+    AddLink("virtual-network", agent->GetLinkLocalVnName().c_str(), "routing-instance", "vrf1");
+    client->WaitForIdle();
+    AddLink("virtual-network", agent->GetLinkLocalVnName().c_str(), "virtual-machine-interface", "vnet1");
+    client->WaitForIdle();
+    AddLink("virtual-machine", "vm1", "virtual-machine-interface", "vnet1");
+    client->WaitForIdle();
+    AddVmPortVrf("vnet1", "", 0);
+    client->WaitForIdle();
+    AddInstanceIp("instance0", input[0].vm_id, input[0].addr);
+    AddLink("virtual-machine-interface", input[0].name,
+            "instance-ip", "instance0");
+    client->WaitForIdle();
+    AddLink("virtual-machine-interface-routing-instance", "vnet1",
+            "routing-instance", "vrf1");
+    client->WaitForIdle();
+    AddLink("virtual-machine-interface-routing-instance", "vnet1",
+            "virtual-machine-interface", "vnet1");
+    client->WaitForIdle();
+    EXPECT_TRUE(VmPortActive(input, 0));
+
+    //Verify UVE
+    EXPECT_EQ(2U, vnut->send_count());
+    EXPECT_EQ(1U, uve1->get_virtualmachine_list().size());
+    EXPECT_EQ(1U, uve1->get_interface_list().size()); 
+
+    // Delete virtual-machine-interface to vrf link attribute
+    DelLink("virtual-machine-interface-routing-instance", "vnet1",
+            "routing-instance", "vrf1");
+    DelLink("virtual-machine-interface-routing-instance", "vnet1",
+            "virtual-machine-interface", "vnet1");
+    client->WaitForIdle();
+
+    //Verify that the port is inactive
+    EXPECT_TRUE(VmPortInactive(input, 0));
+
+    //Verify UVE
+    EXPECT_EQ(3U, vnut->send_count());
+    EXPECT_EQ(0U, uve1->get_virtualmachine_list().size());
+    EXPECT_EQ(0U, uve1->get_interface_list().size());
+
+    //Delete VN
+    DelLink("virtual-network", agent->GetLinkLocalVnName().c_str(),
+            "virtual-machine-interface", "vnet1");
+    DelLink("virtual-network", agent->GetLinkLocalVnName().c_str(),
+            "routing-instance", "vrf1");
+    util_.VnDeleteByName(agent->GetLinkLocalVnName().c_str(), input[0].vn_id);
+
+    //Verify UVE
+    EXPECT_EQ(1U, vnut->delete_count());
+
+    //other cleanup
+    DelLink("virtual-machine", "vm1", "virtual-machine-interface", "vnet1");
+    client->WaitForIdle();
+    EXPECT_TRUE(VmPortInactive(input, 0));
+
+    DelNode("virtual-machine-interface-routing-instance", "vnet1");
+    DelNode("virtual-machine", "vm1");
+    DelNode("routing-instance", "vrf1");
+    DelNode("virtual-network", "vn1");
+    DelNode("virtual-machine-interface", "vnet1");
+    DelInstanceIp("instance0");
+    client->WaitForIdle();
+    IntfCfgDel(input, 0);
+    client->WaitForIdle();
+
+    //clear counters at the end of test case
+    client->Reset();
+    vnut->ClearCount();
+}
+
 int main(int argc, char **argv) {
     GETUSERARGS();
     client = TestInit(init_file, ksync_init);
     UveVnUveTest::TestSetup();
 
     usleep(10000);
-    return RUN_ALL_TESTS();
+    int ret = RUN_ALL_TESTS();
+    client->WaitForIdle();
+    TestShutdown();
+    delete client;
+    return ret;
 }

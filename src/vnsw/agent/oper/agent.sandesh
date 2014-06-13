@@ -61,6 +61,7 @@ struct ItfSandeshData {
    28: string l2_active;
    30: string vm_project_uuid; // project uuid of the vm to which the interface belongs
    31: string admin_state;
+   32: i32 flow_key_idx;
 }
 
 struct VnIpamData {
@@ -154,6 +155,7 @@ struct NhSandeshData {
    20: optional MulticastFamilyCompositeData l3_comp;  //Multicast sub nh list
    21: optional MulticastCompositeData interface_comp;  //Multicast sub nh list
    22: optional MulticastCompositeData evpn_comp;  //Multicast sub nh list
+   23: i32 nh_index;
 }
 
 struct PathSandeshData {
@@ -888,3 +890,9 @@ systemlog sandesh AgentRouteWalkerLog {
 systemlog sandesh GlobalVrouterLog {
     1: string message;
 }
+
+trace sandesh OperSg {
+    1: string message;
+    2: string uuid;
+}
+

@@ -21,13 +21,10 @@ public:
     }
 
     static DBTableBase *CreateTable(DB *db, const std::string &name);
-    static void AddRemoteVmRouteReq(const Peer *peer,
-                                    const string &vrf_name,
-                                    TunnelType::TypeBmap bmap,
-                                    const Ip4Address &server_ip,
-                                    uint32_t label,
+    static void AddRemoteVmRouteReq(const Peer *peer, const string &vm_vrf,
                                     struct ether_addr &mac,
-                                    const Ip4Address &vm_ip, uint32_t plen);
+                                    const Ip4Address &vm_addr,uint8_t plen,
+                                    AgentRouteData *data);
     static void AddLocalVmRouteReq(const Peer *peer,
                                    const uuid &intf_uuid,
                                    const string &vn_name, 
@@ -53,7 +50,8 @@ public:
                                         uint32_t label,
                                         int vxlan_id);
     static void DeleteReq(const Peer *peer, const string &vrf_name,
-                          const struct ether_addr &mac);
+                          const struct ether_addr &mac,
+                          AgentRouteData *data);
     static void Delete(const Peer *peer, const string &vrf_name,
                        const struct ether_addr &mac);
     static void DeleteBroadcastReq(const string &vrf_name);
@@ -124,7 +122,7 @@ public:
 
     virtual AgentRoute *AllocRouteEntry(VrfEntry *vrf, bool is_multicast) const;
     virtual Agent::RouteTableType GetRouteTableType() { return Agent::LAYER2; }
-    virtual string ToString() const { return ("Layer2RouteKey"); }
+    virtual string ToString() const;
     const struct ether_addr &GetMac() const { return dmac_;}
 
 private:

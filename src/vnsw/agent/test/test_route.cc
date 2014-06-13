@@ -122,6 +122,7 @@ protected:
         VrfDelReq(vrf_name_.c_str());
         client->WaitForIdle();
         WAIT_FOR(100, 100, (VrfFind(vrf_name_.c_str()) != true));
+        WAIT_FOR(1000, 1000, agent_->GetVrfTable()->Size() == 1);
     }
 
     void AddHostRoute(Ip4Address addr) {
@@ -142,10 +143,9 @@ protected:
                           const Ip4Address &server_ip, uint32_t plen, 
                           uint32_t label, TunnelType::TypeBmap bmap) {
         //Passing vn name as vrf name itself
-        Agent::GetInstance()->GetDefaultInet4UnicastRouteTable()->
-            AddRemoteVmRouteReq(NULL, vrf_name_, remote_vm_ip, plen, server_ip, 
-                                bmap, label, vrf_name_,
-                                SecurityGroupList());
+        Inet4TunnelRouteAdd(NULL, vrf_name_, remote_vm_ip, plen, server_ip, 
+                            bmap, label, vrf_name_,
+                            SecurityGroupList());
         client->WaitForIdle();
     }
 
@@ -185,7 +185,7 @@ protected:
     void DeleteRoute(const Peer *peer, const std::string &vrf_name, 
                      const Ip4Address &addr, uint32_t plen) {
         Agent::GetInstance()->GetDefaultInet4UnicastRouteTable()->DeleteReq(peer, vrf_name,
-                                                                            addr, plen);
+                                                                            addr, plen, NULL);
         client->WaitForIdle();
         while (RouteFind(vrf_name, addr, plen) == true) {
             client->WaitForIdle();
@@ -459,6 +459,8 @@ TEST_F(RouteTest, RemoteVmRoute_2) {
     DeleteRoute(Agent::GetInstance()->local_peer(), Agent::GetInstance()->GetDefaultVrf(), 
                 server1_ip_, 32);
     EXPECT_FALSE(RouteFind(Agent::GetInstance()->GetDefaultVrf(), server1_ip_, 32));
+    DelArp(server1_ip_.to_string().c_str(), "0a:0b:0c:0d:0e:0f", eth_name_.c_str());
+    client->WaitForIdle();
 }
 
 TEST_F(RouteTest, RemoteVmRoute_3) {
@@ -514,6 +516,8 @@ TEST_F(RouteTest, RemoteVmRoute_4) {
     DeleteRoute(Agent::GetInstance()->local_peer(), Agent::GetInstance()->GetDefaultVrf(), 
                 server1_ip_, 24);
     EXPECT_FALSE(RouteFind(Agent::GetInstance()->GetDefaultVrf(), server1_ip_, 24));
+    DelArp(server1_ip_.to_string().c_str(), "0a:0b:0c:0d:0e:0f", eth_name_.c_str());
+    client->WaitForIdle();
 }
 
 TEST_F(RouteTest, RemoteVmRoute_5) {
@@ -820,6 +824,10 @@ TEST_F(RouteTest, FindLPM) {
     client->WaitForIdle();
     DeleteRoute(Agent::GetInstance()->local_peer(), Agent::GetInstance()->GetDefaultVrf(), lpm5_ip_, 32);
     client->WaitForIdle();
+    DelArp(lpm4_ip_.to_string().c_str(), "0d:0b:0c:0d:0e:0f", eth_name_.c_str());
+    client->WaitForIdle();
+    DelArp(lpm5_ip_.to_string().c_str(), "0d:0b:0c:0d:0e:0a", eth_name_.c_str());
+    client->WaitForIdle();
 }
 
 TEST_F(RouteTest, VlanNHRoute_1) {
@@ -950,7 +958,7 @@ TEST_F(RouteTest, RouteToDeletedNH_1) {
                                                     false);
     client->WaitForIdle();
 
-    Inet4UnicastAgentRouteTable::DeleteReq(peer, "vrf1", addr, 32);
+    Inet4UnicastAgentRouteTable::DeleteReq(peer, "vrf1", addr, 32, NULL);
     client->WaitForIdle();
 
     nh->ClearState(Agent::GetInstance()->GetNextHopTable(), id);
@@ -1005,8 +1013,8 @@ TEST_F(RouteTest, RouteToDeletedNH_2) {
                                                     false);
     client->WaitForIdle();
 
-    Inet4UnicastAgentRouteTable::DeleteReq(peer1, "vrf1", addr, 32);
-    Inet4UnicastAgentRouteTable::DeleteReq(peer2, "vrf1", addr, 32);
+    Inet4UnicastAgentRouteTable::DeleteReq(peer1, "vrf1", addr, 32, NULL);
+    Inet4UnicastAgentRouteTable::DeleteReq(peer2, "vrf1", addr, 32, NULL);
     client->WaitForIdle();
 
     delete peer1;
@@ -1050,7 +1058,7 @@ TEST_F(RouteTest, RouteToInactiveInterface) {
                                                     false);
     client->WaitForIdle();
 
-    Inet4UnicastAgentRouteTable::DeleteReq(peer, "vrf1", addr, 32);
+    Inet4UnicastAgentRouteTable::DeleteReq(peer, "vrf1", addr, 32, NULL);
     client->WaitForIdle();
     delete peer;
 
@@ -1101,6 +1109,8 @@ TEST_F(RouteTest, RtEntryReuse) {
     DeleteRoute(Agent::GetInstance()->local_peer(), Agent::GetInstance()->GetDefaultVrf(), lpm3_ip_, 24);
     client->WaitForIdle();
 
+    DelArp(lpm4_ip_.to_string().c_str(), "0d:0b:0c:0d:0e:0f", eth_name_.c_str());
+    client->WaitForIdle();
     Agent::GetInstance()->GetDefaultInet4UnicastRouteTable()->Unregister(id);
 }
 
@@ -1109,7 +1119,7 @@ TEST_F(RouteTest, ScaleRouteAddDel_1) {
     for (i = 0; i < 1000; i++) {
         AddRemoteVmRoute(remote_vm_ip_, fabric_gw_ip_, 32, 
                          MplsTable::kStartLabel);
-        Inet4UnicastAgentRouteTable::DeleteReq(NULL, "vrf1", remote_vm_ip_, 32);
+        Inet4UnicastAgentRouteTable::DeleteReq(NULL, "vrf1", remote_vm_ip_, 32, NULL);
     }
     client->WaitForIdle(5);
     EXPECT_FALSE(RouteFind(vrf_name_, remote_vm_ip_, 32));
@@ -1124,7 +1134,7 @@ TEST_F(RouteTest, ScaleRouteAddDel_2) {
         if (i != (repeat - 1)) {
             Inet4UnicastAgentRouteTable::DeleteReq
                 (Agent::GetInstance()->local_peer(), "vrf1", remote_vm_ip_,
-                 32);
+                 32, NULL);
         }
     }
     client->WaitForIdle(5);
@@ -1161,9 +1171,8 @@ TEST_F(RouteTest, ScaleRouteAddDel_3) {
 
     SecurityGroupList sg_id_list;
     for (uint32_t i = 0; i < 1000; i++) {    
-        Agent::GetInstance()->GetDefaultInet4UnicastRouteTable()->
-            AddRemoteVmRouteReq(NULL, vrf_name_, remote_vm_ip_, 32, 
-                                comp_nh_list, -1, "test", sg_id_list);
+        EcmpTunnelRouteAdd(NULL, vrf_name_, remote_vm_ip_, 32, 
+                           comp_nh_list, -1, "test", sg_id_list);
         DeleteRoute(NULL, vrf_name_, remote_vm_ip_, 32);
     }
     client->WaitForIdle(5);
@@ -1192,9 +1201,8 @@ TEST_F(RouteTest, ScaleRouteAddDel_4) {
     SecurityGroupList sg_id_list;
     sg_id_list.push_back(1);
     for (uint32_t i = 0; i < repeat; i++) {    
-        Agent::GetInstance()->GetDefaultInet4UnicastRouteTable()->
-            AddRemoteVmRouteReq(NULL, vrf_name_, remote_vm_ip_, 32, 
-                                comp_nh_list, -1, "test", sg_id_list);
+        EcmpTunnelRouteAdd(NULL, vrf_name_, remote_vm_ip_, 32, 
+                           comp_nh_list, -1, "test", sg_id_list);
         if (i != (repeat - 1)) {
             DeleteRoute(NULL, vrf_name_, remote_vm_ip_, 32);
         }
@@ -1226,5 +1234,9 @@ int main(int argc, char *argv[]) {
     RouteTest::SetTunnelType(TunnelType::MPLS_GRE);
     int ret = RUN_ALL_TESTS();
     RouteTest::SetTunnelType(TunnelType::MPLS_UDP);
-    return ret + RUN_ALL_TESTS();
+    ret += RUN_ALL_TESTS();
+    client->WaitForIdle();
+    TestShutdown();
+    delete client;
+    return ret;
 }
