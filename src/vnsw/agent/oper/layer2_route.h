@@ -91,6 +91,7 @@ public:
         return Agent::LAYER2;
     }
     virtual bool DBEntrySandesh(Sandesh *sresp, bool stale) const;
+    virtual uint32_t GetActiveLabel() const;
 
     const struct ether_addr &GetAddress() const {return mac_;}
     const Ip4Address &GetVmIpAddress() const {return vm_ip_;}

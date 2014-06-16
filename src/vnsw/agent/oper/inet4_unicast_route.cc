@@ -706,6 +706,8 @@ Inet4UnicastAgentRouteTable::AddRemoteVmRouteReq(const Peer *peer,
                                                  const Ip4Address &vm_addr,
                                                  uint8_t plen,
                                                  AgentRouteData *data) {
+    if (Agent::GetInstance()->simulate_evpn_tor())
+        return;
     DBRequest req(DBRequest::DB_ENTRY_ADD_CHANGE);
     req.key.reset(new Inet4UnicastRouteKey(peer, vm_vrf, vm_addr, plen));
     req.data.reset(data);

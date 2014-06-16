@@ -438,7 +438,7 @@ AgentRoute *AgentRouteTable::FindActiveEntry(const AgentRouteKey *key) {
     return entry;
 }
 
-uint32_t AgentRoute::GetMplsLabel() const { 
+uint32_t AgentRoute::GetActiveLabel() const { 
     return GetActivePath()->label();
 };
 

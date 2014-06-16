@@ -14,6 +14,14 @@ AgentRouteEncap::AgentRouteEncap(Agent *agent) :
     AgentRouteWalker(agent, AgentRouteWalker::ALL) {
 }
 
+bool AgentRouteEncap::VrfWalkNotify(DBTablePartBase *partition,
+                                      DBEntryBase *e) {
+    VrfEntry *vrf = static_cast<VrfEntry *>(e);
+    AgentRouteWalker::VrfWalkNotify(partition, e);
+    MulticastHandler::GetInstance()->EncapChanged(vrf->GetName());
+    return true;
+}
+
 bool AgentRouteEncap::RouteWalkNotify(DBTablePartBase *partition,
                                       DBEntryBase *e) {
     AgentRoute *route = static_cast<AgentRoute *>(e);

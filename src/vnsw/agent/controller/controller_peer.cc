@@ -1456,6 +1456,10 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
             nh.tunnel_encapsulation_list.tunnel_encapsulation.push_back("udp");
         }
     } else {
+        if (route->is_multicast()) {
+            //TODO remove this and try modifying routes getactivelabel
+            nh.label = route->GetActivePath()->GetActiveLabel(); 
+        }
         nh.tunnel_encapsulation_list.tunnel_encapsulation.push_back("vxlan");
     }
 

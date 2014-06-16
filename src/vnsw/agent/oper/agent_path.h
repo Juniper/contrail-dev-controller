@@ -245,7 +245,7 @@ private:
     string vn_name_;
     string vrf_name_;
     uint32_t label_;
-    int vxlan_id_;
+    uint32_t vxlan_id_;
     COMPOSITETYPE comp_type_;
     DISALLOW_COPY_AND_ASSIGN(MulticastRoute);
 };

@@ -242,16 +242,16 @@ void RouteExport::MulticastNotify(AgentXmppChannel *bgp_xmpp_peer,
             ((state->evpn_exported_ == false) || (state->force_chg_ == true))) {
             state->evpn_exported_ = 
                 AgentXmppChannel::ControllerSendEvpnRoute(bgp_xmpp_peer, route,
-                                                          route->dest_vn_name(),
-                                                          route->GetMplsLabel(),
-                                                          TunnelType::AllType(),
-                                                          associate);
+                                                       route->dest_vn_name(),
+                                                       route->GetActiveLabel(),
+                                                       TunnelType::AllType(),
+                                                       associate);
             CONTROLLER_TRACE(RouteExport, bgp_xmpp_peer->GetBgpPeerName(),
                              route->vrf()->GetName(), 
                              route->ToString(), associate, 
-                             route->GetMplsLabel());
+                             route->GetActiveLabel());
 
-            state->label_ = route->GetMplsLabel();
+            state->label_ = route->GetActiveLabel();
             state->vn_ = route->dest_vn_name();
         }
 

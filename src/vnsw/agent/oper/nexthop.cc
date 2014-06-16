@@ -1302,7 +1302,7 @@ bool CompositeNH::GetOldNH(const CompositeNHData *data,
         if (!list_nh) {
             continue;
         }
-        if (list_nh == nh && it->label_ == rt->GetMplsLabel()) {
+        if (list_nh == nh && it->label_ == rt->GetActiveLabel()) {
             found = true;
             break;
         }
@@ -1310,7 +1310,7 @@ bool CompositeNH::GetOldNH(const CompositeNHData *data,
 
     if (found) {
         component_nh.nh_ = list_nh;
-        component_nh.label_ = rt->GetMplsLabel();
+        component_nh.label_ = rt->GetActiveLabel();
         return true;
     } 
 

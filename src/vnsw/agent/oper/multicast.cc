@@ -345,20 +345,18 @@ void MulticastHandler::HandleVxLanChange(const VnEntry *vn) {
     int new_vxlan_id = 0;
     int vn_vxlan_id = vn->GetVxLanId();
 
-    //if (TunnelType::ComputeType(TunnelType::AllType()) ==
-    //    TunnelType::VXLAN) {
-        if (vn_vxlan_id != 0) {
-            new_vxlan_id = vn_vxlan_id;
-        }
-    //}
+    if (vn_vxlan_id != 0) {
+        new_vxlan_id = vn_vxlan_id;
+    }
 
-    if (new_vxlan_id != obj->vxlan_id()) {
+    if ((new_vxlan_id != 0) && (new_vxlan_id != obj->vxlan_id())) {
         boost::system::error_code ec;
         Ip4Address broadcast =  IpAddress::from_string("255.255.255.255",
                                                        ec).to_v4();
         obj->set_vxlan_id(new_vxlan_id);
         AddL2BroadcastRoute(vn->GetVrf()->GetName(), vn->GetName(), 
                             broadcast, obj->evpn_mpls_label(), new_vxlan_id);
+        //EncapChanged(vn->GetVrf()->GetName());
     }
 }
 
@@ -649,7 +647,9 @@ void MulticastHandler::CreateEvpnCompositeNH(const string &vrf_name) {
     Ip4Address broadcast =  IpAddress::from_string("255.255.255.255",
                                                    ec).to_v4();
     MulticastGroupObject *obj = FindGroupObject(vrf_name, broadcast);
-    AddChangeEvpnCompositeNH(vrf_name, obj);
+    if (obj) {
+        AddChangeEvpnCompositeNH(vrf_name, obj);
+    }
 }
 
 void MulticastHandler::AddChangeEvpnCompositeNH(const string &vrf_name,
@@ -665,15 +665,21 @@ void MulticastHandler::AddChangeEvpnCompositeNH(const string &vrf_name,
     Ip4Address src_addr =  IpAddress::from_string("0.0.0.0",
                                                   ec).to_v4();
 
-    if (obj) {
-        for (TunnelOlist::const_iterator it = obj->GetEvpnOlist().begin();
-             it != obj->GetEvpnOlist().end(); it++) {
-            ComponentNHData nh_data(it->label_,
-                                    Agent::GetInstance()->GetDefaultVrf(),
-                                    Agent::GetInstance()->GetRouterId(),
-                                    it->daddr_, false, it->tunnel_bmap_);
-            data.push_back(nh_data);
-        }
+    //TunnelType::Type type =
+    //    TunnelType::ComputeType(TunnelType::AllType());
+    for (TunnelOlist::const_iterator it = obj->GetEvpnOlist().begin();
+         it != obj->GetEvpnOlist().end(); it++) {
+        uint32_t label = 0;
+        //if (type == TunnelType::VXLAN) {
+        //    label = obj->vxlan_id();
+        //} else {
+            label = it->label_;
+        //}
+        ComponentNHData nh_data(label,
+                                Agent::GetInstance()->GetDefaultVrf(),
+                                Agent::GetInstance()->GetRouterId(),
+                                it->daddr_, false, it->tunnel_bmap_);
+        data.push_back(nh_data);
     }
 
     MCTRACE(Log, "enqueue evpn comp", vrf_name, "255.255.255.255", data.size());
@@ -1179,4 +1185,8 @@ void MulticastHandler::Shutdown() {
         //Delete the multicast object
         delete (*it);
     }
+}
+
+void MulticastHandler::EncapChanged(const std::string &vrf_name) {
+    CreateEvpnCompositeNH(vrf_name);
 }
