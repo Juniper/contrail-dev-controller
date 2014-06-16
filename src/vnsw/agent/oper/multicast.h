@@ -204,7 +204,7 @@ public:
     static MulticastHandler *GetInstance() { 
         return obj_; 
     };
-
+    void EncapChanged(const std::string &vrf_name);
     void AddChangeMultiProtocolCompositeNH(MulticastGroupObject *);
     void TriggerCompositeNHChange(MulticastGroupObject *);
     void TriggerL2CompositeNHChange(MulticastGroupObject *);

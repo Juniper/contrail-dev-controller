@@ -212,6 +212,7 @@ public:
     virtual const std::string GetAddressString() const = 0;
     virtual bool EcmpAddPath(AgentPath *path) {return false;}
     virtual bool EcmpDeletePath(AgentPath *path) {return false;}
+    virtual uint32_t GetActiveLabel() const;
 
     // Accessor functions
     bool is_multicast() const {return is_multicast_;}
@@ -222,7 +223,6 @@ public:
     AgentPath *FindPath(const Peer *peer) const;
     const AgentPath *GetActivePath() const;
     const NextHop *GetActiveNextHop() const; 
-    uint32_t GetMplsLabel() const; 
     const std::string &dest_vn_name() const;
     bool IsRPFInvalid() const;
 

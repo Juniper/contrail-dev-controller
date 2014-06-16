@@ -335,6 +335,32 @@ TEST_F(CfgTest, Global_vxlan_network_identifier_mode_config_sandesh) {
     client->WaitForIdle();
 }
 
+TEST_F(CfgTest, vn_forwarding_mode_changed_0) {
+    struct PortInfo input[] = {
+        {"vnet1", 1, "1.1.1.10", "00:00:01:01:01:10", 1, 1},
+    };
+
+    IpamInfo ipam_info[] = {
+        {"1.1.1.0", 24, "1.1.1.200"},
+    };
+
+    client->Reset();
+    AddEncapList("VXLAN", "MPLSoGRE", "MPLSoUDP");
+    CreateVmportEnv(input, 1);
+    client->WaitForIdle();
+    EXPECT_TRUE(VmPortActive(input, 0));
+    AddIPAM("vn1", ipam_info, 1);
+    client->WaitForIdle();
+
+    client->Reset();
+    DelIPAM("vn1"); 
+    client->WaitForIdle();
+    DeleteVmportEnv(input, 1, true);
+    client->WaitForIdle();
+    DelEncapList();
+    client->WaitForIdle();
+}
+
 TEST_F(CfgTest, vn_forwarding_mode_changed_1) {
     struct PortInfo input[] = {
         {"vnet1", 1, "1.1.1.10", "00:00:01:01:01:10", 1, 1},
@@ -645,6 +671,7 @@ TEST_F(CfgTest, change_in_gatewaywith_no_vrf) {
     client->WaitForIdle();
     WAIT_FOR(1000, 1000, (VrfFind("vrf1") == false));
 }
+
 
 int main(int argc, char **argv) {
     GETUSERARGS();

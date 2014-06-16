@@ -83,6 +83,7 @@ bool AgentPath::RebakeAllTunnelNHinCompositeNH(const AgentRoute *sync_route,
     //Only MPLS types are supported for multicast
     if (sync_route->is_multicast()) {
         if (cnh->CompositeType() == Composite::EVPN) {
+            return true;
             new_tunnel_type = TunnelType::ComputeType(TunnelType::AllType());
         } else {
             new_tunnel_type = TunnelType::ComputeType(TunnelType::MplsType());
@@ -305,6 +306,7 @@ bool HostRoute::AddChangePath(Agent *agent, AgentPath *path) {
         ret = true;
     }
 
+    path->set_proxy_arp(true);
     path->set_unresolved(false);
     if (path->ChangeNH(agent, nh) == true)
         ret = true;
@@ -554,8 +556,22 @@ bool MulticastRoute::AddChangePath(Agent *agent, AgentPath *path) {
     path->set_unresolved(false);
     path->set_vxlan_id(vxlan_id_);
     path->set_label(label_);
-    ret = true;
 
+    //Setting of tunnel is only for simulated TOR.
+    path->set_tunnel_bmap(TunnelType::AllType());
+    TunnelType::Type new_tunnel_type =
+        TunnelType::ComputeType(TunnelType::AllType());
+    if (new_tunnel_type == TunnelType::VXLAN &&
+        vxlan_id_ == VxLanTable::kInvalidvxlan_id) {
+        new_tunnel_type = TunnelType::ComputeType(TunnelType::MplsType());
+    }
+
+    if (path->tunnel_type() != new_tunnel_type) {
+        path->set_tunnel_type(new_tunnel_type);
+        ret = true;
+    }
+
+    ret = true;
     if (nh && (nh->GetType() == NextHop::COMPOSITE)) {
         const CompositeNH *cnh = static_cast<const CompositeNH *>(nh);
         if (cnh->CompositeType() == Composite::EVPN) {

@@ -184,6 +184,22 @@ string Layer2RouteKey::ToString() const {
     return str.str();
 }
 
+uint32_t Layer2RouteEntry::GetActiveLabel() const {
+    uint32_t label = 0;
+
+    if (is_multicast()) {
+        if (TunnelType::ComputeType(TunnelType::AllType()) ==
+            (1 << TunnelType::VXLAN)) {
+            label = GetActivePath()->vxlan_id();
+        } else {
+            label = GetActivePath()->label();
+        }
+    } else {
+        label = GetActivePath()->GetActiveLabel();
+    } 
+    return label;
+}
+
 string Layer2RouteEntry::ToString() const {
     ostringstream str;
     str << (ether_ntoa ((struct ether_addr *)&mac_));
