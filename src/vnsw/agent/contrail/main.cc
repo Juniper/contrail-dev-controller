@@ -114,6 +114,9 @@ int main(int argc, char *argv[]) {
          "IP Address and prefix or the link local port in ip/prefix format")
         ("HYPERVISOR.vmware_physical_port", opt::value<string>(),
          "Physical port used to connect to VMs in VMWare environment")
+        ("HYPERVISOR.vmware_mode",
+         opt::value<string>()->default_value("esxi_neutron"), 
+         "VMWare mode <esxi_neutron|vcenter>")
         ("FLOWS.max_vm_flows", opt::value<uint16_t>(), 
          "Maximum flows allowed per VM - given as \% of maximum system flows")
         ("FLOWS.max_system_linklocal_flows", opt::value<uint16_t>(), 

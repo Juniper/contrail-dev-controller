@@ -44,7 +44,8 @@ InterfaceKSyncEntry::InterfaceKSyncEntry(InterfaceKSyncObject *obj,
     type_(entry->type_), interface_id_(entry->interface_id_), 
     vrf_id_(entry->vrf_id_), fd_(kInvalidIndex),
     has_service_vlan_(entry->has_service_vlan_), mac_(entry->mac_),
-    ip_(entry->ip_), policy_enabled_(entry->policy_enabled_),
+    smac_(entry->smac_), ip_(entry->ip_),
+    policy_enabled_(entry->policy_enabled_),
     analyzer_name_(entry->analyzer_name_),
     mirror_direction_(entry->mirror_direction_), 
     ipv4_active_(false), l2_active_(false),
@@ -59,7 +60,7 @@ InterfaceKSyncEntry::InterfaceKSyncEntry(InterfaceKSyncObject *obj,
     KSyncNetlinkDBEntry(kInvalidIndex), ksync_obj_(obj), 
     interface_name_(intf->name()),
     type_(intf->type()), interface_id_(intf->id()), vrf_id_(intf->vrf_id()),
-    fd_(-1), has_service_vlan_(false), mac_(), ip_(0),
+    fd_(-1), has_service_vlan_(false), mac_(), smac_(), ip_(0),
     policy_enabled_(false), analyzer_name_(),
     mirror_direction_(Interface::UNKNOWN), ipv4_active_(false), l2_active_(false),
     os_index_(intf->os_index()), sub_type_(InetInterface::VHOST),
@@ -212,24 +213,38 @@ bool InterfaceKSyncEntry::Sync(DBEntry *e) {
     }
 
     InterfaceTable *table = static_cast<InterfaceTable *>(intf->get_table());
-    uint8_t smac[ETHER_ADDR_LEN];
+    uint8_t dmac[ETHER_ADDR_LEN];
 
     switch (intf->type()) {
     case Interface::VM_INTERFACE:
     case Interface::PACKET:
-        memcpy(smac, table->agent()->vrrp_mac(), ETHER_ADDR_LEN);
+        memcpy(dmac, table->agent()->vrrp_mac(), ETHER_ADDR_LEN);
         break;
 
     case Interface::PHYSICAL:
     case Interface::INET:
-        memcpy(smac, intf->mac().ether_addr_octet, ETHER_ADDR_LEN);
+        memcpy(dmac, intf->mac().ether_addr_octet, ETHER_ADDR_LEN);
         break;
     default:
         assert(0);
     }
 
-    if (memcmp(smac, mac(), ETHER_ADDR_LEN)) {
-        memcpy(mac_.ether_addr_octet, smac, ETHER_ADDR_LEN);
+    if (memcmp(dmac, mac(), ETHER_ADDR_LEN)) {
+        memcpy(mac_.ether_addr_octet, dmac, ETHER_ADDR_LEN);
+        ret = true;
+    }
+
+    // In VMWare VCenter mode, interface is assigned using the SMAC
+    // in packet. Store the SMAC for interface
+    uint8_t smac[ETHER_ADDR_LEN];
+    memset(smac, 0, sizeof(smac));
+    if (intf->type() == Interface::VM_INTERFACE &&
+        ksync_obj_->ksync()->agent()->isVmwareVcenterMode()) {
+        memcpy(smac, intf->mac().ether_addr_octet, ETHER_ADDR_LEN);
+    }
+
+    if (memcmp(smac, smac_.ether_addr_octet, ETHER_ADDR_LEN)) {
+        memcpy(smac_.ether_addr_octet, smac, ETHER_ADDR_LEN);
         ret = true;
     }
 
@@ -366,6 +381,8 @@ int InterfaceKSyncEntry::Encode(sandesh_op::type op, char *buf, int buf_len) {
     }
 
     encoder.set_vifr_mac(std::vector<int8_t>(mac(), mac() + ETHER_ADDR_LEN));
+    encoder.set_vifr_src_mac(std::vector<int8_t>(smac(),
+                                                 smac() + ETHER_ADDR_LEN));
     encoder.set_vifr_flags(flags);
 
     encoder.set_vifr_vrf(vrf_id_);

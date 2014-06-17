@@ -589,6 +589,10 @@ public:
     void set_controller(VNController *val);
 
     void CopyConfig(AgentParam *params);
+
+    // Agent param accessor functions
+    bool isVmwareMode() const;
+    bool isVmwareVcenterMode() const;
 private:
 
     AgentParam *params_;

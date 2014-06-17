@@ -462,3 +462,14 @@ OperDB *Agent::oper_db() const {
 void Agent::set_oper_db(OperDB *oper_db) {
     oper_db_.reset(oper_db);
 }
+
+bool Agent::isVmwareMode() const {
+    return params_->isVmwareMode();
+}
+
+bool Agent::isVmwareVcenterMode() const {
+    if (isVmwareMode() == false)
+        return false;
+
+    return params_->isVmwareVcenterMode();
+}
