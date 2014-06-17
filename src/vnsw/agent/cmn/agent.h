@@ -609,6 +609,9 @@ public:
     void CreateLifetimeManager();
     void ShutdownLifetimeManager();
 
+    // Agent param accessor functions
+    bool isVmwareMode() const;
+    bool isVmwareVcenterMode() const;
 private:
 
     AgentParam *params_;

@@ -341,6 +341,19 @@ void AgentParam::ParseHypervisor() {
             mode_ = AgentParam::MODE_KVM;
         }
     }
+
+    if (opt_str = tree_.get_optional<string>("HYPERVISOR.vmware_mode")) {
+        if (opt_str.get() == "vcenter") {
+            vmware_mode_ = VCENTER;
+        } else if (opt_str.get() == "esxi_neutron") {
+            vmware_mode_ = ESXI_NEUTRON;
+        } else {
+            cout << "Error in config file <" << config_file_ <<
+                ">. Error parsing vmware_mode from <" 
+                << opt_str.get() << ">\n";
+            return;
+        }
+    }
 }
 
 void AgentParam::ParseDefaultSection() { 
@@ -479,6 +492,21 @@ void AgentParam::ParseHypervisorArguments
                                 "HYPERVISOR.vmware_physical_interface");
         } else {
             mode_ = AgentParam::MODE_KVM;
+        }
+    }
+
+    if (var_map.count("HYPERVISOR.vmware_mode") && 
+        !var_map["HYPERVISOR.vmware_mode"].defaulted()) {
+        cout << " vmware_mode is " << var_map["HYPERVISOR.vmware_mode"].as<string>() << endl;
+        if (var_map["HYPERVISOR.vmware_mode"].as<string>() == "vcenter") {
+            vmware_mode_ = VCENTER;
+        } else if (var_map["HYPERVISOR.vmware_mode"].as<string>() ==
+                   "esxi_neutron") {
+            vmware_mode_ = ESXI_NEUTRON;
+        } else {
+            cout << "Error in parsing arguement for HYPERVISOR.vmware_mode <" 
+                << var_map["HYPERVISOR.vmware_mode"].as<string>() << endl;
+            return;
         }
     }
 }
@@ -754,6 +782,11 @@ void AgentParam::LogConfig() const {
     if (mode_ == MODE_VMWARE) {
     LOG(DEBUG, "Hypervisor mode             : vmware");
     LOG(DEBUG, "Vmware port                 : " << vmware_physical_port_);
+    if (vmware_mode_ == VCENTER) {
+    LOG(DEBUG, "Vmware mode                 : Vcenter");
+    } else {
+    LOG(DEBUG, "Vmware mode                 : Esxi_Neutron");
+    }
     }
 }
 
@@ -775,7 +808,7 @@ AgentParam::AgentParam(Agent *agent) :
         agent_stats_interval_(AgentStatsCollector::AgentStatsInterval), 
         flow_stats_interval_(FlowStatsCollector::FlowStatsInterval),
         vmware_physical_port_(""), test_mode_(false), debug_(false), tree_(),
-        headless_mode_(false) {
+        headless_mode_(false), vmware_mode_(ESXI_NEUTRON) {
     vgw_config_table_ = std::auto_ptr<VirtualGatewayConfigTable>
         (new VirtualGatewayConfigTable(agent));
 }

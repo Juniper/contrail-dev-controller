@@ -40,36 +40,63 @@
 InterfaceKSyncEntry::InterfaceKSyncEntry(InterfaceKSyncObject *obj, 
                                          const InterfaceKSyncEntry *entry, 
                                          uint32_t index) :
-    KSyncNetlinkDBEntry(index), analyzer_name_(entry->analyzer_name_),
-    dhcp_enable_(entry->dhcp_enable_), fd_(kInvalidIndex),
+    KSyncNetlinkDBEntry(index),
+    type_(entry->type_),
+    sub_type_(entry->sub_type_),
+    interface_name_(entry->interface_name_),
+    interface_id_(entry->interface_id_),
+    analyzer_name_(entry->analyzer_name_),
+    dhcp_enable_(entry->dhcp_enable_),
+    fd_(kInvalidIndex),
     flow_key_nh_id_(entry->flow_key_nh_id_),
     has_service_vlan_(entry->has_service_vlan_),
-    interface_id_(entry->interface_id_),
-    interface_name_(entry->interface_name_), 
-    ip_(entry->ip_), ipv4_active_(false),
+    ip_(entry->ip_),
+    ipv4_active_(false),
     ipv4_forwarding_(entry->ipv4_forwarding_),
-    ksync_obj_(obj), l2_active_(false),
+    ksync_obj_(obj),
+    l2_active_(false),
     layer2_forwarding_(entry->layer2_forwarding_),
-    mac_(entry->mac_), mirror_direction_(entry->mirror_direction_), 
-    network_id_(entry->network_id_), os_index_(Interface::kInvalidIndex),
-    parent_(entry->parent_), policy_enabled_(entry->policy_enabled_),
-    sub_type_(entry->sub_type_), type_(entry->type_), vlan_id_(entry->vlan_id_),
+    smac_(entry->smac_),
+    mac_(entry->mac_),
+    mirror_direction_(entry->mirror_direction_), 
+    network_id_(entry->network_id_),
+    os_index_(Interface::kInvalidIndex),
+    parent_(entry->parent_),
+    policy_enabled_(entry->policy_enabled_),
+    vlan_id_(entry->vlan_id_),
     vrf_id_(entry->vrf_id_), persistent_(entry->persistent_),
     xconnect_(entry->xconnect_) {
 }
 
 InterfaceKSyncEntry::InterfaceKSyncEntry(InterfaceKSyncObject *obj, 
                                          const Interface *intf) :
-    KSyncNetlinkDBEntry(kInvalidIndex), analyzer_name_(),
-    dhcp_enable_(true), fd_(-1), flow_key_nh_id_(0),
-    has_service_vlan_(false), interface_id_(intf->id()),
-    interface_name_(intf->name()), ip_(0), ipv4_active_(false),
-    ipv4_forwarding_(true), ksync_obj_(obj), l2_active_(false),
-    layer2_forwarding_(true), mac_(),
-    mirror_direction_(Interface::UNKNOWN), os_index_(intf->os_index()),
-    parent_(NULL), policy_enabled_(false), sub_type_(InetInterface::VHOST),
-    type_(intf->type()), vlan_id_(VmInterface::kInvalidVlanId),
-    vrf_id_(intf->vrf_id()), persistent_(false), xconnect_(NULL) {
+    KSyncNetlinkDBEntry(kInvalidIndex),
+    type_(intf->type()),
+    sub_type_(InetInterface::VHOST),
+    interface_name_(intf->name()),
+    interface_id_(intf->id()),
+   
+    analyzer_name_(),
+    dhcp_enable_(true),
+    fd_(-1),
+    flow_key_nh_id_(0),
+    has_service_vlan_(false),
+    ip_(0),
+    ipv4_active_(false),
+    ipv4_forwarding_(true),
+    ksync_obj_(obj),
+    l2_active_(false),
+    layer2_forwarding_(true),
+    smac_(),
+    mac_(),
+    mirror_direction_(Interface::UNKNOWN),
+    os_index_(intf->os_index()),
+    parent_(NULL),
+    policy_enabled_(false),
+    vlan_id_(VmInterface::kInvalidVlanId),
+    vrf_id_(intf->vrf_id()),
+    persistent_(false),
+    xconnect_(NULL) {
 
     if (intf->flow_key_nh()) {
         flow_key_nh_id_ = intf->flow_key_nh()->id();
@@ -254,12 +281,12 @@ bool InterfaceKSyncEntry::Sync(DBEntry *e) {
     }
 
     InterfaceTable *table = static_cast<InterfaceTable *>(intf->get_table());
-    uint8_t smac[ETHER_ADDR_LEN];
+    uint8_t dmac[ETHER_ADDR_LEN];
 
     switch (intf->type()) {
     case Interface::VM_INTERFACE:
     case Interface::PACKET:
-        memcpy(smac, table->agent()->vrrp_mac(), ETHER_ADDR_LEN);
+        memcpy(dmac, table->agent()->vrrp_mac(), ETHER_ADDR_LEN);
         break;
 
     case Interface::PHYSICAL: 
@@ -270,14 +297,28 @@ bool InterfaceKSyncEntry::Sync(DBEntry *e) {
         break;
     }
     case Interface::INET:
-        memcpy(smac, intf->mac().ether_addr_octet, ETHER_ADDR_LEN);
+        memcpy(dmac, intf->mac().ether_addr_octet, ETHER_ADDR_LEN);
         break;
     default:
         assert(0);
     }
 
-    if (memcmp(smac, mac(), ETHER_ADDR_LEN)) {
-        memcpy(mac_.ether_addr_octet, smac, ETHER_ADDR_LEN);
+    if (memcmp(dmac, mac(), ETHER_ADDR_LEN)) {
+        memcpy(mac_.ether_addr_octet, dmac, ETHER_ADDR_LEN);
+        ret = true;
+    }
+
+    // In VMWare VCenter mode, interface is assigned using the SMAC
+    // in packet. Store the SMAC for interface
+    uint8_t smac[ETHER_ADDR_LEN];
+    memset(smac, 0, sizeof(smac));
+    if (intf->type() == Interface::VM_INTERFACE &&
+        ksync_obj_->ksync()->agent()->isVmwareVcenterMode()) {
+        memcpy(smac, intf->mac().ether_addr_octet, ETHER_ADDR_LEN);
+    }
+
+    if (memcmp(smac, smac_.ether_addr_octet, ETHER_ADDR_LEN)) {
+        memcpy(smac_.ether_addr_octet, smac, ETHER_ADDR_LEN);
         ret = true;
     }
 
@@ -441,6 +482,8 @@ int InterfaceKSyncEntry::Encode(sandesh_op::type op, char *buf, int buf_len) {
     }
 
     encoder.set_vifr_mac(std::vector<int8_t>(mac(), mac() + ETHER_ADDR_LEN));
+    encoder.set_vifr_src_mac(std::vector<int8_t>(smac(),
+                                                 smac() + ETHER_ADDR_LEN));
     encoder.set_vifr_flags(flags);
 
     encoder.set_vifr_vrf(vrf_id_);
