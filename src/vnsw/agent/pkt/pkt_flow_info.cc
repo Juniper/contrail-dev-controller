@@ -576,6 +576,7 @@ void PktFlowInfo::FloatingIpDNat(const PktInfo *pkt, PktControlInfo *in,
         nat_dest_vrf = it->vrf_.get()->vrf_id();
     }
     out->rt_ = ftable->GetUcRoute(it->vrf_.get(), Ip4Address(pkt->ip_daddr));
+    //VrfTranslate(pkt, in, out);
     out->vn_ = it->vn_.get();
     dest_vn = &(it->vn_.get()->GetName());
     dest_vrf = out->intf_->vrf()->vrf_id();
