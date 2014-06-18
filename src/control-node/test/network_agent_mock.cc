@@ -364,11 +364,20 @@ pugi::xml_document *XmppDocumentMock::RouteEnetAddDeleteXmlDoc(
     std::string temp(prefix.c_str());
     char *str = const_cast<char *>(temp.c_str());
     char *saveptr;
-    char *mac = strtok_r(str, ",", &saveptr);
+    char *tag;
+    char *mac;
+    if (strchr(str, '-')) {
+        tag = strtok_r(str, "-", &saveptr);
+        mac = strtok_r(NULL, ",", &saveptr);
+    } else {
+        tag = NULL;
+        mac = strtok_r(str, ",", &saveptr);
+    }
     char *address = strtok_r(NULL, "", &saveptr);
 
     rt_entry.entry.nlri.af = BgpAf::L2Vpn;
     rt_entry.entry.nlri.safi = BgpAf::Enet;
+    rt_entry.entry.nlri.ethernet_tag = tag ? atoi(tag) : 0;
     rt_entry.entry.nlri.mac = std::string(mac) ;
     rt_entry.entry.nlri.address = std::string(address);
 
