@@ -83,7 +83,6 @@ bool AgentPath::RebakeAllTunnelNHinCompositeNH(const AgentRoute *sync_route,
     //Only MPLS types are supported for multicast
     if (sync_route->is_multicast()) {
         if (cnh->CompositeType() == Composite::EVPN) {
-            return true;
             new_tunnel_type = TunnelType::ComputeType(TunnelType::AllType());
         } else {
             new_tunnel_type = TunnelType::ComputeType(TunnelType::MplsType());

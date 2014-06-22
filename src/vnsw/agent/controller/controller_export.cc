@@ -194,6 +194,7 @@ void RouteExport::MulticastNotify(AgentXmppChannel *bgp_xmpp_peer,
 
         if ((route->GetTableType() == Agent::LAYER2) &&
             (state->evpn_exported_ == true)) {
+            state->tunnel_type_ = route->GetActivePath()->tunnel_type();
             CONTROLLER_TRACE(RouteExport, bgp_xmpp_peer->GetBgpPeerName(),
                              route->vrf()->GetName(), 
                              route->ToString(), true, state->label_);
@@ -243,21 +244,54 @@ void RouteExport::MulticastNotify(AgentXmppChannel *bgp_xmpp_peer,
 
         }
 
-        if ((route->GetTableType() == Agent::LAYER2) && 
-            ((state->evpn_exported_ == false) || (state->force_chg_ == true))) {
-            state->evpn_exported_ = 
-                AgentXmppChannel::ControllerSendEvpnRoute(bgp_xmpp_peer, route,
-                                                       route->dest_vn_name(),
-                                                       route->GetActiveLabel(),
-                                                       TunnelType::AllType(),
-                                                       associate);
-            CONTROLLER_TRACE(RouteExport, bgp_xmpp_peer->GetBgpPeerName(),
-                             route->vrf()->GetName(), 
-                             route->ToString(), associate, 
-                             route->GetActiveLabel());
+        TunnelType::Type old_tunnel_type = state->tunnel_type_;
+        uint32_t label = state->label_; 
+        if (route->GetTableType() == Agent::LAYER2) {
+            if (route->GetActivePath()) {
+                if (route->GetActivePath()->tunnel_type() != state->tunnel_type_) {
+                    state->force_chg_ = true;
+                    state->tunnel_type_ = route->GetActivePath()->tunnel_type();
+                }
 
-            state->label_ = route->GetActiveLabel();
-            state->vn_ = route->dest_vn_name();
+                if (route->GetActivePath()->GetActiveLabel() != state->label_) {
+                    state->force_chg_ = true;
+                    state->label_ = route->GetActivePath()->GetActiveLabel();
+                }
+            }
+
+            if ((state->evpn_exported_ == true) && (state->force_chg_ == true)) {
+                if (old_tunnel_type == TunnelType::VXLAN) {
+                    AgentXmppChannel::ControllerSendEvpnRoute(bgp_xmpp_peer, route,
+                                                              state->vn_,
+                                                              label,
+                                                              TunnelType::VxlanType(),
+                                                              false);
+                } else { 
+                    AgentXmppChannel::ControllerSendEvpnRoute(bgp_xmpp_peer, route,
+                                                              state->vn_,
+                                                              label,
+                                                              TunnelType::MplsType(),
+                                                              false);
+                }
+                    state->evpn_exported_ = false;
+            }
+
+            if ((state->evpn_exported_ == false) || (state->force_chg_ == true)) {
+                state->evpn_exported_ = 
+                    AgentXmppChannel::ControllerSendEvpnRoute(bgp_xmpp_peer, route,
+                                                              route->dest_vn_name(),
+                                                              route->GetActiveLabel(),
+                                                              TunnelType::AllType(),
+                                                              associate);
+                CONTROLLER_TRACE(RouteExport, bgp_xmpp_peer->GetBgpPeerName(),
+                                 route->vrf()->GetName(), 
+                                 route->ToString(), associate, 
+                                 route->GetActiveLabel());
+
+                state->label_ = route->GetActivePath()->GetActiveLabel();
+                //state->label_ = route->GetActiveLabel();
+                state->vn_ = route->dest_vn_name();
+            }
         }
 
         state->force_chg_ = false;

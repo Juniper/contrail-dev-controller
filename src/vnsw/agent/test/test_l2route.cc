@@ -190,7 +190,7 @@ TEST_F(RouteTest, LocalVmRoute_1) {
     EXPECT_TRUE(rt->GetActiveNextHop() != NULL);
     const NextHop *nh = rt->GetActiveNextHop();
     EXPECT_TRUE(rt->dest_vn_name() == "vn1");
-    uint32_t label = rt->GetMplsLabel();
+    uint32_t label = rt->GetActiveLabel();
     MplsLabelKey key(MplsLabel::MCAST_NH, label);
     MplsLabel *mpls = 
         static_cast<MplsLabel *>(agent_->mpls_table()->Find(&key, true));
@@ -227,7 +227,7 @@ TEST_F(RouteTest, LocalVmRoute_2) {
     EXPECT_TRUE(rt->GetActiveNextHop() != NULL);
     const NextHop *nh = rt->GetActiveNextHop();
     EXPECT_TRUE(rt->dest_vn_name() == "vn1");
-    uint32_t label = rt->GetMplsLabel();
+    uint32_t label = rt->GetActiveLabel();
     MplsLabelKey key(MplsLabel::MCAST_NH, label);
     MplsLabel *mpls = 
         static_cast<MplsLabel *>(agent_->mpls_table()->Find(&key, true));
@@ -300,7 +300,7 @@ TEST_F(RouteTest, RemoteVmRoute_1) {
     EXPECT_TRUE(L2RouteFind(vrf_name_, *remote_vm_mac_));
 
     Layer2RouteEntry *rt = L2RouteGet(vrf_name_, *remote_vm_mac_);
-    EXPECT_TRUE(rt->GetMplsLabel() == MplsTable::kStartLabel);
+    EXPECT_TRUE(rt->GetActiveLabel() == MplsTable::kStartLabel);
 
     Layer2RouteReq *l2_req = new Layer2RouteReq();
     std::vector<int> result = list_of(1);

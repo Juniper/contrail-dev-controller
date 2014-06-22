@@ -194,9 +194,10 @@ bool InterfaceTable::L2VmInterfaceWalk(DBTablePartBase *partition,
     if (!vm_intf->l2_active())
         return true;
 
-    const VnEntry *vn = vm_intf->vn();
-    if (vm_intf->layer2_forwarding() && 
-        (vn->GetVxLanId() != vm_intf->vxlan_id())) {
+    //const VnEntry *vn = vm_intf->vn();
+    if (vm_intf->layer2_forwarding()) { 
+    //if (vm_intf->layer2_forwarding() && 
+    //    (vn->GetVxLanId() != vm_intf->vxlan_id())) {
         vm_intf->UpdateL2();
     }
     return true;

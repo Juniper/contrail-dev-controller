@@ -15,7 +15,6 @@ public:
     virtual ~AgentRouteEncap() { }
 
     void Update();
-    virtual bool VrfWalkNotify(DBTablePartBase *partition, DBEntryBase *e);
     virtual bool RouteWalkNotify(DBTablePartBase *partition, DBEntryBase *e);
 
 private:
