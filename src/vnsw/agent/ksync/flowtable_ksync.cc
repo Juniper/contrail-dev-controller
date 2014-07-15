@@ -55,7 +55,7 @@ KSyncObject *FlowTableKSyncEntry::GetObject() {
 void FlowTableKSyncEntry::SetPcapData(FlowEntryPtr fe, 
                                       std::vector<int8_t> &data) {
     data.clear();
-    uint32_t addr = ksync_obj_->ksync()->agent()->GetRouterId().to_ulong();
+    uint32_t addr = ksync_obj_->ksync()->agent()->router_id().to_ulong();
     data.push_back(FlowEntry::PCAP_CAPTURE_HOST);
     data.push_back(0x4);
     data.push_back(((addr >> 24) & 0xFF));
@@ -177,9 +177,9 @@ int FlowTableKSyncEntry::Encode(sandesh_op::type op, char *buf, int buf_len) {
             }
             req.set_fr_mir_vrf(flow_entry_->data().mirror_vrf); 
             req.set_fr_mir_sip(htonl(ksync_obj_->ksync()->agent()->
-                                     GetRouterId().to_ulong()));
+                                     router_id().to_ulong()));
             req.set_fr_mir_sport(htons(ksync_obj_->ksync()->agent()->
-                                                            GetMirrorPort()));
+                                                            mirror_port()));
             std::vector<int8_t> pcap_data;
             SetPcapData(flow_entry_, pcap_data);
             req.set_fr_pcap_meta_data(pcap_data);
@@ -188,7 +188,8 @@ int FlowTableKSyncEntry::Encode(sandesh_op::type op, char *buf, int buf_len) {
         req.set_fr_ftable_size(0);
         req.set_fr_ecmp_nh_index(flow_entry_->data().component_nh_idx);
 
-        if (flow_entry_->is_flags_set(FlowEntry::EcmpFlow)) {
+        if (flow_entry_->is_flags_set(FlowEntry::EcmpFlow) &&
+            flow_entry_->reverse_flow_entry() != NULL) {
             flags |= VR_RFLOW_VALID; 
             FlowEntry *rev_flow = flow_entry_->reverse_flow_entry();
             req.set_fr_rindex(rev_flow->flow_handle());
@@ -418,7 +419,7 @@ void FlowTableKSyncEntry::ErrorHandler(int err, uint32_t seq_no) const {
 FlowTableKSyncObject::FlowTableKSyncObject(KSync *ksync) : 
     KSyncObject(), ksync_(ksync), audit_flow_idx_(0),
     audit_timer_(TimerManager::CreateTimer
-                 (*(ksync_->agent()->GetEventManager())->io_service(),
+                 (*(ksync_->agent()->event_manager())->io_service(),
                   "Flow Audit Timer",
                   TaskScheduler::GetInstance()->GetTaskId
                   ("Agent::StatsCollector"),
@@ -428,7 +429,7 @@ FlowTableKSyncObject::FlowTableKSyncObject(KSync *ksync) :
 FlowTableKSyncObject::FlowTableKSyncObject(KSync *ksync, int max_index) :
     KSyncObject(max_index), ksync_(ksync), audit_flow_idx_(0),
     audit_timer_(TimerManager::CreateTimer
-                 (*(ksync_->agent()->GetEventManager())->io_service(),
+                 (*(ksync_->agent()->event_manager())->io_service(),
                   "Flow Audit Timer",
                   TaskScheduler::GetInstance()->GetTaskId
                   ("Agent::StatsCollector"),

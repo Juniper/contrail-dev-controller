@@ -271,6 +271,9 @@ void RoutePathReplicator::Leave(BgpTable *table, const RouteTarget &rt,
                 group->RemoveImportTable(family(), vpntable);
                 group->RemoveExportTable(family(), vpntable);
                 server()->rtarget_group_mgr()->RemoveRtGroup(rt);
+                if (ts->GetGroupList().empty()) {
+                    RequestWalk(vpntable);
+                }
             }
         }
     } else if (group->empty(family())) {
@@ -422,6 +425,11 @@ bool RoutePathReplicator::BgpTableListener(DBTablePartBase *root,
     for (Route::PathList::iterator it = rt->GetPathList().begin(); 
         it != rt->GetPathList().end(); it++) {
         BgpPath *path = static_cast<BgpPath *>(it.operator->());
+
+        // Skip if the source peer is down
+        if (!path->IsStale() && path->GetPeer() && !path->GetPeer()->IsReady())
+            continue;
+
         // No need to replicate the replicated path
         if (path->IsReplicated()) continue;
 

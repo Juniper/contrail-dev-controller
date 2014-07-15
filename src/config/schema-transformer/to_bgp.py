@@ -44,10 +44,15 @@ from sandesh_common.vns.constants import ModuleNames, Module2NodeType, NodeTypeN
 from schema_transformer.sandesh.st_introspect import ttypes as sandesh
 from ncclient import manager
 import discoveryclient.client as client
-from collections import OrderedDict
+try:
+    #python2.7
+    from collections import OrderedDict
+except:
+    #python2.6
+    from ordereddict import OrderedDict
 import jsonpickle
 
-_BGP_RTGT_MAX_ID = 1 << 20
+_BGP_RTGT_MAX_ID = 1 << 24
 _BGP_RTGT_ALLOC_PATH = "/id/bgp/route-targets/"
 
 _VN_MAX_ID = 1 << 24
@@ -223,6 +228,7 @@ class VirtualNetworkST(DictST):
     @classmethod
     def delete(cls, name):
         vn = cls.get(name)
+        analyzer_vn_set = set()
         if vn:
             for service_chain_list in vn.service_chains.values():
                 for service_chain in service_chain_list:
@@ -236,13 +242,12 @@ class VirtualNetworkST(DictST):
             props = vn.obj.get_virtual_network_properties()
             if props and props.network_id:
                 cls._vn_id_allocator.delete(props.network_id - 1)
-            analyzer_vn_set = set()
             for policy in NetworkPolicyST.values():
                 if name in policy.analyzer_vn_set:
                     analyzer_vn_set |= policy.network_back_ref
                     policy.analyzer_vn_set.discard(name)
             del cls._dict[name]
-            return analyzer_vn_set
+        return analyzer_vn_set
     # end delete
 
     @classmethod
@@ -303,6 +308,9 @@ class VirtualNetworkST(DictST):
         # end for vn
 
         for router in BgpRouterST.values():
+            router.update_autonomous_system(new_asn)
+        # end for router
+        for router in LogicalRouterST.values():
             router.update_autonomous_system(new_asn)
         # end for router
         cls._autonomous_system = int(new_asn)
@@ -503,6 +511,8 @@ class VirtualNetworkST(DictST):
         rinst_fq_name_str = '%s:%s' % (self.obj.get_fq_name_str(), rinst_name)
         try:
             rtgt_num = int(self._rt_cf.get(rinst_fq_name_str)['rtgt_num'])
+            if rtgt_num < common.BGP_RTGT_MIN_ID:
+                raise pycassa.NotFoundException
             rtgt_ri_fq_name_str = self._rt_allocator.read(rtgt_num)
             if (rtgt_ri_fq_name_str != rinst_fq_name_str):
                 alloc_new = True
@@ -685,6 +695,10 @@ class VirtualNetworkST(DictST):
             return (None, None)
         sc = ServiceChain.find(left_vn_str, right_vn_str, '<>',
                                [PortType(0, -1)], [PortType(0, -1)], 'any')
+        if sc is None:
+            _sandesh._logger.debug("Service chain between %s and %s not "
+                                   "present", left_vn_str, right_vn_str)
+            return (None, None)
         left_ri_name = left_vn.get_service_name(sc.name, next_hop)
         return (left_vn.get_primary_routing_instance(),
                 left_vn.rinst.get(left_ri_name))
@@ -707,9 +721,7 @@ class VirtualNetworkST(DictST):
         ) or StaticRouteEntriesType()
         for static_route in static_route_entries.get_route() or []:
             if prefix == static_route.prefix:
-                if self.get_route_target() in static_route.route_target:
-                    return
-                else:
+                if self.get_route_target() not in static_route.route_target:
                     static_route.route_target.append(self.get_route_target())
                 break
         else:
@@ -883,6 +895,7 @@ class VirtualNetworkST(DictST):
         sp_list = prule.src_ports
         daddr_list = prule.dst_addresses
         dp_list = prule.dst_ports
+        rule_uuid = prule.get_rule_uuid()
 
         arule_proto = self.protocol_policy_to_acl(prule.protocol)
         if arule_proto is None:
@@ -959,7 +972,7 @@ class VirtualNetworkST(DictST):
                         match = MatchConditionType(arule_proto,
                                                    saddr_match, sp,
                                                    daddr_match, dp)
-                        acl = AclRuleType(match, action)
+                        acl = AclRuleType(match, action, rule_uuid)
                         result_acl_rule_list.append(acl)
                         if ((prule.direction == "<>") and
                                 (svn != dvn or sp != dp)):
@@ -975,7 +988,7 @@ class VirtualNetworkST(DictST):
                             else:
                                 raction.assign_routing_instance = None
 
-                            acl = AclRuleType(rmatch, raction)
+                            acl = AclRuleType(rmatch, raction, rule_uuid)
                             result_acl_rule_list.append(acl)
                     # end for dp
                 # end for sp
@@ -1087,7 +1100,7 @@ class SecurityGroupST(DictST):
     def __init__(self, name):
         self.name = name
         self.obj = _vnc_lib.security_group_read(fq_name_str=name)
-        if self.obj.get_security_group_id() is None:
+        if not self.obj.get_security_group_id():
             # TODO handle overflow + check alloc'd id is not in use
             sg_id_num = self._sg_id_allocator.alloc(name)
             self.obj.set_security_group_id(sg_id_num)
@@ -1163,6 +1176,7 @@ class SecurityGroupST(DictST):
     def policy_to_acl_rule(self, prule):
         ingress_acl_rule_list = []
         egress_acl_rule_list = []
+        rule_uuid = prule.get_rule_uuid()
 
         # convert policy proto input(in str) to acl proto (num)
         if prule.protocol.isdigit():
@@ -1192,7 +1206,7 @@ class SecurityGroupST(DictST):
                         match = MatchConditionType(arule_proto,
                                                    saddr_match, sp,
                                                    daddr_match, dp)
-                        acl = AclRuleType(match, action)
+                        acl = AclRuleType(match, action, rule_uuid)
                         acl_rule_list.append(acl)
                     # end for dp
                 # end for daddr
@@ -1467,7 +1481,13 @@ class ServiceChain(DictST):
                                                  sc_ip_address)
 
             if service_instance:
-                vm_refs = service_instance.get_virtual_machine_back_refs()
+                try:
+                    vm_refs = service_instance.get_virtual_machine_back_refs()
+                except NoIdError:
+                    _sandesh._logger.debug("service chain %s: NoIdError on "
+                                           "service_instance, disappear?",
+                                           self.name)
+                    return None
                 if vm_refs is None:
                     return None
                 for service_vm in vm_refs:
@@ -1568,7 +1588,8 @@ class ServiceChain(DictST):
                           vm_obj.get_virtual_machine_interface_back_refs()
                           or []):
             if_obj = VirtualMachineInterfaceST.get(':'.join(interface['to']))
-            if if_obj.service_interface_type not in ['left', 'right']:
+            if (if_obj is None or
+                if_obj.service_interface_type not in ['left', 'right']):
                 continue
             ip_obj = None
             for ip_ref in if_obj.instance_ip_set:
@@ -2226,7 +2247,12 @@ class VirtualMachineInterfaceST(DictST):
         vm_id = get_vm_id_from_interface(vmi_obj)
         if vm_id is None:
             return network_set
-        vm_obj = _vnc_lib.virtual_machine_read(id=vm_id)
+        try:
+            vm_obj = _vnc_lib.virtual_machine_read(id=vm_id)
+        except NoIdError:
+            _sandesh._logger.debug("NoIdError while reading virtual machine " +
+                                   vm_id)
+            return network_set
         vm_si_refs = vm_obj.get_service_instance_refs()
         if not vm_si_refs:
             return network_set
@@ -2292,6 +2318,9 @@ class VirtualMachineInterfaceST(DictST):
             return
 
         vm_id = get_vm_id_from_interface(vmi_obj)
+        if vm_id is None:
+            _sandesh._logger.debug("vm id is None for interface %s", self.name)
+            return
         try:
             vm_obj = _vnc_lib.virtual_machine_read(id=vm_id)
         except NoIdError as e:
@@ -2386,6 +2415,12 @@ class LogicalRouterST(DictST):
         self.virtual_networks = set()
         obj = _vnc_lib.logical_router_read(fq_name_str=name)
         rt_ref = obj.get_route_target_refs()
+        if rt_ref:
+            rt_key = rt_ref[0]['to'][0]
+            rtgt_num = int(rt_key.split(':')[-1])
+            if rtgt_num < common.BGP_RTGT_MIN_ID:
+                _vnc_lib.route_target_delete(fq_name=[rt_key])
+            rt_ref = None
         if not rt_ref:
             rtgt_num = VirtualNetworkST._rt_allocator.alloc(name)
             rt_key = "target:%s:%d" % (
@@ -2393,8 +2428,6 @@ class LogicalRouterST(DictST):
             rtgt_obj = RouteTargetST.locate(rt_key)
             obj.set_route_target(rtgt_obj)
             _vnc_lib.logical_router_update(obj)
-        else:
-            rt_key = rt_ref[0]['to'][0]
 
         self.route_target = rt_key
     # end __init__
@@ -2415,7 +2448,7 @@ class LogicalRouterST(DictST):
         self.interfaces.add(intf_name)
         vmi_obj = VirtualMachineInterfaceST.get(intf_name)
         if vmi_obj is not None:
-            vn_set = self.virtual_networks | {vmi_obj.virtual_network}
+            vn_set = self.virtual_networks | set(vmi_obj.virtual_network)
             self.set_virtual_networks(vn_set)
     # end add_interface
 
@@ -2444,6 +2477,29 @@ class LogicalRouterST(DictST):
                 ri_obj.update_route_target_list(rt_add=[self.route_target])
         self.virtual_networks = vn_set
     # end set_virtual_networks
+
+    def update_autonomous_system(self, asn):
+        old_rt = self.route_target
+        rtgt_num = int(old_rt.split(':')[-1])
+        rt_key = "target:%s:%d" % (asn, rtgt_num)
+        rtgt_obj = RouteTargetST.locate(rt_key)
+        try:
+            obj = _vnc_lib.logical_router_read(fq_name_str=self.name)
+            obj.set_route_target(rtgt_obj)
+            _vnc_lib.logical_router_update(obj)
+        except NoIdError:
+            _sandesh._logger.debug(
+                "NoIdError while accessing logical router %s" % self.name)
+        for vn in self.virtual_networks:
+            vn_obj = VirtualNetworkST.get(vn)
+            if vn_obj is not None:
+                ri_obj = vn_obj.get_primary_routing_instance()
+                ri_obj.update_route_target_list(rt_del=[old_rt],
+                                                rt_add=[rt_key])
+        _vnc_lib.route_target_delete(fq_name=[old_rt])
+        self.route_target = rt_key
+    # end update_autonomous_system
+
 # end LogicaliRouterST
 
 
@@ -2477,8 +2533,14 @@ class SchemaTransformer(object):
         SecurityGroupST._sg_id_allocator = IndexAllocator(
             _zookeeper_client, _SECURITY_GROUP_ID_ALLOC_PATH,
             _SECURITY_GROUP_MAX_ID)
+        # 0 is not a valid sg id any more. So, if it was previously allocated,
+        # delete it and reserve it
+        if SecurityGroupST._sg_id_allocator.read(0) != '__reserved__':
+            SecurityGroupST._sg_id_allocator.delete(0)
+        SecurityGroupST._sg_id_allocator.reserve(0, '__reserved__')
         VirtualNetworkST._rt_allocator = IndexAllocator(
-            _zookeeper_client, _BGP_RTGT_ALLOC_PATH, _BGP_RTGT_MAX_ID)
+            _zookeeper_client, _BGP_RTGT_ALLOC_PATH, _BGP_RTGT_MAX_ID,
+            common.BGP_RTGT_MIN_ID)
 
         # Initialize discovery client
         self._disc = None
@@ -2509,7 +2571,9 @@ class SchemaTransformer(object):
         _sandesh.set_logging_params(enable_local_log=args.log_local,
                                     category=args.log_category,
                                     level=args.log_level,
-                                    file=args.log_file)
+                                    file=args.log_file,
+                                    enable_syslog=args.use_syslog,
+                                    syslog_facility=args.syslog_facility)
 
         # create cpu_info object to send periodic updates
         sysinfo_req = False
@@ -2606,6 +2670,13 @@ class SchemaTransformer(object):
         if sg:
             sg.update_policy_entries(entries)
     # end add_security_group_entries
+
+    def delete_security_group_entries(self, idents, meta):
+        sg_name = idents['security-group']
+        sg = SecurityGroupST.get(sg_name)
+        if sg:
+            sg.update_policy_entries(None)
+    # end delete_security_group_entries
 
     def add_network_policy_entries(self, idents, meta):
         # Network policy entries arrived or modified
@@ -2814,17 +2885,18 @@ class SchemaTransformer(object):
         policy = NetworkPolicyST.locate(policy_name)
         addr1 = AddressType(virtual_network=left_vn_str)
         addr2 = AddressType(virtual_network=right_vn_str)
-        ports = PortType(0, -1)
         action_list = ActionListType(apply_service=[si_name])
 
         prule = PolicyRuleType(direction="<>", protocol="any",
                                src_addresses=[addr1], dst_addresses=[addr2],
-                               src_ports=[ports], dst_ports=[ports],
+                               src_ports=[PortType(0, -1)],
+                               dst_ports=[PortType(0, -1)],
                                action_list=action_list)
         pentry = PolicyEntriesType([prule])
         policy.obj = NetworkPolicy(policy_name, network_policy_entries=pentry)
         policy.network_back_ref = set([left_vn_str, right_vn_str])
         policy.internal = True
+        policy.add_rules(pentry)
         vn1 = VirtualNetworkST.get(left_vn_str)
         if vn1:
             vn1.add_policy(policy_name)
@@ -3038,7 +3110,8 @@ class SchemaTransformer(object):
                         PortType(-1, -1), rule.match_condition.dst_address,
                         PortType(-1, -1))
 
-                    acl = AclRuleType(match, ActionListType("deny"))
+                    acl = AclRuleType(match, ActionListType("deny"),
+                                      rule.get_rule_uuid())
                     acl_list.append(acl)
 
                     match = MatchConditionType(
@@ -3046,7 +3119,8 @@ class SchemaTransformer(object):
                         PortType(-1, -1), rule.match_condition.src_address,
                         PortType(-1, -1))
 
-                    acl = AclRuleType(match, ActionListType("deny"))
+                    acl = AclRuleType(match, ActionListType("deny"),
+                                      rule.get_rule_uuid())
                     acl_list.append(acl)
                 # end for rule
 
@@ -3098,7 +3172,7 @@ class SchemaTransformer(object):
 
             for lr in LogicalRouterST.values():
                 if network_name in lr.virtual_networks:
-                    for vn_name in (lr.virtual_networks - {network_name}):
+                    for vn_name in (lr.virtual_networks - set(network_name)):
                         virtual_network.add_connection(vn_name)
             # end for lr
 
@@ -3332,6 +3406,8 @@ def parse_args(args_str):
                          --log_level SYS_DEBUG
                          --log_category test
                          --log_file <stdout>
+                         --use_syslog
+                         --syslog_facility LOG_USER
                          [--reset_config]
     '''
 
@@ -3361,6 +3437,8 @@ def parse_args(args_str):
         'log_level': SandeshLevel.SYS_DEBUG,
         'log_category': '',
         'log_file': Sandesh._DEFAULT_LOG_FILE,
+        'use_syslog': False,
+        'syslog_facility': Sandesh._DEFAULT_SYSLOG_FACILITY,
     }
     secopts = {
         'use_certs': False,
@@ -3441,6 +3519,10 @@ def parse_args(args_str):
         help="Category filter for local logging of sandesh messages")
     parser.add_argument("--log_file",
                         help="Filename for the logs to be written to")
+    parser.add_argument("--use_syslog", action="store_true",
+                        help="Use syslog for logging")
+    parser.add_argument("--syslog_facility",
+                        help="Syslog facility to receive log lines")
     parser.add_argument("--admin_user",
                         help="Name of keystone admin user")
     parser.add_argument("--admin_password",

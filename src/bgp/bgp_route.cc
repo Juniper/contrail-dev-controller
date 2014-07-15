@@ -13,6 +13,7 @@
 #include "bgp/bgp_path.h"
 #include "bgp/bgp_peer_types.h"
 #include "bgp/bgp_table.h"
+#include "bgp/extended-community/mac_mobility.h"
 #include "bgp/origin-vn/origin_vn.h"
 #include "bgp/routing-instance/routing_instance.h"
 #include "bgp/security_group/security_group.h"
@@ -282,6 +283,10 @@ void BgpRoute::FillRouteInfo(BgpTable *table, ShowRoute *show_route) {
                 if (ExtCommunity::is_route_target(*it)) {
                     RouteTarget rt(*it);
                     srp.communities.push_back(rt.ToString());
+                } else if (ExtCommunity::is_mac_mobility(*it)) {
+                    MacMobility mm(*it);
+                    srp.communities.push_back(mm.ToString());
+                    srp.set_sequence_no(mm.ToString());
                 } else if (ExtCommunity::is_origin_vn(*it)) {
                     OriginVn origin_vn(*it);
                     srp.communities.push_back(origin_vn.ToString());
@@ -293,6 +298,7 @@ void BgpRoute::FillRouteInfo(BgpTable *table, ShowRoute *show_route) {
                     srp.communities.push_back(sg.ToString());
                 } else if (ExtCommunity::is_tunnel_encap(*it)) {
                     TunnelEncap encap(*it);
+                    srp.communities.push_back(encap.ToString());
                     TunnelEncapType::Encap id = encap.tunnel_encap();
                     srp.tunnel_encap.push_back(
                                TunnelEncapType::TunnelEncapToString(id));

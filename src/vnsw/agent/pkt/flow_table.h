@@ -38,6 +38,7 @@
 #include <oper/interface_common.h>
 #include <oper/nexthop.h>
 #include <oper/route_common.h>
+#include <sandesh/common/flow_types.h>
 
 class FlowStatsCollector;
 class PktSandeshFlow;
@@ -57,6 +58,7 @@ class NhListener;
 class NhState;
 typedef boost::intrusive_ptr<FlowEntry> FlowEntryPtr;
 typedef boost::intrusive_ptr<const NhState> NhStatePtr;
+
 struct RouteFlowKey {
     RouteFlowKey() : vrf(0), plen(0) { ip.ipv4 = 0; }
     RouteFlowKey(uint32_t v, uint32_t ipv4, uint8_t prefix) : 
@@ -167,7 +169,8 @@ struct FlowKeyCmp {
 
 struct FlowStats {
     FlowStats() : setup_time(0), teardown_time(0), last_modified_time(0),
-        bytes(0), packets(0), intf_in(0), exported(false) {}
+        bytes(0), packets(0), intf_in(0), exported(false), fip(0),
+        fip_vm_port_id(Interface::kInvalidIndex) {}
 
     uint64_t setup_time;
     uint64_t teardown_time;
@@ -176,6 +179,9 @@ struct FlowStats {
     uint64_t packets;
     uint32_t intf_in;
     bool exported;
+    // Following fields are required for FIP stats accounting
+    uint32_t fip;
+    uint32_t fip_vm_port_id;
 };
 
 typedef std::list<MatchAclParams> MatchAclParamsList;
@@ -269,9 +275,19 @@ struct FlowData {
 };
 
 class FlowEntry {
-  public:
+    public:
+    enum FlowPolicyState {
+        NOT_EVALUATED,
+        IMPLICIT_ALLOW, /* Due to No Acl rules */
+        IMPLICIT_DENY,
+        DEFAULT_GW_ICMP_OR_DNS, /* DNS/ICMP pkt to/from default gateway */
+        LINKLOCAL_FLOW, /* No policy applied for linklocal flow */
+        MULTICAST_FLOW /* No policy applied for multicast flow */
+    };
+
     static const uint32_t kInvalidFlowHandle=0xFFFFFFFF;
     static const uint8_t kMaxMirrorsPerFlow=0x2;
+    static const std::map<FlowPolicyState, const char*> FlowPolicyStateStr;
 
     // Don't go beyond PCAP_END, pcap type is one byte
     enum PcapType {
@@ -347,7 +363,7 @@ class FlowEntry {
     void GetVrfAssignAcl();
     uint32_t MatchAcl(const PacketHeader &hdr,
                       MatchAclParamsList &acl, bool add_implicit_deny,
-                      bool add_implicit_allow);
+                      bool add_implicit_allow, FlowPolicyInfo *info);
     void ResetPolicy();
     void ResetStats();
     void set_deleted(bool deleted) { deleted_ = deleted; }
@@ -374,6 +390,11 @@ class FlowEntry {
     int linklocal_src_port_fd() const { return linklocal_src_port_fd_; }
     const std::string& acl_assigned_vrf() const;
     uint32_t acl_assigned_vrf_index() const;
+    uint32_t reverse_flow_fip() const;
+    uint32_t reverse_flow_vmport_id() const;
+    void UpdateFipStatsInfo(uint32_t fip, uint32_t id);
+    const std::string &sg_rule_uuid() const { return sg_rule_uuid_; }
+    const std::string &nw_ace_uuid() const { return nw_ace_uuid_; }
 private:
     friend class FlowTable;
     friend class FlowStatsCollector;
@@ -399,6 +420,8 @@ private:
     uint16_t linklocal_src_port_;
     // fd of the socket used to locally bind in case of linklocal
     int linklocal_src_port_fd_;
+    std::string sg_rule_uuid_;
+    std::string nw_ace_uuid_;
     // atomic refcount
     tbb::atomic<int> refcount_;
 };
@@ -649,11 +672,11 @@ inline void intrusive_ptr_release(const NhState *nh_state) {
 class NhListener {
 public:
     NhListener() {
-        id_ = Agent::GetInstance()->GetNextHopTable()->
+        id_ = Agent::GetInstance()->nexthop_table()->
               Register(boost::bind(&NhListener::Notify, this, _1, _2));
     }
     ~NhListener() {
-        Agent::GetInstance()->GetNextHopTable()->Unregister(id_);
+        Agent::GetInstance()->nexthop_table()->Unregister(id_);
     }
     void Notify(DBTablePartBase *part, DBEntryBase *e);
     DBTableBase::ListenerId id() {

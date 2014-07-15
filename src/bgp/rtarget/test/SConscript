@@ -17,6 +17,7 @@ env.Append(CPPPATH = [env['TOP'],
 env.Append(LIBPATH = [env['TOP'] + '/base', env['TOP'] + '/base/test',
            env['TOP'] + '/bgp', env['TOP'] + '/bgp/enet',
            env['TOP'] + '/bgp/ermvpn', env['TOP'] + '/bgp/evpn',
+           env['TOP'] + '/bgp/extended-community',
            env['TOP'] + '/bgp/inet', env['TOP'] + '/bgp/l3vpn',
            env['TOP'] + '/bgp/origin-vn', env['TOP'] + '/bgp/routing-instance',
            env['TOP'] + '/bgp/rtarget', env['TOP'] + '/bgp/security_group',
@@ -31,15 +32,16 @@ env.Append(LIBPATH = [env['TOP'] + '/base', env['TOP'] + '/base/test',
 env.Prepend(LIBS = ['control_test', 'bgptest', 'bgp', 'peer_sandesh',
                     'bgp_schema', 'control_node', 'dbtest',
                     'ifmap_vnc', 'task_test',
-                    'ifmap_test_util', 'ifmap_server', 'ifmap_common',
+                    'ifmap_test_util', 'ifmap_test_util_server',
+		    'ifmap_server', 'ifmap_common',
                     'ifmapio', 'ds', 'pugixml', 'httpc', 'curl',
                     'crypto', 'ssl', 'sandesh', 'http', 'http_parser',
-                    'db', 'sandeshvns', 'io', 'base', 'gunit'])
+                    'db', 'sandeshvns', 'io', 'connection_info', 'base', 'gunit'])
 
 env.Append(LIBS = ['bgp_enet', 'bgp_ermvpn', 'bgp_evpn'])
 env.Append(LIBS = ['bgp_inet', 'bgp_l3vpn'])
 env.Append(LIBS = ['route', 'net', 'routing_instance', 'rtarget'])
-env.Append(LIBS = ['origin_vn', 'security_group', 'tunnel_encap'])
+env.Append(LIBS = ['extended_community', 'origin_vn', 'security_group', 'tunnel_encap'])
 env.Append(LIBS = ['xmpp', 'xmpp_unicast', 
                    'xmpp_multicast', 'xmpp_enet', 'xml', 'pugixml',
                    'boost_regex', 'boost_program_options'])
@@ -87,14 +89,19 @@ rtarget_prefix_test = env.UnitTest('rtarget_prefix_test',
                                     ['rtarget_prefix_test.cc'])
 env.Alias('src/bgp/rtarget:rtarget_prefix_test', rtarget_prefix_test)
 
-
 test_suite = [
     rtarget_address_test,
-    rtarget_table_test,
     rtarget_prefix_test,
 ]
 
-test = env.TestSuite('bgp-test', test_suite)
+test = env.TestSuite('rtarget-test', test_suite)
 env.Alias('controller/src/bgp/rtarget:test', test)
+
+flaky_test_suite = [
+    rtarget_table_test,
+]
+
+flaky_test = env.TestSuite('rtarget-flaky-test', flaky_test_suite)
+env.Alias('controller/src/bgp/rtarget:flaky-test', flaky_test)
 
 Return('test_suite')

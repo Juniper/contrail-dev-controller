@@ -10,7 +10,7 @@ from gevent import ssl, monkey
 monkey.patch_all()
 import gevent
 import gevent.event
-import gevent.pool
+from gevent.queue import Queue
 import sys
 import time
 from pprint import pformat
@@ -809,18 +809,14 @@ class VncCassandraClient(VncCassandraClientGen):
             return None
     # end subnet_delete
 
-    def walk(self, fn, workers=1):
+    def walk(self, fn):
         walk_results = []
-
-        pool = gevent.pool.Pool(size=workers)
-        iterator = self._obj_uuid_cf.get_range()
-
-        def worker(args):
-            result = fn(*args)
+        for obj_uuid, _ in self._obj_uuid_cf.get_range():
+            obj_cols_iter = self._obj_uuid_cf.xget(obj_uuid)
+            obj_cols = dict((k, v) for k, v in obj_cols_iter)
+            result = fn(obj_uuid, obj_cols)
             if result:
-                # [].append is thread-safe.
                 walk_results.append(result)
-        pool.map(worker, iterator)
 
         return walk_results
     # end walk
@@ -828,10 +824,11 @@ class VncCassandraClient(VncCassandraClientGen):
 
 
 class VncKombuClient(object):
-    def _init_server_conn(self, rabbit_ip, rabbit_user, rabbit_password, rabbit_vhost):
+    def _init_server_conn(self, rabbit_ip, rabbit_port, rabbit_user, rabbit_password, rabbit_vhost):
         while True:
             try:
                 self._conn = kombu.Connection(hostname=rabbit_ip,
+                                              port=rabbit_port,
                                               userid=rabbit_user,
                                               password=rabbit_password,
                                               virtual_host=rabbit_vhost)
@@ -848,10 +845,11 @@ class VncKombuClient(object):
                 time.sleep(2)
     # end _init_server_conn
 
-    def __init__(self, db_client_mgr, rabbit_ip, ifmap_db, rabbit_user, rabbit_password, rabbit_vhost):
+    def __init__(self, db_client_mgr, rabbit_ip, rabbit_port, ifmap_db, rabbit_user, rabbit_password, rabbit_vhost):
         self._db_client_mgr = db_client_mgr
         self._ifmap_db = ifmap_db
         self._rabbit_ip = rabbit_ip
+        self._rabbit_port = rabbit_port
         self._rabbit_user = rabbit_user
         self._rabbit_password = rabbit_password
         self._rabbit_vhost = rabbit_vhost
@@ -863,24 +861,32 @@ class VncKombuClient(object):
         q_name = 'vnc_config.%s-%s' %(socket.gethostname(), listen_port)
         self._update_queue_obj = kombu.Queue(q_name, obj_upd_exchange)
 
+        self._publish_queue = Queue()
+        self._dbe_publish_greenlet = gevent.spawn(self._dbe_oper_publish)
         self._dbe_oper_subscribe_greenlet = None
         if self._rabbit_vhost == "__NONE__":
             return
-        self._init_server_conn(self._rabbit_ip, self._rabbit_user, self._rabbit_password, self._rabbit_vhost)
+        self._init_server_conn(self._rabbit_ip, self._rabbit_port, self._rabbit_user, self._rabbit_password, self._rabbit_vhost)
     # end __init__
 
-    def _obj_update_q_put(self, *args, **kwargs):
+    def _obj_update_q_put(self, oper_info):
         if self._rabbit_vhost == "__NONE__":
             return
-        while True:
-            try:
-                self._obj_update_q.put(*args, **kwargs)
-                break
-            except Exception as e:
-                logger.info("Disconnected from rabbitmq. Reinitializing connection: %s" % str(e))
-                time.sleep(1)
-                self._init_server_conn(self._rabbit_ip, self._rabbit_user, self._rabbit_password, self._rabbit_vhost)
+        self._publish_queue.put(oper_info)
     # end _obj_update_q_put
+
+    def _dbe_oper_publish(self):
+        while True:
+            message = self._publish_queue.get()
+            while True:
+                try:
+                    self._obj_update_q.put(message, serializer='json')
+                    break
+                except Exception as e:
+                    logger.info("Disconnected from rabbitmq. Reinitializing connection: %s" % str(e))
+                    time.sleep(1)
+                    self._init_server_conn(self._rabbit_ip, self._rabbit_port, self._rabbit_user, self._rabbit_password, self._rabbit_vhost)
+    # end _dbe_oper_publish
 
     def _dbe_oper_subscribe(self):
         if self._rabbit_vhost == "__NONE__":
@@ -895,7 +901,7 @@ class VncKombuClient(object):
                     message = queue.get()
                 except Exception as e:
                     logger.info("Disconnected from rabbitmq. Reinitializing connection: %s" % str(e))
-                    self._init_server_conn(self._rabbit_ip, self._rabbit_user, self._rabbit_password, self._rabbit_vhost)
+                    self._init_server_conn(self._rabbit_ip, self._rabbit_port, self._rabbit_user, self._rabbit_password, self._rabbit_vhost)
                     # never reached
                     continue
 
@@ -916,7 +922,7 @@ class VncKombuClient(object):
                         message.ack()
                     except Exception as e:
                         logger.info("Disconnected from rabbitmq. Reinitializing connection: %s" % str(e))
-                        self._init_server_conn(self._rabbit_ip, self._rabbit_user, self._rabbit_password, self._rabbit_vhost)
+                        self._init_server_conn(self._rabbit_ip, self._rabbit_port, self._rabbit_user, self._rabbit_password, self._rabbit_vhost)
                         # never reached
 
     #end _dbe_oper_subscribe
@@ -924,7 +930,7 @@ class VncKombuClient(object):
     def dbe_create_publish(self, obj_type, obj_ids, obj_dict):
         oper_info = {'oper': 'CREATE', 'type': obj_type, 'obj_dict': obj_dict}
         oper_info.update(obj_ids)
-        self._obj_update_q_put(oper_info, serializer='json')
+        self._obj_update_q_put(oper_info)
     # end dbe_create_publish
 
     def _dbe_create_notification(self, obj_info):
@@ -944,7 +950,7 @@ class VncKombuClient(object):
     def dbe_update_publish(self, obj_type, obj_ids):
         oper_info = {'oper': 'UPDATE', 'type': obj_type}
         oper_info.update(obj_ids)
-        self._obj_update_q_put(oper_info, serializer='json')
+        self._obj_update_q_put(oper_info)
     # end dbe_update_publish
 
     def _dbe_update_notification(self, obj_info):
@@ -970,7 +976,7 @@ class VncKombuClient(object):
     def dbe_delete_publish(self, obj_type, obj_ids, obj_dict):
         oper_info = {'oper': 'DELETE', 'type': obj_type, 'obj_dict': obj_dict}
         oper_info.update(obj_ids)
-        self._obj_update_q_put(oper_info, serializer='json')
+        self._obj_update_q_put(oper_info)
     # end dbe_delete_publish
 
     def _dbe_delete_notification(self, obj_info):
@@ -1076,7 +1082,7 @@ class VncZkClient(object):
 class VncDbClient(object):
     def __init__(self, api_svr_mgr, ifmap_srv_ip, ifmap_srv_port, uname,
                  passwd, cass_srv_list,
-                 rabbit_server, rabbit_user, rabbit_password, rabbit_vhost, 
+                 rabbit_server, rabbit_port, rabbit_user, rabbit_password, rabbit_vhost,
                  reset_config=False, ifmap_srv_loc=None,
                  zk_server_ip=None):
 
@@ -1106,16 +1112,16 @@ class VncDbClient(object):
         self._cassandra_db = VncCassandraClient(
             self, cass_srv_list, reset_config)
 
-        self._msgbus = VncKombuClient(self, rabbit_server, self._ifmap_db,
+        self._msgbus = VncKombuClient(self, rabbit_server, rabbit_port, self._ifmap_db,
                                       rabbit_user, rabbit_password,
                                       rabbit_vhost)
         self._zk_db = VncZkClient(api_svr_mgr._args.worker_id, zk_server_ip,
                                   reset_config)
     # end __init__
 
-    def db_resync(self, workers=1):
+    def db_resync(self):
         # Read contents from cassandra and publish to ifmap
-        self._cassandra_db.walk(self._dbe_resync, workers=workers)
+        self._cassandra_db.walk(self._dbe_resync)
         self._db_resync_done.set()
     # end db_resync
 
@@ -1185,13 +1191,7 @@ class VncDbClient(object):
             (ok, obj_dicts) = method([obj_uuid])
             obj_dict = obj_dicts[0]
 
-            # TODO remove backward compat create mapping in zk
-            try:
-                self._zk_db.create_fq_name_to_uuid_mapping(obj_type,
-                                      obj_dict['fq_name'], obj_uuid)
-            except ResourceExistsError:
-                pass
-
+            # TODO remove backward compat (use RT instead of VN->LR ref)
             if (obj_type == 'virtual_network' and
                 'logical_router_refs' in obj_dict):
                 for router in obj_dict['logical_router_refs']:

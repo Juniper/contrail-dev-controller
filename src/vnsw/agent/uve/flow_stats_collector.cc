@@ -99,6 +99,9 @@ void FlowStatsCollector::FlowExport(FlowEntry *flow, uint64_t diff_bytes,
             }
         }
     }
+    s_flow.set_sg_rule_uuid(flow->sg_rule_uuid());
+    s_flow.set_nw_ace_uuid(flow->nw_ace_uuid());
+
     FlowEntry *rev_flow = flow->reverse_flow_entry();
     if (rev_flow) {
         s_flow.set_reverse_uuid(to_string(rev_flow->flow_uuid()));
@@ -319,6 +322,9 @@ bool FlowStatsCollector::Run() {
                 //Update Inter-VN stats
                 VnUveTable *vn_table = agent_uve_->vn_uve_table();
                 vn_table->UpdateInterVnStats(entry, diff_bytes, diff_pkts);
+                //Update Floating-IP stats
+                VmUveTable *vm_table = agent_uve_->vm_uve_table();
+                vm_table->UpdateFloatingIpStats(entry, diff_bytes, diff_pkts);
                 stats->bytes = bytes;
                 stats->packets = packets;
                 stats->last_modified_time = curr_time;

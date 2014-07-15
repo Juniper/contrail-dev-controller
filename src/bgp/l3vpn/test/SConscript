@@ -20,6 +20,7 @@ env.Append(LIBPATH = env['TOP'] + '/bgp/inet')
 env.Append(LIBPATH = env['TOP'] + '/bgp/enet')
 env.Append(LIBPATH = env['TOP'] + '/bgp/ermvpn')
 env.Append(LIBPATH = env['TOP'] + '/bgp/evpn')
+env.Append(LIBPATH = env['TOP'] + '/bgp/extended-community')
 env.Append(LIBPATH = env['TOP'] + '/bgp/test')
 env.Append(LIBPATH = env['TOP'] + '/bgp/l3vpn')
 env.Append(LIBPATH = env['TOP'] + '/bgp/origin-vn')
@@ -41,6 +42,7 @@ env.Prepend(LIBS = [
                     'task_test',
                     'bgptest',
                     'bgp',
+                    'extended_community',
                     'peer_sandesh',
                     'control_node',
                     'origin_vn',
@@ -56,6 +58,7 @@ env.Prepend(LIBS = [
                     'curl',
                     'ifmap_server',
                     'ifmap_common',
+                    'connection_info',
                     'base',
                     'db',
                     'gunit',
@@ -116,12 +119,17 @@ inetvpn_table_test = env.Program('inetvpn_table_test',
 env.Alias('src/bgp/l3vpn:inetvpn_table_test', inetvpn_table_test)
 
 test_suite = [
-    inetvpn_peer_test,
     inetvpn_route_test,
     inetvpn_table_test
 ]
 
-test = env.TestSuite('bgp-test', test_suite)
+test = env.TestSuite('l3vpn-test', test_suite)
 env.Alias('controller/src/bgp/l3vpn:test', test)
+
+flaky_test_suite = [
+    inetvpn_peer_test,
+]
+flaky_test = env.TestSuite('l3vpn-flaky-test', flaky_test_suite)
+env.Alias('controller/src/bgp/l3vpn:flaky-test', flaky_test)
 
 Return('test_suite')

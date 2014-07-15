@@ -32,9 +32,7 @@ public:
     void HandleSigChild(const boost::system::error_code& error, int sig);
     void ProcessData();
 private:
-    bool BuildVmStatsMsg(UveVirtualMachineAgent &uve);
-    void RegisterSigHandler();
-    void InitSigHandler();
+    bool BuildVmStatsMsg(VirtualMachineStats *uve);
     void ReadCpuStat();
     void ReadVcpuStat();
     void ReadMemStat();
@@ -69,9 +67,7 @@ private:
     Timer *timer_;
     bool marked_delete_;
     uint32_t pid_;
-    UveVirtualMachineStats prev_stats_;
     uint32_t retry_;
-    boost::asio::signal_set signal_;
     DoneCb call_back_;
     DISALLOW_COPY_AND_ASSIGN(VmStat);
 };

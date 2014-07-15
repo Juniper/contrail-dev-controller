@@ -53,7 +53,9 @@ public:
     }
 
     void UpdatePeerRefCount(int count) {
-        if (peer_) const_cast<IPeer *>(peer_)->UpdateRefCount(count);
+        if (peer_) {
+            peer_->UpdateRefCount(count);
+        }
     }
 
     const BgpAttr *GetAttr() const {

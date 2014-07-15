@@ -16,6 +16,50 @@ from gen.resource_xsd import *
 from gen.resource_common import *
 from gen.resource_server import *
 from pprint import pformat
+import uuid
+
+class GlobalSystemConfigServer(GlobalSystemConfigServerGen):
+    @classmethod
+    def _check_asn(cls, obj_dict, db_conn):
+        global_asn = obj_dict.get('autonomous_system')
+        if not global_asn:
+            return (True, '')
+        (ok, result) = db_conn.dbe_list('virtual-network')
+        if not ok:
+            return (ok, result)
+        for vn_name, vn_uuid in result:
+            ok, result = db_conn.dbe_read('virtual-network', {'uuid': vn_uuid})
+            if not ok:
+                return ok, result
+            rt_dict = result.get('route_target_list', {})
+            for rt in rt_dict.get('route_target', []):
+                (_, asn, target) = rt.split(':')
+                if (int(asn) == global_asn and
+                    int(target) >= cfgm_common.BGP_RTGT_MIN_ID):
+                    return (False, (400, "Virtual network %s is configured "
+                            "with a route target with this ASN and route "
+                            "target value in the same range as used by "
+                            "automatically allocated route targets" % vn_name))
+        return (True, '')
+    # end _check_asn
+
+    @classmethod
+    def http_post_collection(cls, tenant_name, obj_dict, db_conn):
+        ok, result = cls._check_asn(obj_dict, db_conn)
+        if not ok:
+            return ok, result
+        return True, ''
+    # end http_post_collection
+
+    @classmethod
+    def http_put(cls, id, fq_name, obj_dict, db_conn):
+        ok, result = cls._check_asn(obj_dict, db_conn)
+        if not ok:
+            return ok, result
+        return True, ''
+    # end http_put
+
+# end class GlobalSystemConfigServer
 
 
 class FloatingIpServer(FloatingIpServerGen):
@@ -202,7 +246,7 @@ class LogicalRouterServer(LogicalRouterServerGen):
         try:
             fq_name = obj_dict['fq_name']
             proj_uuid = db_conn.fq_name_to_uuid('project', fq_name[0:2])
-        except NoIdError:
+        except cfgm_common.exceptions.NoIdError:
             return (False, (500, 'No Project ID error : ' + proj_uuid))
 
         (ok, proj_dict) = QuotaHelper.get_project_dict(proj_uuid, db_conn)
@@ -228,7 +272,12 @@ class VirtualMachineInterfaceServer(VirtualMachineInterfaceServerGen):
     @classmethod
     def http_post_collection(cls, tenant_name, obj_dict, db_conn):
         vn_dict = obj_dict['virtual_network_refs'][0]
-        vn_uuid = vn_dict['uuid']
+        vn_uuid = vn_dict.get('uuid')
+        if not vn_uuid:
+            vn_fq_name = vn_dict.get('to')
+            if not vn_fq_name:
+                return (False, (500, 'Internal error : ' + pformat(vn_dict)))
+            vn_uuid = db_conn.fq_name_to_uuid('virtual-network', vn_fq_name)
         (ok, vn_dict) = QuotaHelper.get_objtype_dict(vn_uuid, 'virtual-network', db_conn)
         if not ok:
             return (False, (500, 'Internal error : ' + pformat(vn_dict)))
@@ -273,11 +322,33 @@ class VirtualMachineInterfaceServer(VirtualMachineInterfaceServerGen):
 class VirtualNetworkServer(VirtualNetworkServerGen):
 
     @classmethod
+    def _check_route_targets(cls, obj_dict, db_conn):
+        if 'route_target_list' not in obj_dict:
+            return (True, '')
+        config_uuid = db_conn.fq_name_to_uuid('global_system_config', ['default-global-system-config'])
+        config = db_conn.uuid_to_obj_dict(config_uuid)
+        global_asn = config.get('prop:autonomous_system')
+        if not global_asn:
+            return (True, '')
+        global_asn = json.loads(global_asn)
+        rt_dict = obj_dict.get('route_target_list')
+        if not rt_dict:
+            return (True, '')
+        for rt in rt_dict.get('route_target', []):
+            (_, asn, target) = rt.split(':')
+            if asn == global_asn and int(target) >= cfgm_common.BGP_RTGT_MIN_ID:
+                 return (False, "Configured route target must use ASN that is "
+                         "different from global ASN or route target value must"
+                         " be less than %d" % cfgm_common.BGP_RTGT_MIN_ID)
+        return (True, '')
+    # end _check_route_targets
+
+    @classmethod
     def http_post_collection(cls, tenant_name, obj_dict, db_conn):
         try:
             fq_name = obj_dict['fq_name']
             proj_uuid = db_conn.fq_name_to_uuid('project', fq_name[0:2])
-        except NoIdError:
+        except cfgm_common.exceptions.NoIdError:
             return (False, (500, 'No Project ID error : ' + proj_uuid))
 
         (ok, proj_dict) = QuotaHelper.get_project_dict(proj_uuid, db_conn)
@@ -292,6 +363,9 @@ class VirtualNetworkServer(VirtualNetworkServerGen):
             if not ok:
                 return (False, (403, pformat(obj_dict['fq_name']) + ' : ' + quota_limit))
 
+        (ok, error) =  cls._check_route_targets(obj_dict, db_conn)
+        if not ok:
+            return (False, (400, error))
         try:
             cls.addr_mgmt.net_create_req(obj_dict)
         except Exception as e:
@@ -313,8 +387,7 @@ class VirtualNetworkServer(VirtualNetworkServerGen):
             # Ignore ip-fabric subnet updates
             return True,  ""
 
-        ipam_refs = obj_dict.get('network_ipam_refs', None)
-        if not ipam_refs:
+        if 'network_ipam_refs' not in obj_dict:
             # NOP for addr-mgmt module
             return True,  ""
 
@@ -322,6 +395,7 @@ class VirtualNetworkServer(VirtualNetworkServerGen):
         (read_ok, read_result) = db_conn.dbe_read('virtual-network', vn_id)
         if not read_ok:
             return (False, (500, read_result))
+
         (ok, result) = cls.addr_mgmt.net_check_subnet_quota(read_result,
                                                             obj_dict, db_conn)
         if not ok:
@@ -340,6 +414,9 @@ class VirtualNetworkServer(VirtualNetworkServerGen):
         except Exception as e:
             return (False, (500, str(e)))
 
+        (ok, error) =  cls._check_route_targets(obj_dict, db_conn)
+        if not ok:
+            return (False, (400, error))
         return True, ""
     # end http_put
 
@@ -509,7 +586,7 @@ class VirtualDnsServer(VirtualDnsServerGen):
             if not read_ok:
                 return (
                     False,
-                    (500, "Internal error : Virtual Dns is not in a domain"))
+                    (500, "Internal error : Virtual DNS is not in a domain"))
             virtual_DNSs = read_result.get('virtual_DNSs', None)
             for vdns in virtual_DNSs:
                 vdns_uuid = vdns['uuid']
@@ -520,7 +597,7 @@ class VirtualDnsServer(VirtualDnsServerGen):
                     return (
                         False,
                         (500,
-                         "Internal error : Unable to read Virtual Dns data"))
+                         "Internal error : Unable to read Virtual DNS data"))
                 vdns_data = read_result['virtual_DNS_data']
                 if 'next_virtual_DNS' in vdns_data:
                     if vdns_data['next_virtual_DNS'] == vdns_name:
@@ -623,7 +700,7 @@ class VirtualDnsServer(VirtualDnsServerGen):
                         return (
                             False,
                             (403,
-                             "Cannot have Virtual Dns servers "
+                             "Cannot have Virtual DNS Servers "
                              "referring to each other"))
         return True, ""
     # end validate_dns_server
@@ -715,6 +792,14 @@ class VirtualDnsRecordServer(VirtualDnsRecordServerGen):
     # end validate_dns_record
 # end class VirtualDnsRecordServer
 
+def _check_policy_rule_uuid(entries):
+    if not entries:
+        return
+    for rule in entries.get('policy_rule') or []:
+        if not rule.get('rule_uuid'):
+            rule['rule_uuid'] = str(uuid.uuid4())
+# end _check_policy_rule_uuid
+
 class SecurityGroupServer(SecurityGroupServerGen):
     generate_default_instance = False
 
@@ -723,7 +808,7 @@ class SecurityGroupServer(SecurityGroupServerGen):
         try:
             fq_name = obj_dict['fq_name']
             proj_uuid = db_conn.fq_name_to_uuid('project', fq_name[0:2])
-        except NoIdError:
+        except cfgm_common.exceptions.NoIdError:
             return (False, (500, 'No Project ID error : ' + proj_uuid))
 
         (ok, proj_dict) = QuotaHelper.get_project_dict(proj_uuid, db_conn)
@@ -762,3 +847,54 @@ class SecurityGroupServer(SecurityGroupServerGen):
     # end http_put
 
 # end class SecurityGroupServer
+
+
+class NetworkPolicyServer(NetworkPolicyServerGen):
+
+    @classmethod
+    def http_post_collection(cls, tenant_name, obj_dict, db_conn):
+        try:
+            fq_name = obj_dict['fq_name']
+            proj_uuid = db_conn.fq_name_to_uuid('project', fq_name[0:2])
+        except cfgm_common.exceptions.NoIdError:
+            return (False, (500, 'No Project ID error : ' + proj_uuid))
+
+        (ok, proj_dict) = QuotaHelper.get_project_dict(proj_uuid, db_conn)
+        if not ok:
+            return (False, (500, 'Internal error : ' + pformat(proj_dict)))
+
+        obj_type = 'network-policy'
+        QuotaHelper.ensure_quota_project_present(obj_type, proj_uuid, proj_dict, db_conn)
+        if 'network-policys' in proj_dict:
+            quota_count = len(proj_dict['network-policys'])
+            (ok, quota_limit) = QuotaHelper.check_quota_limit(proj_dict, obj_type, quota_count)
+            if not ok:
+                return (False, (403, pformat(obj_dict['fq_name']) + ' : ' + quota_limit))
+
+        _check_policy_rule_uuid(obj_dict.get('network_policy_entries'))
+        try:
+            cls._check_policy(obj_dict)
+        except Exception as e:
+            return (False, (500, str(e)))
+
+        return True, ""
+    # end http_post_collection
+
+    @classmethod
+    def http_put(cls, id, fq_name, obj_dict, db_conn):
+        p_id = {'uuid': id}
+        (read_ok, read_result) = db_conn.dbe_read('network-policy', p_id)
+        if not read_ok:
+            return (False, (500, read_result))
+        _check_policy_rule_uuid(obj_dict.get('network_policy_entries'))
+        return True, ""
+    # end http_put
+
+    @classmethod
+    def _check_policy(cls, obj_dict):
+        entries = obj_dict.get('network_policy_entries')
+        if not entries:
+            return
+    # end _check_policy
+
+# end class VirtualNetworkServer

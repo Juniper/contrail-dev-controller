@@ -14,6 +14,7 @@
 #include "oper/interface_common.h"
 #include "oper/nexthop.h"
 #include "oper/route_common.h"
+#include "oper/path_preference.h"
 #include "oper/vrf.h"
 #include "oper/sg.h"
 #include "oper/global_vrouter.h"
@@ -286,7 +287,7 @@ static void SetInEcmpIndex(const PktInfo *pkt, PktFlowInfo *flow_info,
         const VmInterface *vm_port = 
             static_cast<const VmInterface *>(in->intf_);
         const VrfEntry *vrf = 
-            Agent::GetInstance()->GetVrfTable()->FindVrfFromId(pkt->vrf);
+            Agent::GetInstance()->vrf_table()->FindVrfFromId(pkt->vrf);
         if (vm_port->HasServiceVlan() && vm_port->vrf() != vrf) {
             //Packet came on service VRF
             label = vm_port->GetServiceVlanLabel(vrf);
@@ -295,24 +296,24 @@ static void SetInEcmpIndex(const PktInfo *pkt, PktFlowInfo *flow_info,
             VlanNHKey key(vm_port->GetUuid(), vlan);
             component_nh_ptr =
                 static_cast<NextHop *>
-                (Agent::GetInstance()->GetNextHopTable()->FindActiveEntry(&key));
+                (Agent::GetInstance()->nexthop_table()->FindActiveEntry(&key));
         } else {
             InterfaceNHKey key(static_cast<InterfaceKey *>(vm_port->GetDBRequestKey().release()),
                                false, InterfaceNHFlags::INET4);
             component_nh_ptr =
                 static_cast<NextHop *>
-                (Agent::GetInstance()->GetNextHopTable()->FindActiveEntry(&key));
+                (Agent::GetInstance()->nexthop_table()->FindActiveEntry(&key));
             label = vm_port->label();
         }
     } else {
         //Packet from fabric
         Ip4Address dest_ip(pkt->tunnel.ip_saddr);
-        TunnelNHKey key(Agent::GetInstance()->GetDefaultVrf(), 
-                        Agent::GetInstance()->GetRouterId(), dest_ip,
+        TunnelNHKey key(Agent::GetInstance()->fabric_vrf_name(), 
+                        Agent::GetInstance()->router_id(), dest_ip,
                         false, pkt->tunnel.type);
         //Get component NH pointer
         component_nh_ptr =
-            static_cast<NextHop *>(Agent::GetInstance()->GetNextHopTable()->FindActiveEntry(&key));
+            static_cast<NextHop *>(Agent::GetInstance()->nexthop_table()->FindActiveEntry(&key));
         //Get Label to be used to reach destination server
         const CompositeNH *nh = 
             static_cast<const CompositeNH *>(in->rt_->GetActiveNextHop());
@@ -353,6 +354,15 @@ static void SetInEcmpIndex(const PktInfo *pkt, PktFlowInfo *flow_info,
         //a interface NH and not composite NH, install reverse flow for consistency
         flow_info->ecmp = true;
     }
+}
+
+static bool RouteAllowNatLookup(const Inet4UnicastRouteEntry *rt) {
+    if (rt != NULL && IsLinkLocalRoute(rt)) {
+        // skip NAT lookup if found route has link local peer.
+        return false;
+    }
+
+    return true;
 }
 
 void PktFlowInfo::SetEcmpFlowInfo(const PktInfo *pkt, const PktControlInfo *in,
@@ -442,14 +452,14 @@ void PktFlowInfo::LinkLocalServiceFromVm(const PktInfo *pkt, PktControlInfo *in,
         return; 
     }
 
-    out->vrf_ = Agent::GetInstance()->GetVrfTable()->
-                FindVrfFromName(Agent::GetInstance()->GetDefaultVrf());
+    out->vrf_ = Agent::GetInstance()->vrf_table()->
+                FindVrfFromName(Agent::GetInstance()->fabric_vrf_name());
     dest_vrf = out->vrf_->vrf_id();
 
     // Set NAT flow fields
     linklocal_flow = true;
     nat_done = true;
-    if (nat_server == Agent::GetInstance()->GetRouterId()) {
+    if (nat_server == Agent::GetInstance()->router_id()) {
         // In case of metadata or when link local destination is local host,
         // set VM's metadata address as NAT source address. This is required
         // to avoid response from the linklocal service being looped back and
@@ -458,7 +468,7 @@ void PktFlowInfo::LinkLocalServiceFromVm(const PktInfo *pkt, PktControlInfo *in,
         nat_ip_saddr = vm_port->mdata_ip_addr().to_ulong();
         nat_sport = pkt->sport;
     } else {
-        nat_ip_saddr = Agent::GetInstance()->GetRouterId().to_ulong();
+        nat_ip_saddr = Agent::GetInstance()->router_id().to_ulong();
         // we bind to a local port & use it as NAT source port (cannot use
         // incoming src port); init here and bind in Add;
         nat_sport = 0;
@@ -491,7 +501,7 @@ void PktFlowInfo::LinkLocalServiceFromHost(const PktInfo *pkt, PktControlInfo *i
     }
 
     if ((pkt->ip_daddr != vm_port->mdata_ip_addr().to_ulong()) ||
-        (pkt->ip_saddr != Agent::GetInstance()->GetRouterId().to_ulong())) {
+        (pkt->ip_saddr != Agent::GetInstance()->router_id().to_ulong())) {
         // Force implicit deny
         in->rt_ = NULL;
         out->rt_ = NULL;
@@ -506,7 +516,7 @@ void PktFlowInfo::LinkLocalServiceFromHost(const PktInfo *pkt, PktControlInfo *i
     nat_ip_saddr = METADATA_IP_ADDR;
     nat_ip_daddr = vm_port->ip_addr().to_ulong();
     nat_dport = pkt->dport;
-    if (pkt->sport == Agent::GetInstance()->GetMetadataServerPort()) {
+    if (pkt->sport == Agent::GetInstance()->metadata_server_port()) {
         nat_sport = METADATA_NAT_PORT;
     } else {
         nat_sport = pkt->sport;
@@ -566,18 +576,18 @@ void PktFlowInfo::FloatingIpDNat(const PktInfo *pkt, PktControlInfo *in,
         nat_dest_vrf = it->vrf_.get()->vrf_id();
     }
     out->rt_ = ftable->GetUcRoute(it->vrf_.get(), Ip4Address(pkt->ip_daddr));
-    //VrfTranslate(pkt, in, out);
     out->vn_ = it->vn_.get();
     dest_vn = &(it->vn_.get()->GetName());
     dest_vrf = out->intf_->vrf()->vrf_id();
 
     // Translate the Dest-IP
-    nat_done = true;
-    nat_ip_saddr = pkt->ip_saddr;
+    if (nat_done == false)
+        nat_ip_saddr = pkt->ip_saddr;
     nat_ip_daddr = vm_port->ip_addr().to_ulong();
     nat_sport = pkt->sport;
     nat_dport = pkt->dport;
     nat_vrf = dest_vrf;
+    nat_done = true;
 
     if (in->rt_) {
         flow_source_vrf = static_cast<const AgentRoute *>(in->rt_)->vrf_id();
@@ -585,6 +595,9 @@ void PktFlowInfo::FloatingIpDNat(const PktInfo *pkt, PktControlInfo *in,
         flow_source_vrf = VrfEntry::kInvalidIndex;
     }
     flow_dest_vrf = it->vrf_.get()->vrf_id();
+
+    // Update fields required for floating-IP stats accounting
+    fip_dnat = true;
 
     return;
 }
@@ -640,11 +653,11 @@ void PktFlowInfo::FloatingIpSNat(const PktInfo *pkt, PktControlInfo *in,
         return;
     }
 
-    //VrfTranslate(pkt, in, out);
-    // Compute out-intf and ECMP info from out-route
-    if (RouteToOutInfo(out->rt_, pkt, this, in, out) == false) {
-        return;
-    }
+    //Populate in->vn, used for VRF translate ACL lookup
+    in->vn_ = fip_it->vn_.get();
+    // Source-VN for policy processing is based on floating-ip VN
+    // Dest-VN will be based on out->rt_ and computed below
+    source_vn = &(fip_it->vn_.get()->GetName());
 
     // Floating-ip found. We will change src-ip to floating-ip. Recompute route
     // for new source-ip. All policy decisions will be based on this new route
@@ -653,12 +666,15 @@ void PktFlowInfo::FloatingIpSNat(const PktInfo *pkt, PktControlInfo *in,
         return;
     }
 
-    dest_vrf = fip_it->vrf_.get()->vrf_id();
-    in->vn_ = fip_it->vn_.get();
-    // Source-VN for policy processing is based on floating-ip VN
-    // Dest-VN will be based on out->rt_ and computed below
-    source_vn = &(fip_it->vn_.get()->GetName());
+    if (in->rt_ && out->rt_) {
+        VrfTranslate(pkt, in, out);
+    }
+    // Compute out-intf and ECMP info from out-route
+    if (RouteToOutInfo(out->rt_, pkt, this, in, out) == false) {
+        return;
+    }
 
+    dest_vrf = out->rt_->vrf_id();
     // Setup reverse flow to translate sip.
     nat_done = true;
     nat_ip_saddr = fip_it->floating_ip_.to_ulong();
@@ -685,6 +701,9 @@ void PktFlowInfo::FloatingIpSNat(const PktInfo *pkt, PktControlInfo *in,
     } else {
         flow_dest_vrf = VrfEntry::kInvalidIndex;
     }
+    // Update fields required for floating-IP stats accounting
+    snat_fip = nat_ip_saddr;
+    fip_snat = true;
     return;
 }
 
@@ -705,9 +724,11 @@ void PktFlowInfo::VrfTranslate(const PktInfo *pkt, PktControlInfo *in,
     //packet, else get the acl attached to VN and try matching the packet to
     //network acl
     const AclDBEntry *acl = vm_intf->vrf_assign_acl();
-    if (acl == NULL && vm_intf->vn()) {
-        //Check if the network ACL is present
-        acl = vm_intf->vn()->GetAcl();
+    if (acl == NULL) {
+        if (in->vn_) {
+            //Check if the network ACL is present
+            acl = in->vn_->GetAcl();
+        }
     }
 
     if (!acl) {
@@ -726,8 +747,17 @@ void PktFlowInfo::VrfTranslate(const PktInfo *pkt, PktControlInfo *in,
         hdr.src_port = 0;
         hdr.dst_port = 0;
     }
-    hdr.src_policy_id = RouteToVn(in->rt_);
-    hdr.dst_policy_id = RouteToVn(out->rt_);
+    if (source_vn != NULL) {
+        hdr.src_policy_id = source_vn;
+    } else {
+        hdr.src_policy_id = RouteToVn(in->rt_);
+    }
+
+    if (dest_vn != NULL) {
+        hdr.dst_policy_id = dest_vn;
+    } else {
+        hdr.dst_policy_id = RouteToVn(out->rt_);
+    }
 
     if (in->rt_) {
         const AgentPath *path = in->rt_->GetActivePath();
@@ -739,14 +769,14 @@ void PktFlowInfo::VrfTranslate(const PktInfo *pkt, PktControlInfo *in,
     }
 
     MatchAclParams match_acl_param;
-    if (!acl->PacketMatch(hdr, match_acl_param)) {
+    if (!acl->PacketMatch(hdr, match_acl_param, NULL)) {
         return;
     }
 
     if (match_acl_param.action_info.vrf_translate_action_.vrf_name() != "") {
         VrfKey key(match_acl_param.action_info.vrf_translate_action_.vrf_name());
         const VrfEntry *vrf = static_cast<const VrfEntry*>
-            (Agent::GetInstance()->GetVrfTable()->FindActiveEntry(&key));
+            (Agent::GetInstance()->vrf_table()->FindActiveEntry(&key));
         out->vrf_ = vrf;
         if (vrf) {
             out->rt_ = vrf->GetUcRoute(Ip4Address(pkt->ip_daddr));
@@ -795,14 +825,13 @@ void PktFlowInfo::IngressProcess(const PktInfo *pkt, PktControlInfo *in,
         }
     }
 
-    // If no route for DA or route points to a different VN
-    // and floating-ip configured try floating-ip SNAT
-    if (out->rt_ == NULL ||
-        (in->vn_ != NULL && *RouteToVn(out->rt_) != in->vn_->GetName())) {
+    if (RouteAllowNatLookup(out->rt_)) {
+        // If interface has floating IP, check if we have more specific route in
+        // public VN (floating IP)
         if (IntfHasFloatingIp(in->intf_)) {
             FloatingIpSNat(pkt, in, out);
         }
-    } 
+    }
     
     if (out->rt_ != NULL) {
         // Route is present. If IP-DA is a floating-ip, we need DNAT
@@ -829,7 +858,7 @@ void PktFlowInfo::IngressProcess(const PktInfo *pkt, PktControlInfo *in,
 
 void PktFlowInfo::EgressProcess(const PktInfo *pkt, PktControlInfo *in,
                                 PktControlInfo *out) {
-    MplsLabel *mpls = Agent::GetInstance()->GetMplsTable()->FindMplsLabel(pkt->tunnel.label);
+    MplsLabel *mpls = Agent::GetInstance()->mpls_table()->FindMplsLabel(pkt->tunnel.label);
     if (mpls == NULL) {
         LogError(pkt, "Invalid Label in egress flow");
         return;
@@ -847,8 +876,9 @@ void PktFlowInfo::EgressProcess(const PktInfo *pkt, PktControlInfo *in,
         out->vn_ = InterfaceToVn(out->intf_);
     }
 
-    // If no route for DA and floating-ip configured try floating-ip DNAT
-    if (out->rt_ == NULL) {
+    if (RouteAllowNatLookup(out->rt_)) {
+        // If interface has floating IP, check if destination is one of the
+        // configured floating IP.
         if (IntfHasFloatingIp(out->intf_)) {
             FloatingIpDNat(pkt, in, out);
         }
@@ -880,7 +910,7 @@ bool PktFlowInfo::Process(const PktInfo *pkt, PktControlInfo *in,
         }
     }
 
-    in->vrf_ = Agent::GetInstance()->GetVrfTable()->FindVrfFromId(pkt->agent_hdr.vrf);
+    in->vrf_ = Agent::GetInstance()->vrf_table()->FindVrfFromId(pkt->agent_hdr.vrf);
     if (in->vrf_ == NULL || !in->vrf_->IsActive()) {
         in->vrf_ = NULL;
         LogError(pkt, "Invalid or Inactive VRF");
@@ -938,6 +968,13 @@ void PktFlowInfo::Add(const PktInfo *pkt, PktControlInfo *in,
                 pkt->ip_proto, pkt->sport, pkt->dport);
     FlowEntryPtr flow(Agent::GetInstance()->pkt()->flow_table()->Allocate(key));
 
+    if (ingress && !short_flow && !linklocal_flow) {
+        if (in->rt_->WaitForTraffic()) {
+            flow_table->agent()->oper_db()->route_preference_module()->
+                EnqueueTrafficSeen(Ip4Address(pkt->ip_saddr), 32,
+                                   in->intf_->id(), pkt->vrf);
+        }
+    }
     // Do not allow more than max flows
     if ((in->vm_ &&
          (flow_table->VmFlowCount(in->vm_) + 2) > flow_table->max_vm_flows()) ||
@@ -986,12 +1023,89 @@ void PktFlowInfo::Add(const PktInfo *pkt, PktControlInfo *in,
         rflow = Agent::GetInstance()->pkt()->flow_table()->Allocate(rkey);
     }
 
+    // If the flows are already present, we want to retain the Forward and
+    // Reverse flow characteristics for flow.
+    // We have following conditions,
+    // flow has ReverseFlow set, rflow has ReverseFlow reset
+    //      Swap flow and rflow
+    // flow has ReverseFlow set, rflow has ReverseFlow set
+    //      Unexpected case. Continue with flow as forward flow
+    // flow has ReverseFlow reset, rflow has ReverseFlow reset
+    //      Unexpected case. Continue with flow as forward flow
+    // flow has ReverseFlow reset, rflow has ReverseFlow set
+    //      No change in forward/reverse flow. Continue with flow as forward-flow
+    bool swap_flows = false;
+    if (flow->is_flags_set(FlowEntry::ReverseFlow) &&
+        !rflow->is_flags_set(FlowEntry::ReverseFlow)) {
+        swap_flows = true;
+    }
+
     tcp_ack = pkt->tcp_ack;
     flow->InitFwdFlow(this, pkt, in, out);
     rflow->InitRevFlow(this, out, in);
 
-    Agent::GetInstance()->pkt()->flow_table()->Add(flow.get(), rflow.get());
+    /* Fip stats info in not updated in InitFwdFlow and InitRevFlow because
+     * both forward and reverse flows are not not linked to each other yet.
+     * We need both forward and reverse flows to update Fip stats info */
+    UpdateFipStatsInfo(flow.get(), rflow.get(), pkt, in, out);
+    if (swap_flows) {
+        Agent::GetInstance()->pkt()->flow_table()->Add(rflow.get(), flow.get());
+    } else {
+        Agent::GetInstance()->pkt()->flow_table()->Add(flow.get(), rflow.get());
+    }
 }
+
+void PktFlowInfo::UpdateFipStatsInfo
+    (FlowEntry *flow, FlowEntry *rflow, const PktInfo *pkt,
+     const PktControlInfo *in, const PktControlInfo *out) {
+    uint32_t intf_id, r_intf_id;
+    uint32_t fip, r_fip;
+    intf_id = Interface::kInvalidIndex;
+    r_intf_id = Interface::kInvalidIndex;
+    fip = 0;
+    r_fip = 0;
+    if (fip_snat && fip_dnat) {
+        /* This is the case where Source and Destination VMs (part of
+         * same compute node) have floating-IP assigned to each of them from
+         * a common VN and then each of these VMs send traffic to other VM by
+         * addressing the other VM's Floating IP. In this case both SNAT and
+         * DNAT flags will be set. We identify SNAT and DNAT flows by
+         * inspecting IP of forward and reverse flows and update Fip stats
+         * info based on that. */
+        const FlowKey *nat_key = &(rflow->key());
+        if (flow->key().src.ipv4 != nat_key->dst.ipv4) {
+            //SNAT case
+            fip = snat_fip;
+            intf_id = in->intf_->id();
+        } else if (flow->key().dst.ipv4 != nat_key->src.ipv4) {
+            //DNAT case
+            fip = flow->key().dst.ipv4;
+            intf_id = out->intf_->id();
+        }
+        nat_key = &(flow->key());
+        if (rflow->key().src.ipv4 != nat_key->dst.ipv4) {
+            //SNAT case
+            r_fip = snat_fip;
+            r_intf_id = in->intf_->id();
+        } else if (rflow->key().dst.ipv4 != nat_key->src.ipv4) {
+            //DNAT case
+            r_fip = rflow->key().dst.ipv4;
+            r_intf_id = out->intf_->id();
+        }
+    } else if (fip_snat) {
+        fip = r_fip = nat_ip_saddr;
+        intf_id = r_intf_id = in->intf_->id();
+    } else if (fip_dnat) {
+        fip = r_fip = pkt->ip_daddr;
+        intf_id = r_intf_id = out->intf_->id();
+    }
+
+    if (fip_snat || fip_dnat) {
+        flow->UpdateFipStatsInfo(fip, intf_id);
+        rflow->UpdateFipStatsInfo(r_fip, r_intf_id);
+    }
+}
+
 
 //If a packet is trapped for ecmp resolve, dp might have already
 //overwritten original packet(NAT case), hence get actual packet by
@@ -1034,4 +1148,3 @@ void PktFlowInfo::RewritePktInfo(uint32_t flow_index) {
     }
     return;
 }
-

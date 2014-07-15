@@ -26,17 +26,13 @@ VmStat::VmStat(Agent *agent, const uuid &vm_uuid):
     virt_memory_(0), virt_memory_peak_(0), vm_memory_quota_(0), 
     prev_cpu_stat_(0), cpu_usage_(0), prev_cpu_snapshot_time_(0), 
     prev_vcpu_snapshot_time_(0), 
-    input_(*(agent_->GetEventManager()->io_service())),
-    timer_(TimerManager::CreateTimer(*(agent_->GetEventManager())->io_service(),
-    "VmStatTimer")), marked_delete_(false), pid_(0), retry_(0), 
-    signal_(*(agent_->GetEventManager()->io_service())) {
-    InitSigHandler();
+    input_(*(agent_->event_manager()->io_service())),
+    timer_(TimerManager::CreateTimer(*(agent_->event_manager())->io_service(),
+    "VmStatTimer")), marked_delete_(false), pid_(0), retry_(0) {
 }
 
 VmStat::~VmStat() {
     TimerManager::DeleteTimer(timer_);
-    boost::system::error_code ec;
-    signal_.cancel(ec);
 }
 
 void VmStat::ReadData(const boost::system::error_code &ec,
@@ -231,31 +227,28 @@ void VmStat::ReadMemStat() {
     data_.str(" ");
     data_.clear();
     //Send Stats
-    UveVirtualMachineAgent vm_agent;
-    if (BuildVmStatsMsg(vm_agent)) {
-        agent_->uve()->vm_uve_table()->DispatchVmMsg(vm_agent);
+    VirtualMachineStats vm_agent;
+    if (BuildVmStatsMsg(&vm_agent)) {
+        agent_->uve()->vm_uve_table()->DispatchVmStatsMsg(vm_agent);
     }
     StartTimer();    
 }
 
-bool VmStat::BuildVmStatsMsg(UveVirtualMachineAgent &uve) {
-    bool changed = false;
-    uve.set_name(UuidToString(vm_uuid_));
+bool VmStat::BuildVmStatsMsg(VirtualMachineStats *uve) {
+    uve->set_name(UuidToString(vm_uuid_));
 
-    UveVirtualMachineStats stats;
+    std::vector<VmCpuStats> cpu_stats_list;
+    VmCpuStats stats;
     stats.set_cpu_one_min_avg(cpu_usage_);
-    stats.set_vcpu_one_min_avg(vcpu_usage_percent_);
     stats.set_vm_memory_quota(vm_memory_quota_);
     stats.set_rss(mem_usage_);
     stats.set_virt_memory(virt_memory_);
-    stats.set_peak_virt_memory(virt_memory_peak_);   
+    stats.set_peak_virt_memory(virt_memory_peak_);
 
-    if (stats != prev_stats_){
-        uve.set_vm_stats(stats);
-        prev_stats_ = stats;
-        changed = true;
-    }
-    return changed;
+    cpu_stats_list.push_back(stats);
+    uve->set_cpu_stats(cpu_stats_list);
+
+    return true;
 }
 
 void VmStat::GetCpuStat() {
@@ -353,26 +346,5 @@ void VmStat::Stop() {
         //entry as asio may be using it
         delete this;
     }
-}
-
-void VmStat::HandleSigChild(const boost::system::error_code& error, int sig) {
-    if (!error) {
-        int status;
-        while (::waitpid(-1, &status, WNOHANG) > 0);
-        RegisterSigHandler();
-    }
-}
-
-void VmStat::RegisterSigHandler() {
-    signal_.async_wait(boost::bind(&VmStat::HandleSigChild, this, _1, _2));
-}
-
-void VmStat::InitSigHandler() {
-    boost::system::error_code ec;
-    signal_.add(SIGCHLD, ec);
-    if (ec) {
-        LOG(ERROR, "SIGCHLD registration failed");
-    }
-    RegisterSigHandler();
 }
 

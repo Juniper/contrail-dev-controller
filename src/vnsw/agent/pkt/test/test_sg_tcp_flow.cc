@@ -115,7 +115,7 @@ static void AddSgIdAcl(const char *name, int id, int proto,
     pugi::xml_document xdoc_;
     pugi::xml_parse_result result = xdoc_.load(s.c_str());
     EXPECT_TRUE(result);
-    Agent::GetInstance()->GetIfMapAgentParser()->ConfigParse(xdoc_.first_child(), 0);
+    Agent::GetInstance()->ifmap_parser()->ConfigParse(xdoc_.first_child(), 0);
     client->WaitForIdle();
 }
 
@@ -182,7 +182,7 @@ static bool VmPortSetup(struct PortInfo *input, int count, int aclid) {
         ret = false;
     }
 
-    strcpy(vhost_addr, Agent::GetInstance()->GetRouterId().to_string().c_str());
+    strcpy(vhost_addr, Agent::GetInstance()->router_id().to_string().c_str());
     return ret;
 }
 
@@ -274,7 +274,8 @@ public:
                 "sg_tcp_i");
 
         AddFloatingIpPool("fip-pool1", 1);
-        AddLink("floating-ip-pool", "fip-pool1", "virtual-network", "vn3");
+        AddLink("floating-ip-pool", "fip-pool1", "virtual-network",
+                "default-project:vn3");
         AddFloatingIp("fip1", 1, "3.3.3.100");
         AddLink("floating-ip", "fip1", "floating-ip-pool", "fip-pool1");
         client->WaitForIdle();
@@ -293,15 +294,17 @@ public:
 
         //Add a remote route pointing to SG id 2
         boost::system::error_code ec;
-        Inet4TunnelRouteAdd(NULL, "vn1:vn1", Ip4Address::from_string("1.1.1.0", ec), 24,
+        Inet4TunnelRouteAdd(NULL, "default-project:vn1:vn1",
+             Ip4Address::from_string("1.1.1.0", ec), 24,
              Ip4Address::from_string("10.10.10.10", ec), TunnelType::AllType(),
-             17, "vn1", sg_id_list);
+             17, "default-project:vn1", sg_id_list, PathPreference());
         client->WaitForIdle();
 
         //Add a remote route for floating-ip VN pointing to SG id 2
-        Inet4TunnelRouteAdd(NULL, "vn3:vn3", Ip4Address::from_string("3.3.3.2", ec), 24,
+        Inet4TunnelRouteAdd(NULL, "default-project:vn3:vn3",
+             Ip4Address::from_string("3.3.3.2", ec), 24,
              Ip4Address::from_string("10.10.10.10", ec), TunnelType::AllType(),
-             18, "vn3", sg_id_list);
+             18, "default-project:vn3", sg_id_list, PathPreference());
         client->WaitForIdle();
 
 
@@ -314,15 +317,18 @@ public:
 
         boost::system::error_code ec;
         Inet4UnicastAgentRouteTable::DeleteReq
-            (NULL, "vn1:vn1", Ip4Address::from_string("1.1.1.0", ec), 24, NULL);
+            (NULL, "default-project:vn1:vn1", Ip4Address::from_string("1.1.1.0", ec),
+             24, NULL);
         client->WaitForIdle();
 
         Inet4UnicastAgentRouteTable::DeleteReq
-            (NULL, "vn3:vn3", Ip4Address::from_string("3.3.3.2", ec), 24, NULL);
+            (NULL, "default-project:vn3:vn3", Ip4Address::from_string("3.3.3.2", ec),
+             24, NULL);
 
         client->WaitForIdle();
         DelLink("virtual-machine-interface", "vnet1", "floating-ip", "fip1");
-        DelLink("floating-ip-pool", "fip-pool1", "virtual-network", "vn3");
+        DelLink("floating-ip-pool", "fip-pool1", "virtual-network",
+                "default-project:vn3");
         DelLink("floating-ip", "fip1", "floating-ip-pool", "fip-pool1");
         DelFloatingIp("fip1");
         DelFloatingIpPool("fip-pool1");
@@ -658,14 +664,14 @@ TEST_F(SgTcpAckTest, local_vm_ingress_tcp_acl_1) {
                                intf1->flow_key_nh()->id()));
 
     // TCP Non-ACK from VM2 to VM1 - DROP
-    TxTcpPacket(intf1->id(), intf2_addr, intf1_addr, 3, 3, false, 20);
+    TxTcpPacket(intf2->id(), intf2_addr, intf1_addr, 3, 3, false, 20);
     client->WaitForIdle();
     EXPECT_TRUE(ValidateAction(intf2->vrf()->vrf_id(), intf2_addr,
                                intf1_addr, 6, 3, 3, TrafficAction::DROP,
                                intf2->flow_key_nh()->id()));
 
     // TCP Non-ACK from VM2 to VM1 - DROP
-    TxTcpPacket(intf1->id(), intf2_addr, intf1_addr, 4, 4, true, 30);
+    TxTcpPacket(intf2->id(), intf2_addr, intf1_addr, 4, 4, true, 30);
     client->WaitForIdle();
     EXPECT_TRUE(ValidateAction(intf2->vrf()->vrf_id(), intf2_addr,
                                intf1_addr, 6, 4, 4, TrafficAction::DROP,

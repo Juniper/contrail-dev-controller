@@ -91,11 +91,11 @@ public:
         char acl_name[80];
 
         sprintf(acl_name, "acl%d", id);
-        uint32_t count = Agent::GetInstance()->GetAclTable()->Size();
+        uint32_t count = Agent::GetInstance()->acl_table()->Size();
         client->Reset();
         AddAcl(acl_name, id);
         EXPECT_TRUE(client->AclNotifyWait(1));
-        EXPECT_EQ((count + 1), Agent::GetInstance()->GetAclTable()->Size());
+        EXPECT_EQ((count + 1), Agent::GetInstance()->acl_table()->Size());
     }
 
     void CreateRemoteRoute(const char *vrf, const char *remote_vm, 
@@ -104,7 +104,7 @@ public:
         Ip4Address addr = Ip4Address::from_string(remote_vm, ec);
         Ip4Address gw = Ip4Address::from_string(serv, ec);
         Inet4TunnelRouteAdd(peer_, vrf, addr, 32, gw, TunnelType::AllType(), label, vn,
-                            SecurityGroupList());
+                            SecurityGroupList(), PathPreference());
         client->WaitForIdle(2);
         WAIT_FOR(1000, 500, (RouteFind(vrf, addr, 32) == true));
     }
@@ -113,7 +113,7 @@ public:
         boost::system::error_code ec;
         Ip4Address addr = Ip4Address::from_string(ip, ec);
         Agent::Agent::GetInstance()->
-            GetDefaultInet4UnicastRouteTable()->DeleteReq(peer_, 
+            fabric_inet4_unicast_table()->DeleteReq(peer_, 
                 vrf, addr, 32, NULL);
         client->WaitForIdle();
         WAIT_FOR(1000, 1, (RouteFind(vrf, addr, 32) == false));
@@ -472,13 +472,13 @@ TEST_F(UveVnUveTest, FlowCount_1) {
     EXPECT_EQ(4U, in_count);
     EXPECT_EQ(4U, out_count);
     UveVirtualNetworkAgent *uve1 =  vnut->VnUveObject("vn5");
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
     EXPECT_EQ(4U, uve1->get_ingress_flow_count());
     EXPECT_EQ(4U, uve1->get_egress_flow_count());
 
     DeleteFlow(flow, 1);
     EXPECT_EQ(2U, Agent::GetInstance()->pkt()->flow_table()->Size());
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
     EXPECT_EQ(2U, uve1->get_ingress_flow_count());
     EXPECT_EQ(2U, uve1->get_egress_flow_count());
     FlowTearDown();
@@ -543,7 +543,7 @@ TEST_F(UveVnUveTest, FlowCount_2) {
     EXPECT_EQ(2U, out_count);
 
     //Trigger VN UVE send
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
 
     //Verfiy ingress and egress flow counts for local VN "vn5"
     UveVirtualNetworkAgent *uve1 =  vnut->VnUveObject("vn5");
@@ -559,7 +559,7 @@ TEST_F(UveVnUveTest, FlowCount_2) {
     EXPECT_EQ(2U, Agent::GetInstance()->pkt()->flow_table()->Size());
 
     //Trigger VN UVE send
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
     //Verfiy ingress and egress flow counts in VN UVEs
     EXPECT_EQ(1U, uve1->get_ingress_flow_count());
     EXPECT_EQ(1U, uve1->get_egress_flow_count());
@@ -627,7 +627,7 @@ TEST_F(UveVnUveTest, FipCount) {
     EXPECT_TRUE(VmPortActive(input, 0));
 
     //Trigger VN UVE send
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
 
     //Verify UVE 
     UveVirtualNetworkAgent *uve1 =  vnut->VnUveObject("vn1");
@@ -636,28 +636,30 @@ TEST_F(UveVnUveTest, FipCount) {
 
     //Create a VN for floating-ip
     client->Reset();
-    AddVn("vn2", 2);
+    AddVn("default-project:vn2", 2);
     client->WaitForIdle();
     EXPECT_TRUE(client->VnNotifyWait(1));
-    AddVrf("vn2:vn2");
+    AddVrf("default-project:vn2:vn2");
     client->WaitForIdle();
     EXPECT_TRUE(client->VrfNotifyWait(1));
-    EXPECT_TRUE(VrfFind("vn2:vn2"));
-    AddLink("virtual-network", "vn2", "routing-instance", "vn2:vn2");
+    EXPECT_TRUE(VrfFind("default-project:vn2:vn2"));
+    AddLink("virtual-network", "default-project:vn2", "routing-instance",
+            "default-project:vn2:vn2");
     client->WaitForIdle();
 
     // Configure Floating-IP
     AddFloatingIpPool("fip-pool1", 1);
     AddFloatingIp("fip1", 1, "71.1.1.100");
     AddLink("floating-ip", "fip1", "floating-ip-pool", "fip-pool1");
-    AddLink("floating-ip-pool", "fip-pool1", "virtual-network", "vn2");
+    AddLink("floating-ip-pool", "fip-pool1", "virtual-network",
+            "default-project:vn2");
     client->WaitForIdle();
     AddLink("virtual-machine-interface", "vnet1", "floating-ip", "fip1");
     client->WaitForIdle();
     WAIT_FOR(1000, 500, ((VmPortFloatingIpCount(1, 1) == true)));
 
     //Trigger VN UVE send
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
     client->WaitForIdle();
 
     //Verify UVE 
@@ -670,7 +672,7 @@ TEST_F(UveVnUveTest, FipCount) {
     client->WaitForIdle(3);
 
     //Trigger VN UVE send
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
     client->WaitForIdle();
 
     //Verify UVE 
@@ -683,7 +685,7 @@ TEST_F(UveVnUveTest, FipCount) {
     client->WaitForIdle();
 
     //Trigger VN UVE send
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
 
     //Verify UVE 
     EXPECT_EQ(1, uve1->get_associated_fip_count());
@@ -695,7 +697,7 @@ TEST_F(UveVnUveTest, FipCount) {
     client->WaitForIdle();
 
     //Trigger VN UVE send
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
 
     //Verify UVE 
     EXPECT_EQ(0, uve1->get_associated_fip_count());
@@ -742,7 +744,7 @@ TEST_F(UveVnUveTest, VnVrfAssoDisassoc_1) {
     EXPECT_EQ(1U, vnut->send_count());
 
     //Trigger send of VN stats
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
 
     //Verify vrf stats list in UVE
     UveVirtualNetworkAgent *uve1 =  vnut->VnUveObject("vn3");
@@ -754,7 +756,7 @@ TEST_F(UveVnUveTest, VnVrfAssoDisassoc_1) {
     client->WaitForIdle();
 
     //Trigger send of VN stats
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
 
     //Verify vrf stats list in UVE
     EXPECT_EQ(1U, uve1->get_vrf_stats_list().size()); 
@@ -764,7 +766,7 @@ TEST_F(UveVnUveTest, VnVrfAssoDisassoc_1) {
     client->WaitForIdle();
 
     //Trigger send of VN stats
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
 
     //Verify vrf stats list in UVE
     EXPECT_EQ(0U, uve1->get_vrf_stats_list().size()); 
@@ -774,7 +776,7 @@ TEST_F(UveVnUveTest, VnVrfAssoDisassoc_1) {
     client->WaitForIdle();
 
     //Trigger send of VN stats
-    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats();
+    Agent::GetInstance()->uve()->vn_uve_table()->SendVnStats(false);
 
     //Verify vrf stats list in UVE
     EXPECT_EQ(1U, uve1->get_vrf_stats_list().size()); 
@@ -800,10 +802,10 @@ TEST_F(UveVnUveTest, LinkLocalVn_Xen) {
     VnUveTableTest *vnut = static_cast<VnUveTableTest *>
         (agent->uve()->vn_uve_table());
     //Add VN
-    util_.VnAddByName(agent->GetLinkLocalVnName().c_str(), input[0].vn_id);
+    util_.VnAddByName(agent->linklocal_vn_name().c_str(), input[0].vn_id);
     EXPECT_EQ(1U, vnut->send_count());
 
-    UveVirtualNetworkAgent *uve1 =  vnut->VnUveObject(agent->GetLinkLocalVnName());
+    UveVirtualNetworkAgent *uve1 =  vnut->VnUveObject(agent->linklocal_vn_name());
     EXPECT_EQ(0U, uve1->get_virtualmachine_list().size());
     EXPECT_EQ(0U, uve1->get_interface_list().size());
 
@@ -823,9 +825,9 @@ TEST_F(UveVnUveTest, LinkLocalVn_Xen) {
     //Add necessary objects and links to make vm-intf active
     util_.VmAdd(input[0].vm_id);
     util_.VrfAdd(input[0].vn_id);
-    AddLink("virtual-network", agent->GetLinkLocalVnName().c_str(), "routing-instance", "vrf1");
+    AddLink("virtual-network", agent->linklocal_vn_name().c_str(), "routing-instance", "vrf1");
     client->WaitForIdle();
-    AddLink("virtual-network", agent->GetLinkLocalVnName().c_str(), "virtual-machine-interface", "vnet1");
+    AddLink("virtual-network", agent->linklocal_vn_name().c_str(), "virtual-machine-interface", "vnet1");
     client->WaitForIdle();
     AddLink("virtual-machine", "vm1", "virtual-machine-interface", "vnet1");
     client->WaitForIdle();
@@ -864,11 +866,11 @@ TEST_F(UveVnUveTest, LinkLocalVn_Xen) {
     EXPECT_EQ(0U, uve1->get_interface_list().size());
 
     //Delete VN
-    DelLink("virtual-network", agent->GetLinkLocalVnName().c_str(),
+    DelLink("virtual-network", agent->linklocal_vn_name().c_str(),
             "virtual-machine-interface", "vnet1");
-    DelLink("virtual-network", agent->GetLinkLocalVnName().c_str(),
+    DelLink("virtual-network", agent->linklocal_vn_name().c_str(),
             "routing-instance", "vrf1");
-    util_.VnDeleteByName(agent->GetLinkLocalVnName().c_str(), input[0].vn_id);
+    util_.VnDeleteByName(agent->linklocal_vn_name().c_str(), input[0].vn_id);
 
     //Verify UVE
     EXPECT_EQ(1U, vnut->delete_count());
@@ -893,6 +895,57 @@ TEST_F(UveVnUveTest, LinkLocalVn_Xen) {
     vnut->ClearCount();
 }
 
+TEST_F(UveVnUveTest, VnThroughput) {
+    struct PortInfo input[30];
+    VmInterface *intf[30];
+    uint8_t size = Agent::GetInstance()->interface_config_table()->Size();
+    for (int i = 0; i < 30; i++) {
+        int id = (i + 10);
+        sprintf(input[i].name, "myvnet%d", id);
+        input[i].intf_id = id;
+        sprintf(input[i].addr, "1.1.1.%d", id);
+        sprintf(input[i].mac, "00:00:00:01:01:%02d", id);
+        input[i].vn_id = 8;
+        input[i].vm_id = id;
+    }
+    CreateVmportEnv(input, 30);
+    client->WaitForIdle();
+    EXPECT_EQ((size + 30), Agent::GetInstance()->interface_config_table()->
+                                                 Size());
+
+    AgentStatsCollectorTest *collector = static_cast<AgentStatsCollectorTest *>
+        (Agent::GetInstance()->uve()->agent_stats_collector());
+    collector->Run();
+    client->WaitForIdle();
+    for (int i = 0; i < 30; i++) {
+        intf[i] = VmInterfaceGet(input[i].intf_id);
+        EXPECT_TRUE(intf[i] != NULL);
+        EXPECT_TRUE(VmPortStatsMatch(intf[i], 0,0,0,0));
+        KSyncSockTypeMap::IfStatsUpdate(intf[i]->id(), 50, 1, 0, 20, 1, 0);
+    }
+
+    collector->Run();
+    client->WaitForIdle();
+
+    for (int i = 0; i < 30; i++) {
+        EXPECT_TRUE(VmPortStatsMatch(intf[i], 50, 1, 20, 1));
+    }
+
+    VnUveTableTest *vnut = static_cast<VnUveTableTest *>
+        (Agent::GetInstance()->uve()->vn_uve_table());
+
+    UveVirtualNetworkAgent *uve1 =  vnut->VnUveObject(intf[0]->vn()->GetName());
+    EXPECT_EQ(30U, uve1->get_in_tpkts());
+    EXPECT_EQ(30U, uve1->get_out_tpkts());
+    EXPECT_EQ((30 * 50), uve1->get_in_bytes());
+    EXPECT_EQ((30 * 20), uve1->get_out_bytes());
+
+    //cleanup
+    DeleteVmportEnv(input, 30, true);
+    client->WaitForIdle();
+    EXPECT_EQ(size, Agent::GetInstance()->interface_config_table()->Size());
+}
+
 int main(int argc, char **argv) {
     GETUSERARGS();
     client = TestInit(init_file, ksync_init);
@@ -901,7 +954,5 @@ int main(int argc, char **argv) {
     usleep(10000);
     int ret = RUN_ALL_TESTS();
     client->WaitForIdle();
-    TestShutdown();
-    delete client;
     return ret;
 }

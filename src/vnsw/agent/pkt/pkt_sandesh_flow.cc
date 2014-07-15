@@ -67,6 +67,9 @@ using boost::system::error_code;
         data.set_ecmp_index(fe->data().component_nh_idx);                     \
     }                                                                       \
     data.set_reverse_flow(fe->is_flags_set(FlowEntry::ReverseFlow) ? "yes" : "no"); \
+    Ip4Address fip(fe->stats().fip);                                        \
+    data.set_fip(fip.to_string());                                          \
+    data.set_fip_vm_interface_idx(fe->stats().fip_vm_port_id);              \
     SetAclInfo(data, fe);                                                   \
     data.set_nh(fe->key().nh);                                              \
 
@@ -138,6 +141,9 @@ static void SetAclInfo(SandeshFlowData &data, FlowEntry *fe) {
     SetOneAclInfo(&policy, fe->match_p().out_mirror_action,
                   fe->match_p().m_out_mirror_acl_l);
     data.set_out_mirror(policy);
+
+    data.set_sg_rule_uuid(fe->sg_rule_uuid());
+    data.set_nw_ace_uuid(fe->nw_ace_uuid());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

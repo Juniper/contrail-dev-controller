@@ -5,14 +5,16 @@
 # stdout as communication channel and gratitious text there will break it.
 # stderr should be fine
 
-from gevent import monkey
-monkey.patch_all()
+import sys
 import gevent
+from gevent import monkey
+if not 'unittest' in sys.modules:
+    monkey.patch_all()
+
 import requests
 import uuid
 import json
 import hashlib
-import sys
 import socket
 from disc_utils import *
 from disc_consts import *
@@ -22,6 +24,9 @@ import socket
 
 # sandesh
 from sandesh.discovery_client import ttypes as sandesh
+from pysandesh.connection_info import ConnectionState
+from pysandesh.gen_py.connection_info.ttypes import ConnectionStatus, \
+    ConnectionType
 
 def CamelCase(input):
     words = input.replace('_', '-').split('-')
@@ -71,6 +76,11 @@ class Subscribe(object):
 
         if f:
             # asynch - callback when new info is received
+            ConnectionState.update(conn_type = ConnectionType.DISCOVERY,
+                name = self.service_type,
+                status = ConnectionStatus.INIT,
+                message = 'Subscribe',
+                server_addrs = ['%s:%s' % (dc._server_ip, dc._server_port)])
             self.task = gevent.spawn(self.ttl_loop)
         else:
             self._query()
@@ -92,6 +102,7 @@ class Subscribe(object):
     # info [{u'service_type': u'ifmap-server',
     #        u'ip_addr': u'10.84.7.1', u'port': u'8443'}]
     def _query(self):
+        conn_state_updated = False
         connected = False
         # hoping all errors are transient and a little wait will solve the problem
         while not connected:
@@ -100,12 +111,32 @@ class Subscribe(object):
                     self.url, data=self.post_body, headers=self._headers)
                 if r.status_code != 200:
                     self.syslog('Discovery Server returned error (code %d)' % (r.status_code))
+                    if not conn_state_updated:
+                        conn_state_updated = True
+                        ConnectionState.update(
+                            conn_type = ConnectionType.DISCOVERY, 
+                            name = self.service_type,
+                            status = ConnectionStatus.DOWN,
+                            message = 'Subscribe - Error (code %d)' % \
+                                (r.status_code),
+                            server_addrs = ['%s:%s' % (self.dc._server_ip, \
+                                self.dc._server_port)])
                     gevent.sleep(2)
                 else:
                     connected = True
             except requests.exceptions.ConnectionError:
                 # discovery server down or restarting?
                 self.syslog('discovery server down or restarting?')
+                if not conn_state_updated:
+                    conn_state_updated = True
+                    ConnectionState.update(
+                        conn_type = ConnectionType.DISCOVERY, 
+                        name = self.service_type,
+                        status = ConnectionStatus.DOWN,
+                        message = 'Subscribe - ConnectionError',
+                        server_addrs = \
+                            ['%s:%s' % (self.dc._server_ip, \
+                             self.dc._server_port)])
                 gevent.sleep(2)
         # end while
 
@@ -130,6 +161,13 @@ class Subscribe(object):
             self.info = info
             self.sig = sig
             self.change = True
+
+        ConnectionState.update(conn_type = ConnectionType.DISCOVERY,
+            name = self.service_type,
+            status = ConnectionStatus.UP,
+            message = 'Subscribe Response',
+            server_addrs = ['%s:%s' % (self.dc._server_ip, \
+                self.dc._server_port)])
 
     def wait(self):
         while not self.done:
@@ -195,14 +233,31 @@ class DiscoveryClient(object):
     def _publish_int(self, service, data):
         self.syslog('Publish service "%s", data "%s"' % (service, data))
         payload = {service: data}
+        conn_state_updated = False
         while True:
             try:
                 r = requests.post(
                     self.puburl, data=json.dumps(payload), headers=self._headers)
                 if r.status_code == 200:
                     break
+                if not conn_state_updated:
+                    conn_state_updated = True
+                    ConnectionState.update(conn_type = ConnectionType.DISCOVERY,
+                        name = service,
+                        status = ConnectionStatus.DOWN,
+                        server_addrs = ['%s:%s' % (self._server_ip, \
+                            self._server_port)],
+                        message = 'Publish Error - Status Code ' + 
+                            str(r.status_code))
             except requests.exceptions.ConnectionError:
-                pass
+                if not conn_state_updated:
+                    conn_state_updated = True
+                    ConnectionState.update(conn_type = ConnectionType.DISCOVERY,
+                        name = service,
+                        status = ConnectionStatus.DOWN,
+                        server_addrs = ['%s:%s' % (self._server_ip, \
+                            self._server_port)],
+                        message = 'Publish Error - Connection Error') 
             self.syslog('connection error or failed to publish')
             gevent.sleep(2)
 
@@ -210,7 +265,11 @@ class DiscoveryClient(object):
         cookie = response['cookie']
         self.pubdata[cookie] = (service, data)
         self.syslog('Saving token %s' % (cookie))
-
+        ConnectionState.update(conn_type = ConnectionType.DISCOVERY,
+            name = service, status = ConnectionStatus.UP,
+            server_addrs = ['%s:%s' % (self._server_ip, \
+                self._server_port)],
+            message = 'Publish Response')
         return cookie
 
     # publisher - send periodic heartbeat
@@ -226,6 +285,12 @@ class DiscoveryClient(object):
                     r = requests.post(
                         self.hburl, data=json.dumps(payload), headers=self._headers)
                 except requests.exceptions.ConnectionError:
+                    service, data = pub_list[cookie]
+                    ConnectionState.update(conn_type = ConnectionType.DISCOVERY,
+                        name = service, status = ConnectionState.DOWN,
+                        server_addrs = ['%s:%s' % (self._server_ip, \
+                            self._server_port)],
+                        message = 'HeartBeat - Connection Error') 
                     self.syslog('Connection Error')
                     continue
 

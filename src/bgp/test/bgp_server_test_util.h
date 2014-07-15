@@ -94,9 +94,19 @@ public:
         XmppServer::InsertConnection(connection);
     }
 
-    void RemoveConnection(XmppConnection *connection) {
+    bool RemoveConnection(XmppConnection *connection) {
         tbb::mutex::scoped_lock lock(mutex_);
-        XmppServer::RemoveConnection(connection);
+        return XmppServer::RemoveConnection(connection);
+    }
+
+    void DeleteConnection(XmppConnection *connection) {
+        tbb::mutex::scoped_lock lock(mutex_);
+        XmppServer::DeleteConnection(connection);
+    }
+
+    void DestroyConnection(XmppConnection *connection) {
+        tbb::mutex::scoped_lock lock(mutex_);
+        XmppServer::DestroyConnection(connection);
     }
 
     boost::function<bool()> GetIsPeerCloseGraceful_fnc_;
@@ -176,6 +186,10 @@ public:
 
     virtual bool IsReady() const {
         return IsReady_fnc_();
+    }
+
+    void set_vpn_tables_registered(bool registered) {
+        vpn_tables_registered_ = registered;
     }
 
     boost::function<bool(const uint8_t *, size_t)> SendUpdate_fnc_;

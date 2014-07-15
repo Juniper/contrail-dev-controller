@@ -14,6 +14,7 @@
 #include <vnc_cfg_types.h>
 
 #include <cmn/agent_param.h>
+#include <cmn/agent_signal.h>
 #include <cfg/cfg_init.h>
 #include <cfg/cfg_mirror.h>
 #include <cfg/discovery_agent.h>
@@ -40,7 +41,7 @@
 #include <diag/diag.h>
 #include <ksync/ksync_init.h>
 
-const std::string Agent::null_str_ = "";
+const std::string Agent::null_string_ = "";
 const std::string Agent::fabric_vn_name_ = 
     "default-domain:default-project:ip-fabric";
 std::string Agent::fabric_vrf_name_ =
@@ -53,20 +54,24 @@ const uint8_t Agent::vrrp_mac_[] = {0x00, 0x00, 0x5E, 0x00, 0x01, 0x00};
 const std::string Agent::bcast_mac_ = "FF:FF:FF:FF:FF:FF";
 const std::string Agent::config_file_ = "/etc/contrail/contrail-vrouter-agent.conf";
 const std::string Agent::log_file_ = "/var/log/contrail/vrouter.log";
+const std::string Agent::xmpp_dns_server_connection_name_prefix_ = "dns-server:";
+const std::string Agent::xmpp_control_node_connection_name_prefix_ = "control-node:";
 
 Agent *Agent::singleton_;
 
-const string &Agent::GetHostInterfaceName() {
+const string &Agent::GetHostInterfaceName() const {
     // There is single host interface.  Its addressed by type and not name
-    return Agent::null_str_;
+    return Agent::null_string_;
 };
+
+std::string Agent::GetUuidStr(boost::uuids::uuid uuid_val) const {
+    std::ostringstream str;
+    str << uuid_val;
+    return str.str();
+}
 
 const string &Agent::vhost_interface_name() const {
     return vhost_interface_name_;
-};
-
-const string &Agent::GetHostName() {
-    return host_name_;
 };
 
 bool Agent::isXenMode() {
@@ -231,27 +236,43 @@ void Agent::set_cn_mcast_builder(AgentXmppChannel *peer) {
 }
 
 void Agent::InitCollector() {
-    // If discovery server is not specified, init connection to collector
-    // based on configuration
-    if (dss_addr_.empty() == false) {
+    /* If Sandesh initialization is not being done via discovery we need to
+     * initialize here. We need to do sandesh initialization here for cases
+     * (i) When both Discovery and Collectors are configured.
+     * (ii) When both are not configured (to initilialize introspect)
+     * (iii) When only collector is configured
+     */
+    if (!discovery_server().empty() &&
+        params_->collector_server_list().size() == 0) {
         return;
     }
 
+    /* If collector configuration is specified, use that for connection to
+     * collector. If not we still need to invoke InitGenerator to initialize
+     * introspect.
+     */
     Module::type module = Module::VROUTER_AGENT;
     NodeType::type node_type =
         g_vns_constants.Module2NodeType.find(module)->second;
-    Sandesh::InitGenerator(g_vns_constants.ModuleNames.find(module)->second,
-                           params_->host_name(),
-                           g_vns_constants.NodeTypeNames.find(node_type)->second,
-                           g_vns_constants.INSTANCE_ID_DEFAULT,
-                           GetEventManager(),
-                           params_->http_server_port());
-
-    if (params_->collector_port() != 0 && 
-        params_->collector().to_ulong() != 0) {
-        Sandesh::ConnectToCollector(params_->collector().to_string(),
-                                    params_->collector_port());
+    if (params_->collector_server_list().size() != 0) {
+        Sandesh::InitGenerator(g_vns_constants.ModuleNames.find(module)->second,
+                params_->host_name(),
+                g_vns_constants.NodeTypeNames.find(node_type)->second,
+                g_vns_constants.INSTANCE_ID_DEFAULT,
+                event_manager(),
+                params_->http_server_port(), 0,
+                params_->collector_server_list(),
+                NULL);
+    } else {
+        Sandesh::InitGenerator(g_vns_constants.ModuleNames.find(module)->second,
+                params_->host_name(),
+                g_vns_constants.NodeTypeNames.find(node_type)->second,
+                g_vns_constants.INSTANCE_ID_DEFAULT,
+                event_manager(),
+                params_->http_server_port(),
+                NULL);
     }
+
 }
 
 static bool interface_exist(string &name) {
@@ -312,7 +333,7 @@ Agent::Agent() :
     cn_mcast_builder_(NULL), ds_client_(NULL), host_name_(""),
     prog_name_(""), sandesh_port_(0), db_(NULL), intf_table_(NULL),
     nh_table_(NULL), uc_rt_table_(NULL), mc_rt_table_(NULL), vrf_table_(NULL),
-    vm_table_(NULL), vn_table_(NULL), sg_table_(NULL), addr_table_(NULL),
+    vm_table_(NULL), vn_table_(NULL), sg_table_(NULL),
     mpls_table_(NULL), acl_table_(NULL), mirror_table_(NULL),
     vrf_assign_table_(NULL), mirror_cfg_table_(NULL),
     intf_mirror_cfg_table_(NULL), intf_cfg_table_(NULL), 
@@ -328,7 +349,8 @@ Agent::Agent() :
     mirror_src_udp_port_(0), lifetime_manager_(NULL), 
     ksync_sync_mode_(true), mgmt_ip_(""),
     vxlan_network_identifier_mode_(AUTOMATIC), headless_agent_mode_(false), 
-    debug_(false), test_mode_(false), init_done_(false) {
+    connection_state_(NULL), debug_(false), test_mode_(false),
+    init_done_(false) {
 
     assert(singleton_ == NULL);
     singleton_ = this;
@@ -340,10 +362,16 @@ Agent::Agent() :
 
     SetAgentTaskPolicy();
     CreateLifetimeManager();
+
+    agent_signal_.reset(
+        AgentObjectFactory::Create<AgentSignal>(event_mgr_));
 }
 
 Agent::~Agent() {
     uve_.reset(NULL);
+
+    agent_signal_->Terminate();
+    agent_signal_.reset();
 
     delete event_mgr_;
     event_mgr_ = NULL;

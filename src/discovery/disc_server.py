@@ -178,7 +178,7 @@ class DiscoveryServer():
         self._sandesh.init_generator(
             module_name, socket.gethostname(), node_type_name, instance_id,
             self._args.collectors, 'discovery_context', 
-            int(self._args.http_server_port), ['sandesh', 'uve'])
+            int(self._args.http_server_port), ['sandesh'])
         self._sandesh.set_logging_params(enable_local_log=self._args.log_local,
                                          category=self._args.log_category,
                                          level=self._args.log_level,
@@ -528,7 +528,7 @@ class DiscoveryServer():
             len(pubs), len(pubs_active), len(subs)))
 
         if subs:
-            plist = {entry['service_id']:entry for entry in pubs_active}
+            plist = dict((entry['service_id'],entry) for entry in pubs_active)
             for service_id, result in subs:
                 # previously published service is gone
                 entry = plist.get(service_id, None)

@@ -120,23 +120,23 @@ void InterfaceTable::Delete(DBEntry *entry, const DBRequest *req) {
 VrfEntry *InterfaceTable::FindVrfRef(const string &name) const {
     VrfKey key(name);
     return static_cast<VrfEntry *>
-        (agent_->GetVrfTable()->FindActiveEntry(&key));
+        (agent_->vrf_table()->FindActiveEntry(&key));
 }
 
 VmEntry *InterfaceTable::FindVmRef(const uuid &uuid) const {
     VmKey key(uuid);
-    return static_cast<VmEntry *>(agent_->GetVmTable()->FindActiveEntry(&key));
+    return static_cast<VmEntry *>(agent_->vm_table()->FindActiveEntry(&key));
 }
 
 VnEntry *InterfaceTable::FindVnRef(const uuid &uuid) const {
     VnKey key(uuid);
-    return static_cast<VnEntry *>(agent_->GetVnTable()->FindActiveEntry(&key));
+    return static_cast<VnEntry *>(agent_->vn_table()->FindActiveEntry(&key));
 }
 
 MirrorEntry *InterfaceTable::FindMirrorRef(const string &name) const {
     MirrorEntryKey key(name);
     return static_cast<MirrorEntry *>
-        (agent_->GetMirrorTable()->FindActiveEntry(&key));
+        (agent_->mirror_table()->FindActiveEntry(&key));
 }
 
 DBTableBase *InterfaceTable::CreateTable(DB *db, const std::string &name) {
@@ -207,7 +207,7 @@ void InterfaceTable::VmInterfaceWalkDone(DBTableBase *partition) {
 }
 
 void InterfaceTable::UpdateVxLanNetworkIdentifierMode() {
-    DBTableWalker *walker = agent_->GetDB()->GetWalker();
+    DBTableWalker *walker = agent_->db()->GetWalker();
     if (walkid_ != DBTableWalker::kInvalidWalkerId) {
         walker->WalkCancel(walkid_);
     }
@@ -365,18 +365,18 @@ DBEntryBase::KeyPtr PhysicalInterface::GetDBRequestKey() const {
 
 // Enqueue DBRequest to create a Host Interface
 void PhysicalInterface::CreateReq(InterfaceTable *table, const string &ifname,
-                                  const string &vrf_name) {
+                                  const string &vrf_name, bool persistent) {
     DBRequest req(DBRequest::DB_ENTRY_ADD_CHANGE);
     req.key.reset(new PhysicalInterfaceKey(ifname));
-    req.data.reset(new PhysicalInterfaceData(vrf_name));
+    req.data.reset(new PhysicalInterfaceData(vrf_name, persistent));
     table->Enqueue(&req);
 }
 
 void PhysicalInterface::Create(InterfaceTable *table, const string &ifname,
-                               const string &vrf_name) {
+                               const string &vrf_name, bool persistent) {
     DBRequest req(DBRequest::DB_ENTRY_ADD_CHANGE);
     req.key.reset(new PhysicalInterfaceKey(ifname));
-    req.data.reset(new PhysicalInterfaceData(vrf_name));
+    req.data.reset(new PhysicalInterfaceData(vrf_name, persistent));
     table->Process(req);
 }
 
@@ -648,6 +648,20 @@ void Interface::SetItfSandeshData(ItfSandeshData &data) const {
             static_route_list.push_back(entry);
         }
         data.set_static_route_list(static_route_list);
+
+        std::vector<StaticRouteSandesh> aap_list;
+        VmInterface::AllowedAddressPairSet::iterator aap_it =
+            vintf->allowed_address_pair_list().list_.begin();
+        while (aap_it != vintf->allowed_address_pair_list().list_.end()) {
+            const VmInterface::AllowedAddressPair &rt = *aap_it;
+            StaticRouteSandesh entry;
+            entry.set_vrf_name(rt.vrf_);
+            entry.set_ip_addr(rt.addr_.to_string());
+            entry.set_prefix(rt.plen_);
+            aap_it++;
+            aap_list.push_back(entry);
+        }
+        data.set_allowed_address_pair_list(aap_list);
 
         if (vintf->fabric_port()) {
             data.set_fabric_port("FabricPort");

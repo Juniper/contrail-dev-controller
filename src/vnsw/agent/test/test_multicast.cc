@@ -26,8 +26,8 @@ public:
     }
 
     virtual void TearDown() {
-        WAIT_FOR(1000, 10000, (agent_->GetVnTable()->Size() == 0));
-        WAIT_FOR(1000, 10000, (agent_->GetVrfTable()->Size() == 1));
+        WAIT_FOR(1000, 10000, (agent_->vn_table()->Size() == 0));
+        WAIT_FOR(1000, 10000, (agent_->vrf_table()->Size() == 1));
     }
     Agent *agent_;
 };
@@ -63,7 +63,7 @@ void WaitForCompositeNHDelete(Ip4Address grp, std::string vrf_name)
                        Composite::FABRIC);
     NextHop *nh;
     do {
-        nh = static_cast<NextHop *>(Agent::GetInstance()->GetNextHopTable()->
+        nh = static_cast<NextHop *>(Agent::GetInstance()->nexthop_table()->
                                     FindActiveEntry(&key));
         usleep(1000);
         client->WaitForIdle();
@@ -124,21 +124,21 @@ TEST_F(MulticastTest, McastSubnet_1) {
     };
 
     IpamInfo ipam_info[] = {
-        {"1.1.1.0", 24, "1.1.1.200"},
-        {"2.2.2.0", 24, "2.2.2.200"},
-        {"3.3.3.0", 16, "3.3.30.200"},
+        {"1.1.1.0", 24, "1.1.1.200", true},
+        {"2.2.2.0", 24, "2.2.2.200", true},
+        {"3.3.3.0", 16, "3.3.30.200", true},
     };
 
     IpamInfo ipam_updated_info[] = {
-        {"1.1.1.0", 24, "1.1.1.200"},
-        {"2.2.2.0", 24, "2.2.2.200"},
-        {"3.3.3.0", 16, "3.3.30.200"},
-        {"4.0.0.0", 8, "4.4.40.200"},
+        {"1.1.1.0", 24, "1.1.1.200", true},
+        {"2.2.2.0", 24, "2.2.2.200", true},
+        {"3.3.3.0", 16, "3.3.30.200", true},
+        {"4.0.0.0", 8, "4.4.40.200", true},
     };
 
     IpamInfo ipam_updated_info_2[] = {
-        {"2.2.2.0", 24, "2.2.2.200"},
-        {"3.3.3.0", 16, "3.3.30.200"},
+        {"2.2.2.0", 24, "2.2.2.200", true},
+        {"3.3.3.0", 16, "3.3.30.200", true},
     };
     char buf[BUF_SIZE];
     int len = 0;
@@ -179,7 +179,7 @@ TEST_F(MulticastTest, McastSubnet_1) {
                                           IpAddress::from_string("255.255.255.255").to_v4(),
                                           IpAddress::from_string("0.0.0.0").to_v4(),
                                           1112, olist_map);
-    AddArp("8.8.8.8", "00:00:08:08:08:08", agent_->GetIpFabricItfName().c_str());
+    AddArp("8.8.8.8", "00:00:08:08:08:08", agent_->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     //Verify sandesh
@@ -193,7 +193,7 @@ TEST_F(MulticastTest, McastSubnet_1) {
                                               cnh->GetGrpAddr());
     ASSERT_TRUE(mcobj->GetSourceMPLSLabel() == 1111);
 	MplsLabel *mpls = 
-	    agent_->GetMplsTable()->FindMplsLabel(1111);
+	    agent_->mpls_table()->FindMplsLabel(1111);
 	ASSERT_TRUE(mpls == NULL);
     ASSERT_TRUE((mcobj->GetLocalOlist()).size() == 2);
     ASSERT_TRUE((mcobj->GetTunnelOlist()).size() == 1);
@@ -220,7 +220,7 @@ TEST_F(MulticastTest, McastSubnet_1) {
     ASSERT_TRUE(nh != NULL);
     mcobj = MulticastHandler::GetInstance()->FindGroupObject("vrf1", addr);
     ASSERT_TRUE(mcobj->GetSourceMPLSLabel() == 2222);
-	mpls = agent_->GetMplsTable()->FindMplsLabel(2222);
+	mpls = agent_->mpls_table()->FindMplsLabel(2222);
 	ASSERT_TRUE(mpls == NULL);
     ASSERT_TRUE((mcobj->GetLocalOlist()).size() == 1);
     ASSERT_TRUE((mcobj->GetTunnelOlist()).size() == 3);
@@ -246,7 +246,7 @@ TEST_F(MulticastTest, McastSubnet_1) {
     ASSERT_TRUE(nh != NULL);
     mcobj = MulticastHandler::GetInstance()->FindGroupObject("vrf1", addr);
     ASSERT_TRUE(mcobj->GetSourceMPLSLabel() == 2222);
-	mpls = agent_->GetMplsTable()->FindMplsLabel(2222);
+	mpls = agent_->mpls_table()->FindMplsLabel(2222);
 	ASSERT_TRUE(mpls == NULL);
     ASSERT_TRUE((mcobj->GetLocalOlist()).size() == 1);
     ASSERT_TRUE((mcobj->GetTunnelOlist()).size() == 2);
@@ -263,7 +263,7 @@ TEST_F(MulticastTest, McastSubnet_1) {
     EXPECT_TRUE(rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
 
     DelArp("8.8.8.8", "00:00:08:08:08:08", 
-           agent_->GetIpFabricItfName().c_str());
+           agent_->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     IntfCfgDel(input, 0);
@@ -307,9 +307,9 @@ TEST_F(MulticastTest, L2Broadcast_1) {
     };
 
     IpamInfo ipam_info[] = {
-        {"1.1.1.0", 24, "1.1.1.200"},
-        {"2.2.2.0", 24, "2.2.2.200"},
-        {"3.3.3.0", 16, "3.3.30.200"},
+        {"1.1.1.0", 24, "1.1.1.200", true},
+        {"2.2.2.0", 24, "2.2.2.200", true},
+        {"3.3.3.0", 16, "3.3.30.200", true},
     };
 
     client->Reset();
@@ -344,7 +344,7 @@ TEST_F(MulticastTest, L2Broadcast_1) {
                                           IpAddress::from_string("0.0.0.0").to_v4(),
                                           1111, olist_map);
     AddArp("8.8.8.8", "00:00:08:08:08:08", 
-           agent_->GetIpFabricItfName().c_str());
+           agent_->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     Inet4MulticastRouteEntry *rt = 
@@ -398,7 +398,7 @@ TEST_F(MulticastTest, L2Broadcast_1) {
     DoMulticastSandesh(3);
 
     DelArp("8.8.8.8", "00:00:08:08:08:08", 
-           agent_->GetIpFabricItfName().c_str());
+           agent_->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     IntfCfgDel(input, 0);
@@ -427,7 +427,7 @@ TEST_F(MulticastTest, McastSubnet_DeleteRouteOnVRFDeleteofVN) {
     };
 
     IpamInfo ipam_info[] = {
-        {"1.1.1.0", 24, "1.1.1.200"},
+        {"1.1.1.0", 24, "1.1.1.200", true},
     };
 
     client->Reset();
@@ -453,7 +453,7 @@ TEST_F(MulticastTest, McastSubnet_DeleteRouteOnVRFDeleteofVN) {
     CompositeNHKey key("vrf1", IpAddress::from_string("1.1.1.255").to_v4(),
                        IpAddress::from_string("0.0.0.0").to_v4(), false,
                        Composite::L3COMP);
-    nh = static_cast<NextHop *>(agent_->GetNextHopTable()->FindActiveEntry(&key));
+    nh = static_cast<NextHop *>(agent_->nexthop_table()->FindActiveEntry(&key));
     cnh = static_cast<CompositeNH *>(nh);
     WAIT_FOR(1000, 1000, (cnh->ComponentNHCount() != 0));
 
@@ -465,7 +465,7 @@ TEST_F(MulticastTest, McastSubnet_DeleteRouteOnVRFDeleteofVN) {
                                           IpAddress::from_string("1.1.1.255").to_v4(),
                                           IpAddress::from_string("0.0.0.0").to_v4(),
                                           1111, olist_map);
-    AddArp("8.8.8.8", "00:00:08:08:08:08", agent_->GetIpFabricItfName().c_str());
+    AddArp("8.8.8.8", "00:00:08:08:08:08", agent_->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     Ip4Address addr = Ip4Address::from_string("1.1.1.255");
@@ -476,13 +476,13 @@ TEST_F(MulticastTest, McastSubnet_DeleteRouteOnVRFDeleteofVN) {
                                               cnh->GetGrpAddr());
     ASSERT_TRUE(mcobj->GetSourceMPLSLabel() == 1111);
 	MplsLabel *mpls = 
-	    agent_->GetMplsTable()->FindMplsLabel(1111);
+	    agent_->mpls_table()->FindMplsLabel(1111);
 	ASSERT_TRUE(mpls == NULL);
     ASSERT_TRUE((mcobj->GetLocalOlist()).size() == 1);
     ASSERT_TRUE((mcobj->GetTunnelOlist()).size() == 1);
 
     DelArp("8.8.8.8", "00:00:08:08:08:08", 
-           agent_->GetIpFabricItfName().c_str());
+           agent_->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     DelLink("virtual-network", "vn1", "routing-instance", "vrf1");
@@ -510,7 +510,7 @@ TEST_F(MulticastTest, McastSubnet_DeleteRouteOnIPAMDeleteofVN) {
     };
 
     IpamInfo ipam_info[] = {
-        {"1.1.1.0", 24, "1.1.1.200"},
+        {"1.1.1.0", 24, "1.1.1.200", true},
     };
 
     client->Reset();
@@ -539,7 +539,7 @@ TEST_F(MulticastTest, McastSubnet_DeleteRouteOnIPAMDeleteofVN) {
                                           IpAddress::from_string("1.1.1.255").to_v4(),
                                           IpAddress::from_string("0.0.0.0").to_v4(),
                                           1111, olist_map);
-    AddArp("8.8.8.8", "00:00:08:08:08:08", agent_->GetIpFabricItfName().c_str());
+    AddArp("8.8.8.8", "00:00:08:08:08:08", agent_->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     Ip4Address addr = Ip4Address::from_string("1.1.1.255");
@@ -550,7 +550,7 @@ TEST_F(MulticastTest, McastSubnet_DeleteRouteOnIPAMDeleteofVN) {
                                               cnh->GetGrpAddr());
     ASSERT_TRUE(mcobj->GetSourceMPLSLabel() == 1111);
 	MplsLabel *mpls = 
-	    agent_->GetMplsTable()->FindMplsLabel(1111);
+	    agent_->mpls_table()->FindMplsLabel(1111);
 	ASSERT_TRUE(mpls == NULL);
     ASSERT_TRUE((mcobj->GetLocalOlist()).size() == 1);
     ASSERT_TRUE((mcobj->GetTunnelOlist()).size() == 1);
@@ -560,7 +560,7 @@ TEST_F(MulticastTest, McastSubnet_DeleteRouteOnIPAMDeleteofVN) {
     client->WaitForIdle();
 
     DelArp("8.8.8.8", "00:00:08:08:08:08", 
-           agent_->GetIpFabricItfName().c_str());
+           agent_->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     client->Reset();
@@ -582,7 +582,7 @@ TEST_F(MulticastTest, McastSubnet_DeleteCompNHThenModifyFabricList) {
     };
 
     IpamInfo ipam_info[] = {
-        {"1.1.1.0", 24, "1.1.1.200"},
+        {"1.1.1.0", 24, "1.1.1.200", true},
     };
 
     client->Reset();
@@ -619,7 +619,7 @@ TEST_F(MulticastTest, McastSubnet_DeleteCompNHThenModifyFabricList) {
     req.oper = DBRequest::DB_ENTRY_DELETE;
     req.key.reset(key);
     req.data.reset(NULL);
-    agent_->GetNextHopTable()->Enqueue(&req);
+    agent_->nexthop_table()->Enqueue(&req);
 
     MulticastGroupObject *mcobj;
     mcobj = MulticastHandler::GetInstance()->FindGroupObject("vrf1",
@@ -635,18 +635,18 @@ TEST_F(MulticastTest, McastSubnet_DeleteCompNHThenModifyFabricList) {
                                           IpAddress::from_string("1.1.1.255").to_v4(),
                                           IpAddress::from_string("0.0.0.0").to_v4(),
                                           1111, olist_map);
-    AddArp("8.8.8.8", "00:00:08:08:08:08", agent_->GetIpFabricItfName().c_str());
+    AddArp("8.8.8.8", "00:00:08:08:08:08", agent_->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     CompositeNHKey nhkey("vrf1", IpAddress::from_string("1.1.1.255").to_v4(),
                          IpAddress::from_string("0.0.0.0").to_v4(), false,
                          Composite::L3COMP);
-    nh = static_cast<NextHop *>(agent_->GetNextHopTable()->Find(&nhkey, true));
+    nh = static_cast<NextHop *>(agent_->nexthop_table()->Find(&nhkey, true));
     EXPECT_TRUE(nh->IsDeleted() == true);
 
     client->Reset();
     DelArp("8.8.8.8", "00:00:08:08:08:08", 
-           agent_->GetIpFabricItfName().c_str());
+           agent_->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     DelIPAM("vn1");
@@ -673,14 +673,14 @@ TEST_F(MulticastTest, McastSubnet_SubnetIPAMAddDel) {
     client->WaitForIdle();
 
     IpamInfo ipam_info[] = {
-        {"10.1.1.0", 30, "10.1.1.2"},
-        {"11.1.1.0", 30, "11.1.1.2"},
+        {"10.1.1.0", 30, "10.1.1.2", true},
+        {"11.1.1.0", 30, "11.1.1.2", true},
     };
 
     IpamInfo ipam_info_2[] = {
-        {"10.1.1.0", 30, "10.1.1.2"},
-        {"10.1.1.10", 29, "10.1.1.14"},
-        {"11.1.1.0", 30, "11.1.1.2"},
+        {"10.1.1.0", 30, "10.1.1.2", true},
+        {"10.1.1.10", 29, "10.1.1.14", true},
+        {"11.1.1.0", 30, "11.1.1.2", true},
     };
 
     client->Reset();
@@ -724,7 +724,7 @@ TEST_F(MulticastTest, McastSubnet_interfaceadd_after_ipam_delete) {
     };
 
     IpamInfo ipam_info[] = {
-        {"11.1.1.0", 24, "11.1.1.200"},
+        {"11.1.1.0", 24, "11.1.1.200", true},
     };
 
     const char *vrf_name = "domain:vn1:vrf1";
@@ -773,9 +773,9 @@ TEST_F(MulticastTest, McastSubnet_VN2MultipleVRFtest_ignore_unknown_vrf) {
     };
 
     IpamInfo ipam_info[] = {
-        {"10.1.1.0", 30, "10.1.1.2"},
-        {"10.1.1.10", 29, "10.1.1.14"},
-        {"11.1.1.0", 30, "11.1.1.2"},
+        {"10.1.1.0", 30, "10.1.1.2", true},
+        {"10.1.1.10", 29, "10.1.1.14", true},
+        {"11.1.1.0", 30, "11.1.1.2", true},
     };
 
     const char *vrf_name = "domain:vn1:vrf1";
@@ -822,8 +822,8 @@ TEST_F(MulticastTest, subnet_bcast_ipv4_vn_delete) {
     };
 
     IpamInfo ipam_info[] = {
-        {"10.1.1.0", 24, "10.1.1.100"},
-        {"11.1.1.0", 24, "11.1.1.100"},
+        {"10.1.1.0", 24, "10.1.1.100", true},
+        {"11.1.1.0", 24, "11.1.1.100", true},
     };
 
     EXPECT_FALSE(VrfFind("vrf1"));
@@ -877,13 +877,13 @@ TEST_F(MulticastTest, subnet_bcast_ipv4_vn_ipam_change) {
     };
 
     IpamInfo ipam_info[] = {
-        {"10.1.1.0", 24, "10.1.1.100"},
-        {"11.1.1.0", 24, "11.1.1.100"},
+        {"10.1.1.0", 24, "10.1.1.100", true},
+        {"11.1.1.0", 24, "11.1.1.100", true},
     };
 
     IpamInfo ipam_info_2[] = {
-        {"10.1.1.0", 24, "10.1.1.100"},
-        {"12.1.1.0", 24, "12.1.1.100"},
+        {"10.1.1.0", 24, "10.1.1.100", true},
+        {"12.1.1.0", 24, "12.1.1.100", true},
     };
 
     EXPECT_FALSE(VrfFind("vrf1"));
@@ -937,8 +937,8 @@ TEST_F(MulticastTest, subnet_bcast_ipv4_vn_vrf_link_delete) {
     };
 
     IpamInfo ipam_info[] = {
-        {"10.1.1.0", 24, "10.1.1.100"},
-        {"11.1.1.0", 24, "11.1.1.100"},
+        {"10.1.1.0", 24, "10.1.1.100", true},
+        {"11.1.1.0", 24, "11.1.1.100", true},
     };
 
     EXPECT_FALSE(VrfFind("vrf1"));
@@ -995,8 +995,8 @@ TEST_F(MulticastTest, subnet_bcast_add_l2l3vn_and_l2vn) {
     };
 
     IpamInfo ipam_info[] = {
-        {"10.1.1.0", 24, "10.1.1.100"},
-        {"11.1.1.0", 24, "11.1.1.100"},
+        {"10.1.1.0", 24, "10.1.1.100", true},
+        {"11.1.1.0", 24, "11.1.1.100", true},
     };
 
     EXPECT_FALSE(VrfFind("vrf1"));
@@ -1058,11 +1058,11 @@ TEST_F(MulticastTest, change_in_gateway_of_subnet_noop) {
     };
 
     IpamInfo ipam_info[] = {
-        {"11.1.1.0", 24, "11.1.1.200"},
+        {"11.1.1.0", 24, "11.1.1.200", true},
     };
 
     IpamInfo ipam_info_2[] = {
-        {"11.1.1.0", 24, "11.1.1.100"},
+        {"11.1.1.0", 24, "11.1.1.100", true},
     };
 
     EXPECT_FALSE(VrfFind("vrf1"));
@@ -1103,9 +1103,9 @@ TEST_F(MulticastTest, McastSubnet_VN2MultipleVRFtest_negative) {
     };
 
     IpamInfo ipam_info[] = {
-        {"10.1.1.0", 30, "10.1.1.2"},
-        {"10.1.1.10", 29, "10.1.1.14"},
-        {"11.1.1.0", 30, "11.1.1.2"},
+        {"10.1.1.0", 30, "10.1.1.2", true},
+        {"10.1.1.10", 29, "10.1.1.14", true},
+        {"11.1.1.0", 30, "11.1.1.2", true},
     };
 
     const char *vrf_name = "vn1:vn1";
@@ -1133,7 +1133,7 @@ TEST_F(MulticastTest, McastSubnet_VN2MultipleVRFtest_negative) {
 
     DelLink("virtual-network", "vn1", "routing-instance", "vrf1");
     client->WaitForIdle();
-    EXPECT_TRUE(agent_->GetVnTable()->Size() == 1);
+    EXPECT_TRUE(agent_->vn_table()->Size() == 1);
 
     AddIPAM("vn1", ipam_info, 3);
     client->WaitForIdle();

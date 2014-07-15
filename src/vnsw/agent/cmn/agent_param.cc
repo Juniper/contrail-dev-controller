@@ -40,11 +40,42 @@ namespace opt = boost::program_options;
 
 template <typename ValueType>
 bool AgentParam::GetOptValue
-    (const boost::program_options::variables_map &var_map, ValueType &var, 
+    (const boost::program_options::variables_map &var_map, ValueType &var,
      const std::string &val) {
+    return GetOptValueImpl(var_map, var, val,
+        static_cast<ValueType *>(0));
+}
+
+template <typename ValueType>
+bool AgentParam::GetOptValueImpl
+    (const boost::program_options::variables_map &var_map,
+     ValueType &var, const std::string &val, ValueType*) {
     // Check if the value is present.
     if (var_map.count(val) && !var_map[val].defaulted()) {
         var = var_map[val].as<ValueType>();
+        return true;
+    }
+    return false;
+}
+
+template <typename ElementType>
+bool AgentParam::GetOptValueImpl(
+    const boost::program_options::variables_map &var_map,
+    std::vector<ElementType> &var, const std::string &val,
+    std::vector<ElementType>*) {
+    // Check if the value is present.
+    if (var_map.count(val) && !var_map[val].defaulted()) {
+        std::vector<ElementType> tmp(
+            var_map[val].as<std::vector<ElementType> >());
+        // Now split the individual elements
+        for (typename std::vector<ElementType>::const_iterator it = 
+                 tmp.begin();
+             it != tmp.end(); it++) {
+            std::stringstream ss(*it);
+            std::copy(istream_iterator<ElementType>(ss),
+                istream_iterator<ElementType>(),
+                std::back_inserter(var));
+        }
         return true;
     }
     return false;
@@ -235,8 +266,11 @@ bool AgentParam::ParseServerListArguments
 }
 
 void AgentParam::ParseCollector() { 
-    ParseIp("COLLECTOR.server", &collector_);
-    GetValueFromTree<uint16_t>(collector_port_, "COLLECTOR.port");
+    optional<string> opt_str;
+    if (opt_str = tree_.get_optional<string>("DEFAULT.collectors")) {
+        boost::split(collector_server_list_, opt_str.get(),
+                     boost::is_any_of(" "));
+    }
 }
 
 void AgentParam::ParseVirtualHost() { 
@@ -333,7 +367,7 @@ void AgentParam::ParseDefaultSection() {
         log_level_ = "SYS_DEBUG";
     }
     if (!GetValueFromTree<string>(log_file_, "DEFAULT.log_file")) {
-        log_file_ = Agent::DefaultLogFile();
+        log_file_ = Agent::GetInstance()->log_file();
     }
 
     if (!GetValueFromTree<string>(log_category_, "DEFAULT.log_category")) {
@@ -386,8 +420,8 @@ void AgentParam::ParseHeadlessMode() {
 
 void AgentParam::ParseCollectorArguments
     (const boost::program_options::variables_map &var_map) {
-    ParseIpArgument(var_map, collector_, "COLLECTOR.server");
-    GetOptValue<uint16_t>(var_map, collector_port_, "COLLECTOR.port");
+    GetOptValue< vector<string> >(var_map, collector_server_list_,
+                                      "DEFAULT.collectors");
 }
 
 void AgentParam::ParseVirtualHostArguments
@@ -737,7 +771,7 @@ AgentParam::AgentParam(Agent *agent) :
         linklocal_system_flows_(), linklocal_vm_flows_(),
         flow_cache_timeout_(), config_file_(), program_name_(),
         log_file_(), log_local_(false), log_level_(), log_category_(),
-        collector_(), collector_port_(), http_server_port_(), host_name_(),
+        collector_server_list_(), http_server_port_(), host_name_(),
         agent_stats_interval_(AgentStatsCollector::AgentStatsInterval), 
         flow_stats_interval_(FlowStatsCollector::FlowStatsInterval),
         vmware_physical_port_(""), test_mode_(false), debug_(false), tree_(),
