@@ -64,7 +64,8 @@ InterfaceKSyncEntry::InterfaceKSyncEntry(InterfaceKSyncObject *obj,
     parent_(entry->parent_),
     policy_enabled_(entry->policy_enabled_),
     vlan_id_(entry->vlan_id_),
-    vrf_id_(entry->vrf_id_), persistent_(entry->persistent_),
+    vrf_id_(entry->vrf_id_),
+    persistent_(entry->persistent_),
     xconnect_(entry->xconnect_) {
 }
 
