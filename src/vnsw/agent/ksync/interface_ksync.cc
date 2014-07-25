@@ -291,7 +291,7 @@ bool InterfaceKSyncEntry::Sync(DBEntry *e) {
 
     case Interface::PHYSICAL: 
     {
-        memcpy(smac, intf->mac().ether_addr_octet, ETHER_ADDR_LEN);
+        memcpy(dmac, intf->mac().ether_addr_octet, ETHER_ADDR_LEN);
         PhysicalInterface *phy_intf = static_cast<PhysicalInterface *>(intf);
         persistent_ = phy_intf->persistent();
         break;
@@ -310,15 +310,15 @@ bool InterfaceKSyncEntry::Sync(DBEntry *e) {
 
     // In VMWare VCenter mode, interface is assigned using the SMAC
     // in packet. Store the SMAC for interface
-    uint8_t smac[ETHER_ADDR_LEN];
-    memset(smac, 0, sizeof(smac));
+    uint8_t src_mac[ETHER_ADDR_LEN];
+    memset(src_mac, 0, sizeof(src_mac));
     if (intf->type() == Interface::VM_INTERFACE &&
         ksync_obj_->ksync()->agent()->isVmwareVcenterMode()) {
-        memcpy(smac, intf->mac().ether_addr_octet, ETHER_ADDR_LEN);
+        memcpy(src_mac, intf->mac().ether_addr_octet, ETHER_ADDR_LEN);
     }
 
-    if (memcmp(smac, smac_.ether_addr_octet, ETHER_ADDR_LEN)) {
-        memcpy(smac_.ether_addr_octet, smac, ETHER_ADDR_LEN);
+    if (memcmp(src_mac, smac_.ether_addr_octet, ETHER_ADDR_LEN)) {
+        memcpy(smac_.ether_addr_octet, src_mac, ETHER_ADDR_LEN);
         ret = true;
     }
 
