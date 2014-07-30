@@ -430,7 +430,7 @@ TEST_F(RouteTest, RemoteVmRoute_1) {
     EXPECT_TRUE(RouteFind(vrf_name_, remote_vm_ip_, 32));
     Inet4UnicastRouteEntry *rt = RouteGet(vrf_name_, remote_vm_ip_, 32);
     EXPECT_TRUE(rt->dest_vn_name() == vrf_name_);
-    EXPECT_TRUE(rt->GetMplsLabel() == MplsTable::kStartLabel);
+    EXPECT_TRUE(rt->GetActiveLabel() == MplsTable::kStartLabel);
     EXPECT_TRUE(rt->GetActiveNextHop()->GetType() == NextHop::TUNNEL);
 
     DeleteRoute(NULL, vrf_name_, remote_vm_ip_, 32);
@@ -866,7 +866,7 @@ TEST_F(RouteTest, VlanNHRoute_1) {
 
     // Add a route using NH created for service interface
     client->WaitForIdle();
-    AddVlanNHRoute("vrf1", "2.2.2.0", 24, 1, 1, rt->GetMplsLabel(), "TestVn");
+    AddVlanNHRoute("vrf1", "2.2.2.0", 24, 1, 1, rt->GetActiveLabel(), "TestVn");
     rt = RouteGet("vrf1", Ip4Address::from_string("2.2.2.0"), 24);
     EXPECT_TRUE(rt != NULL);
     if (rt) {

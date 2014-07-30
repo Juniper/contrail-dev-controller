@@ -2783,7 +2783,7 @@ bool FindMplsLabel(MplsLabel::Type type, uint32_t label) {
     return (mpls != NULL);
 }
 
-MplsLabel* GetMplsLabel(MplsLabel::Type type, uint32_t label) {
+MplsLabel* GetActiveLabel(MplsLabel::Type type, uint32_t label) {
     MplsLabelKey key(type, label);
     return static_cast<MplsLabel *>(Agent::GetInstance()->mpls_table()->FindActiveEntry(&key));
 }

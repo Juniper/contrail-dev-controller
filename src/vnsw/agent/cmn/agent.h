@@ -559,6 +559,9 @@ public:
     bool headless_agent_mode() const {return headless_agent_mode_;}
     void set_headless_agent_mode(bool mode) {headless_agent_mode_ = mode;}
 
+    bool simulate_evpn_tor() const {return simulate_evpn_tor_;}
+    void set_simulate_evpn_tor(bool mode) {simulate_evpn_tor_ = mode;}
+
     IFMapAgentParser *ifmap_parser() const {return ifmap_parser_;}
     void set_ifmap_parser(IFMapAgentParser *parser) {
         ifmap_parser_ = parser;

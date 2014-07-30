@@ -31,6 +31,7 @@ public:
     }
     virtual ~PeerMock() { }
 
+    virtual void UpdateRefCount(int count) const { }
     int index() {
         return index_;
     }

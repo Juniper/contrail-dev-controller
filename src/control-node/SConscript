@@ -151,7 +151,7 @@ if sys.platform != 'darwin':
     env.Prepend(LINKFLAGS =
                      ['-Wl,--whole-archive',
                       '-lbgp_l3vpn', '-lbgp_inet',
-                      '-lbgp_evpn', '-lbgp_ermvpn', '-lbgp_evpn', '-lextended_community', '-lrtarget',
+                      '-lbgp_evpn', '-lbgp_ermvpn', '-lextended_community', '-lrtarget',
                       '-lifmap_server', '-lcpuinfo',
                       '-Wl,--no-whole-archive'])
 else:

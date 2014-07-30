@@ -547,7 +547,7 @@ TEST_F(AgentXmppUnitTest, Connection) {
     rt = RouteGet("vrf2", Ip4Address::from_string("2.2.2.1"), 32);
     EXPECT_TRUE(rt != NULL);
     // Send route, back to vrf1
-    SendRouteMessage(mock_peer.get(), "vrf1", "2.2.2.0/24", rt->GetMplsLabel(),
+    SendRouteMessage(mock_peer.get(), "vrf1", "2.2.2.0/24", rt->GetActiveLabel(),
                      "TestVn");
     // Route reflected to vrf1
     WAIT_FOR(1000, 10000, (bgp_peer.get()->Count() == 4));

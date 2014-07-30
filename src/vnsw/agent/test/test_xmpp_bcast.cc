@@ -282,7 +282,7 @@ protected:
 
         autogen::EnetNextHopType item_nexthop;
         item_nexthop.af = 1;
-        item_nexthop.address = Agent::GetInstance()->GetRouterId().to_string();
+        item_nexthop.address = Agent::GetInstance()->router_id().to_string();
         item_nexthop.label = label;
         if (is_vxlan) {
             item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation.push_back("vxlan");
@@ -293,7 +293,7 @@ protected:
 
         autogen::EnetNextHopType item_nexthop_1;
         item_nexthop_1.af = 1;
-        item_nexthop_1.address = Agent::GetInstance()->GetRouterId().to_string();
+        item_nexthop_1.address = Agent::GetInstance()->router_id().to_string();
         item_nexthop_1.label = label + 1;
         if (is_vxlan) {
             item_nexthop_1.tunnel_encapsulation_list.tunnel_encapsulation.push_back("vxlan");

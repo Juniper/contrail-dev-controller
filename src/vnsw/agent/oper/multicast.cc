@@ -681,8 +681,8 @@ void MulticastHandler::AddChangeEvpnCompositeNH(const string &vrf_name,
             label = it->label_;
         //}
         ComponentNHData nh_data(label,
-                                Agent::GetInstance()->GetDefaultVrf(),
-                                Agent::GetInstance()->GetRouterId(),
+                                Agent::GetInstance()->fabric_vrf_name(),
+                                Agent::GetInstance()->router_id(),
                                 it->daddr_, false, it->tunnel_bmap_);
         data.push_back(nh_data);
     }
@@ -694,7 +694,7 @@ void MulticastHandler::AddChangeEvpnCompositeNH(const string &vrf_name,
     req.key.reset(key);
     cnh_data = new CompositeNHData(data, CompositeNHData::REPLACE);
     req.data.reset(cnh_data);
-    Agent::GetInstance()->GetNextHopTable()->Enqueue(&req);
+    Agent::GetInstance()->nexthop_table()->Enqueue(&req);
 }
 
 void MulticastHandler::AddChangeFabricCompositeNH(MulticastGroupObject *obj)
@@ -747,7 +747,7 @@ void MulticastHandler::AddChangeInterfaceCompositeNH(MulticastGroupObject *obj,
     req.key.reset(key);
     cnh_data = new CompositeNHData(data, CompositeNHData::REPLACE);
     req.data.reset(cnh_data);
-    Agent::GetInstance()->GetNextHopTable()->Enqueue(&req);
+    Agent::GetInstance()->nexthop_table()->Enqueue(&req);
 }
 
 void MulticastHandler::TriggerL2CompositeNHChange(MulticastGroupObject *obj)
@@ -898,7 +898,7 @@ void MulticastHandler::AddVmInterfaceInFloodGroup(const std::string &vrf_name,
         } 
         all_broadcast->SetLayer2Forwarding(vn->layer2_forwarding());
         this->TriggerL2CompositeNHChange(all_broadcast);
-        uint32_t evpn_label = Agent::GetInstance()->GetMplsTable()->
+        uint32_t evpn_label = Agent::GetInstance()->mpls_table()->
             AllocLabel();
         if (evpn_label != MplsLabel::INVALID) { 
             all_broadcast->set_evpn_mpls_label(evpn_label);

@@ -194,7 +194,7 @@ void RouteExport::MulticastNotify(AgentXmppChannel *bgp_xmpp_peer,
 
         if ((route->GetTableType() == Agent::LAYER2) &&
             (state->evpn_exported_ == true)) {
-            state->tunnel_type_ = route->GetActivePath()->tunnel_type();
+            state->tunnel_type_ = TunnelType::INVALID;
             CONTROLLER_TRACE(RouteExport, bgp_xmpp_peer->GetBgpPeerName(),
                              route->vrf()->GetName(), 
                              route->ToString(), true, state->label_);

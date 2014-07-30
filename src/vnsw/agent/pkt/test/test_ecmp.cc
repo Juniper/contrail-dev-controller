@@ -64,13 +64,13 @@ class EcmpTest : public ::testing::Test {
         Inet4UnicastRouteEntry *rt = RouteGet("default-project:vn3:vn3", ip, 32);
         EXPECT_TRUE(rt != NULL);
         EXPECT_TRUE(rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
-        mpls_label_1 = rt->GetMplsLabel();
+        mpls_label_1 = rt->GetActiveLabel();
 
         ip = Ip4Address::from_string("2.1.1.1");
         rt = RouteGet("vrf2", ip, 32);
         EXPECT_TRUE(rt != NULL);
         EXPECT_TRUE(rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
-        mpls_label_2 = rt->GetMplsLabel();
+        mpls_label_2 = rt->GetActiveLabel();
 
         //Add floating IP for vrf3 interfaces to talk vrf4
         AddFloatingIpPool("fip-pool2", 2);
@@ -86,7 +86,7 @@ class EcmpTest : public ::testing::Test {
         rt = RouteGet("default-project:vn4:vn4", ip, 32);
         EXPECT_TRUE(rt != NULL);
         EXPECT_TRUE(rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
-        mpls_label_3 = rt->GetMplsLabel();
+        mpls_label_3 = rt->GetActiveLabel();
 
         //Populate ethernet interface id
         eth_intf_id_ = EthInterfaceGet("vnet0")->id();
@@ -333,7 +333,7 @@ TEST_F(EcmpTest, EcmpTest_4) {
                    remote_vm_ip, vm_ip, 1, 10);
 
     client->WaitForIdle();
-    int nh_id = GetMplsLabel(MplsLabel::VPORT_NH, mpls_label_2)->nexthop()->id();
+    int nh_id = GetActiveLabel(MplsLabel::VPORT_NH, mpls_label_2)->nexthop()->id();
     FlowEntry *entry = FlowGet(VrfGet("vrf2")->vrf_id(),
                                remote_vm_ip, vm_ip, 1, 0, 0,  nh_id);
     EXPECT_TRUE(entry != NULL);
@@ -362,7 +362,7 @@ TEST_F(EcmpTest, EcmpTest_5) {
                    remote_vm_ip, vm_ip, 1, 10);
     client->WaitForIdle();
 
-    int nh_id = GetMplsLabel(MplsLabel::VPORT_NH, mpls_label_3)->nexthop()->id();
+    int nh_id = GetActiveLabel(MplsLabel::VPORT_NH, mpls_label_3)->nexthop()->id();
     FlowEntry *entry = FlowGet(VrfGet("default-project:vn4:vn4")->vrf_id(),
                                remote_vm_ip, vm_ip, 1, 0, 0, nh_id);
     EXPECT_TRUE(entry != NULL);
@@ -435,7 +435,7 @@ TEST_F(EcmpTest, EcmpTest_8) {
                    remote_vm_ip, vm_ip, 1, 10);
 
     client->WaitForIdle();
-    int nh_id = GetMplsLabel(MplsLabel::VPORT_NH, 16)->nexthop()->id();
+    int nh_id = GetActiveLabel(MplsLabel::VPORT_NH, 16)->nexthop()->id();
     FlowEntry *entry = FlowGet(VrfGet("vrf2")->vrf_id(),
                                remote_vm_ip, vm_ip, 1, 0, 0, nh_id);
     EXPECT_TRUE(entry != NULL);
@@ -749,9 +749,9 @@ TEST_F(EcmpTest, ServiceVlanTest_3) {
     std::vector<ComponentNHData> comp_nh_list;
     EXPECT_TRUE(rt != NULL);
     const VlanNH *vlan_nh = static_cast<const VlanNH *>(rt->GetActiveNextHop());
-    ComponentNHData comp_nh(rt->GetMplsLabel(), vlan_nh->GetIfUuid(), 
+    ComponentNHData comp_nh(rt->GetActiveLabel(), vlan_nh->GetIfUuid(), 
                             vlan_nh->GetVlanTag(), false);
-    uint32_t vlan_label = rt->GetMplsLabel();
+    uint32_t vlan_label = rt->GetActiveLabel();
     comp_nh_list.push_back(comp_nh);
     AddRemoteEcmpRoute("vrf10", "11.1.1.0", 24, "vn11", 1, comp_nh_list);
     AddRemoteEcmpRoute("service-vrf1", "11.1.1.0", 24, "vn11", 1, comp_nh_list);
@@ -834,7 +834,7 @@ TEST_F(EcmpTest, ServiceVlanTest_3) {
         client->WaitForIdle();
 
         int nh_id =
-            GetMplsLabel(MplsLabel::VPORT_NH, vlan_label)->nexthop()->id();
+            GetActiveLabel(MplsLabel::VPORT_NH, vlan_label)->nexthop()->id();
         FlowEntry *entry = FlowGet(VrfGet("service-vrf1")->vrf_id(),
                 "10.1.1.3", "11.1.1.252", IPPROTO_TCP, sport, dport, nh_id);
         EXPECT_TRUE(entry != NULL);
@@ -947,7 +947,7 @@ TEST_F(EcmpTest, ServiceVlanTest_4) {
     //Leak a remote VM route in service-vrf
     AddRemoteVmRoute("service-vrf1", "10.1.1.3", 32, "vn10");
     client->WaitForIdle();
-    uint32_t label = rt->GetMplsLabel();
+    uint32_t label = rt->GetActiveLabel();
     //Send a packet from a remote VM to service VM
     sport = rand() % 65535;
     dport = rand() % 65535;
@@ -961,7 +961,7 @@ TEST_F(EcmpTest, ServiceVlanTest_4) {
                         sport, dport, false, hash_id);
         client->WaitForIdle();
 
-        int nh_id = GetMplsLabel(MplsLabel::VPORT_NH, label)->nexthop()->id();
+        int nh_id = GetActiveLabel(MplsLabel::VPORT_NH, label)->nexthop()->id();
         FlowEntry *entry = FlowGet(VrfGet("service-vrf1")->vrf_id(),
                 "10.1.1.3", "11.1.1.252", IPPROTO_TCP, sport, dport, nh_id);
         EXPECT_TRUE(entry != NULL);
@@ -1179,7 +1179,7 @@ TEST_F(EcmpTest, ServiceVlanTest_6) {
     Ip4Address service_vm_ip = Ip4Address::from_string("11.1.1.2"); 
     Inet4UnicastRouteEntry *rt = RouteGet("service-vrf1", service_vm_ip, 32);
     EXPECT_TRUE(rt != NULL);
-    uint32_t mpls_label = rt->GetMplsLabel();
+    uint32_t mpls_label = rt->GetActiveLabel();
 
     std::vector<ComponentNHData> comp_nh_list;
     CompositeNHKey nh_key("service-vrf1", service_vm_ip, 32, true);
@@ -1279,7 +1279,7 @@ TEST_F(EcmpTest, ServiceVlanTest_6) {
         client->WaitForIdle();
 
         int nh_id =
-            GetMplsLabel(MplsLabel::VPORT_NH, mpls_label)->nexthop()->id();
+            GetActiveLabel(MplsLabel::VPORT_NH, mpls_label)->nexthop()->id();
         FlowEntry *entry = FlowGet(service_vrf_id,
                 "11.1.1.1", "10.1.1.1", IPPROTO_TCP, sport, dport, nh_id);
         EXPECT_TRUE(entry != NULL);
@@ -1311,7 +1311,7 @@ TEST_F(EcmpTest, ServiceVlanTest_6) {
         client->WaitForIdle();
 
         int nh_id =
-            GetMplsLabel(MplsLabel::VPORT_NH, mpls_label)->nexthop()->id();
+            GetActiveLabel(MplsLabel::VPORT_NH, mpls_label)->nexthop()->id();
         FlowEntry *entry = FlowGet(service_vrf_id,
                 "11.1.1.3", "10.1.1.1", IPPROTO_TCP, sport, dport, nh_id);
         EXPECT_TRUE(entry != NULL);
@@ -1341,7 +1341,7 @@ TEST_F(EcmpTest, ServiceVlanTest_6) {
                         sport, dport, false, hash_id);
         client->WaitForIdle();
         int nh_id =
-            GetMplsLabel(MplsLabel::VPORT_NH, mpls_label)->nexthop()->id();
+            GetActiveLabel(MplsLabel::VPORT_NH, mpls_label)->nexthop()->id();
         FlowEntry *entry = FlowGet(service_vrf_id,
                 "11.1.1.3", "10.1.1.1", IPPROTO_TCP, sport, dport, nh_id);
         EXPECT_TRUE(entry != NULL);
@@ -1414,7 +1414,7 @@ TEST_F(EcmpTest, ServiceVlanTest_7) {
 
     std::vector<ComponentNHData> comp_nh_list;
     const VlanNH *vlan_nh = static_cast<const VlanNH *>(rt->GetActiveNextHop());
-    ComponentNHData comp_nh_data(rt->GetMplsLabel(), vlan_nh->GetIfUuid(),
+    ComponentNHData comp_nh_data(rt->GetActiveLabel(), vlan_nh->GetIfUuid(),
                                  vlan_nh->GetVlanTag(), false);
     comp_nh_list.push_back(comp_nh_data);
 
@@ -1507,7 +1507,7 @@ TEST_F(EcmpTest,ServiceVlanTest_8) {
 
     std::vector<ComponentNHData> comp_nh_list;
     const VlanNH *vlan_nh = static_cast<const VlanNH *>(rt->GetActiveNextHop());
-    ComponentNHData comp_nh_data(rt->GetMplsLabel(), vlan_nh->GetIfUuid(),
+    ComponentNHData comp_nh_data(rt->GetActiveLabel(), vlan_nh->GetIfUuid(),
                                  vlan_nh->GetVlanTag(), false);
     comp_nh_list.push_back(comp_nh_data);
 

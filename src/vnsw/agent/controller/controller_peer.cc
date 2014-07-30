@@ -1430,7 +1430,7 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
     if (!peer) return false;
 
     if (route->is_multicast() && add_route && (peer->agent()->
-                              GetControlNodeMulticastBuilder() != peer)) {
+                              mulitcast_builder() != peer)) {
         CONTROLLER_TRACE(Trace, peer->GetBgpPeerName(),
                          route->vrf()->GetName(),
                          "Peer not elected Multicast Tree Builder (EVPN)");

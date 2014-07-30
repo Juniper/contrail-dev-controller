@@ -362,7 +362,7 @@ TEST_F(MulticastTest, L2Broadcast_1) {
                                               cnh->GetGrpAddr());
     ASSERT_TRUE(mcobj->GetSourceMPLSLabel() == 1111);
     WAIT_FOR(1000, 1000, FindMplsLabel(MplsLabel::MCAST_NH, 1111));
-	MplsLabel *mpls = GetMplsLabel(MplsLabel::MCAST_NH, 1111);; 
+	MplsLabel *mpls = GetActiveLabel(MplsLabel::MCAST_NH, 1111);
     ASSERT_TRUE((mcobj->GetLocalOlist()).size() == 3);
     ASSERT_TRUE((mcobj->GetTunnelOlist()).size() == 1);
     ASSERT_TRUE((mcobj->GetEvpnOlist()).size() == 0);
@@ -1066,10 +1066,7 @@ TEST_F(MulticastTest, subnet_bcast_add_l2l3vn_and_l2vn) {
     WAIT_FOR(1000, 1000, (VrfFind("vrf1") == false));
 }
 
-<<<<<<< HEAD
-TEST_F(MulticastTest, change_in_gateway_of_subnet_noop) {
-=======
-TEST_F(CfgTest, evpn_flood_l2l3_mode) {
+TEST_F(MulticastTest, evpn_flood_l2l3_mode) {
     client->Reset();
     struct PortInfo input[] = {
         {"vnet1", 1, "1.1.1.1", "00:00:00:01:01:01", 1, 1},
@@ -1113,7 +1110,7 @@ TEST_F(CfgTest, evpn_flood_l2l3_mode) {
     client->WaitForIdle();
 
     AddArp("8.8.8.8", "00:00:08:08:08:08", 
-           Agent::GetInstance()->GetIpFabricItfName().c_str());
+           Agent::GetInstance()->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     TunnelOlist evpn_olist_map;
@@ -1190,7 +1187,7 @@ TEST_F(CfgTest, evpn_flood_l2l3_mode) {
     }
 
     //Verify EVPN mpls label NH points to l2_intf_cnh above
-    MplsLabel *evpn_label = Agent::GetInstance()->GetMplsTable()->
+    MplsLabel *evpn_label = Agent::GetInstance()->mpls_table()->
         FindMplsLabel(evpn_flood_label);
     const NextHop *evpn_label_nh = evpn_label->nexthop();
     ASSERT_TRUE(evpn_label_nh == l2_cnh);
@@ -1212,11 +1209,14 @@ TEST_F(CfgTest, evpn_flood_l2l3_mode) {
     DeleteVmportEnv(input, 2, 1, 0);
     client->WaitForIdle();
 
+    DelArp("8.8.8.8", "00:00:08:08:08:08", 
+           agent_->fabric_interface_name().c_str());
+    client->WaitForIdle();
     WaitForCompositeNHDelete(IpAddress::from_string("255.255.255.255").to_v4(), "vrf1");
     client->WaitForIdle();
 }
 
-TEST_F(CfgTest, evpn_flood_l2_mode) {
+TEST_F(MulticastTest, evpn_flood_l2_mode) {
     struct PortInfo input[] = {
         {"vnet1", 1, "1.1.1.10", "00:00:01:01:01:10", 1, 1},
     };
@@ -1244,7 +1244,7 @@ TEST_F(CfgTest, evpn_flood_l2_mode) {
     client->WaitForIdle();
 
     AddArp("8.8.8.8", "00:00:08:08:08:08", 
-           Agent::GetInstance()->GetIpFabricItfName().c_str());
+           Agent::GetInstance()->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     TunnelOlist evpn_olist_map;
@@ -1297,7 +1297,7 @@ TEST_F(CfgTest, evpn_flood_l2_mode) {
     EXPECT_TRUE(l2_intf_cnh->ComponentNHCount() == 1);
 
     //Verify EVPN mpls label NH points to l2_intf_cnh above
-    MplsLabel *evpn_label = Agent::GetInstance()->GetMplsTable()->
+    MplsLabel *evpn_label = Agent::GetInstance()->mpls_table()->
         FindMplsLabel(evpn_flood_label);
     const NextHop *evpn_label_nh = evpn_label->nexthop();
     ASSERT_TRUE(evpn_label_nh == l2_cnh);
@@ -1308,13 +1308,15 @@ TEST_F(CfgTest, evpn_flood_l2_mode) {
     DeleteVmportEnv(input, 1, true);
     client->WaitForIdle();
 
+    DelArp("8.8.8.8", "00:00:08:08:08:08", 
+           agent_->fabric_interface_name().c_str());
+    client->WaitForIdle();
     WaitForCompositeNHDelete(IpAddress::from_string("255.255.255.255").to_v4(), "vrf1");
     EXPECT_FALSE(VmPortFind(input, 0));
     client->WaitForIdle();
 }
 
-TEST_F(CfgTest, change_in_gateway_of_subnet_noop) {
->>>>>>> Agent EVPN multicast support
+TEST_F(MulticastTest, change_in_gateway_of_subnet_noop) {
     //Send control node message on subnet bcast after family has changed to L2
     client->Reset();
     struct PortInfo input[] = {
