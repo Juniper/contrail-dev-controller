@@ -222,11 +222,11 @@ void TcpSession::CloseInternal(bool callObserver) {
     {
         tbb::mutex::scoped_lock obs_lock(obs_mutex_);
         if (callObserver == true && observer_) {
-            observer_(session.get(), CLOSE);
+            observer_(this, CLOSE);
         }
     }
 
-    server_->OnSessionClose(session.get());
+    server_->OnSessionClose(this);
 }
 
 void TcpSession::Close() {
@@ -618,7 +618,7 @@ boost::system::error_code TcpSession::SetSocketOptions() {
         //
         // Set socket send and receive buffer size
         //
-        // XXX Currently, used only under test environments to trigger partial
+        // Currently used only under test environments to trigger partial
         // sends more deterministically
         //
         socket_base::send_buffer_size send_buffer_size_option(sz);

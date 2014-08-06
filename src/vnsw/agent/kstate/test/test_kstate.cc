@@ -120,8 +120,9 @@ public:
                 //5 interface nexthops get created for each interface 
                 //(l2 with policy, l2 without policy, l3 with policy, l3 
                 // without policy and 1 multicast - mac as all f's)
-                //plus 4 Nexthops for each VRF (1 VRF NH and 3 Composite NHs)
-                WAIT_FOR(1000, 1000, ((nh_count + (num_ports * 5) + 4) == 
+                //plus 4 Nexthops for each VRF (1 VRF NH and
+                //2 Composite NHs(L3 composite + L2 composite)
+                WAIT_FOR(1000, 1000, ((nh_count + (num_ports * 5) + 3) ==
                                     KSyncSockTypeMap::NHCount()));
             }
             if (rt_count) {
@@ -252,8 +253,9 @@ TEST_F(KStateTest, NHDumpTest) {
     //5 interface nexthops get created for each interface 
     //(l2 with policy, l2 without policy, l3 with policy, l3 without policy 
     // and 1 multicast - mac as all f's )
-    //plus 4 Nexthops for each VRF (1 VRF NH and 3 Composite NHs)
-    TestNHKState::Init(-1, true, nh_count + (max_ports * 5) + 4);
+    //plus 4 Nexthops for each VRF (1 VRF NH and
+    //2 Composite NHs(L3 composite + L2 composite)
+    TestNHKState::Init(-1, true, nh_count + (max_ports * 5) + 3);
     client->WaitForIdle();
     client->KStateResponseWait(1);
 
@@ -269,11 +271,19 @@ TEST_F(KStateTest, NHGetTest) {
     LOG(DEBUG, "nh count " << nh_count);
 
     CreatePorts(0, nh_count, 0);
+    int count = 0;
     //Two interface nexthops get created for each interface (with and without policy)
-    for (int i = 0; i < (MAX_TEST_FD * 2); i++) {
-        TestNHKState::Init(nh_count + i);
-        client->WaitForIdle();
-        client->KStateResponseWait(1);
+    for (int i = 0; count < (MAX_TEST_FD * 2); i++) {
+        uint32_t nh_id = nh_count + i;
+        /* Check whether nexthop-index is valid by checking it in oper db before doing
+         * Get from mock kernel */
+        NextHop *nh = Agent::GetInstance()->nexthop_table()->FindNextHop(nh_id);
+        if (nh) {
+            TestNHKState::Init(nh_id);
+            client->WaitForIdle();
+            client->KStateResponseWait(1);
+            count++;
+        }
     }
     DeletePorts();
 }

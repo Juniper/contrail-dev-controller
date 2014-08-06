@@ -45,6 +45,7 @@
 #include "db/db.h"
 #include "io/event_manager.h"
 
+#include "sandesh/common/vns_types.h"
 #include "sandesh/sandesh_http.h"
 #include "sandesh/sandesh_types.h"
 #include "schema/xmpp_unicast_types.h"
@@ -209,38 +210,6 @@ PeerCloseManagerTest::~PeerCloseManagerTest() {
 }
 
 void PeerCloseManagerTest::StartStaleTimer() {
-}
-
-void StateMachineTest:: StartConnectTimer(int seconds) {
-    connect_timer_->Start(100,
-            boost::bind(&StateMachine::ConnectTimerExpired, this),
-            boost::bind(&StateMachine::TimerErrorHanlder, this, _1, _2));
-}
-
-void StateMachineTest::StartOpenTimer(int seconds) {
-    open_timer_->Start(100,
-            boost::bind(&StateMachine::OpenTimerExpired, this),
-            boost::bind(&StateMachine::TimerErrorHanlder, this, _1, _2));
-}
-
-void StateMachineTest::StartIdleHoldTimer() {
-    if (idle_hold_time_ <= 0) return;
-
-    idle_hold_timer_->Start(100,
-            boost::bind(&StateMachine::IdleHoldTimerExpired, this),
-            boost::bind(&StateMachine::TimerErrorHanlder, this, _1, _2));
-}
-
-void XmppStateMachineTest::StartConnectTimer(int seconds) {
-    connect_timer_->Start(10,
-        boost::bind(&XmppStateMachine::ConnectTimerExpired, this),
-        boost::bind(&XmppStateMachine::TimerErrorHandler, this, _1, _2));
-}
-
-void XmppStateMachineTest::StartOpenTimer(int seconds) {
-    open_timer_->Start(10,
-        boost::bind(&XmppStateMachine::OpenTimerExpired, this),
-        boost::bind(&XmppStateMachine::TimerErrorHandler, this, _1, _2));
 }
 
 static string GetRouterName(int router_id) {
@@ -580,7 +549,7 @@ void BgpStressTest::TearDown() {
     xmpp_server_test_->Shutdown();
     WaitForIdle();
     if (n_agents_) {
-        TASK_UTIL_EXPECT_EQ(0, xmpp_server_test_->ConnectionsCount());
+        TASK_UTIL_EXPECT_EQ(0, xmpp_server_test_->ConnectionCount());
     }
     AgentCleanup();
     channel_manager_.reset();
@@ -2888,11 +2857,15 @@ static void process_command_line_args(int argc, const char **argv) {
             string hostname(boost::asio::ip::host_name(error));
             log_file << "." << hostname << "." << getpid();
         }
+
+        Module::type module = Module::CONTROL_NODE;
+        string module_name = g_vns_constants.ModuleNames.find(module)->second;
         bgp_log_test::init(log_file.str(),
             vm.count("log-file-size") ?
                 vm["log-file-size"].as<unsigned long>() : log_file_size,
             vm.count("log-file-index") ?
-                vm["log-file-index"].as<unsigned int>() : log_file_index);
+                vm["log-file-index"].as<unsigned int>() : log_file_index,
+                !d_log_disable_, d_log_level_, module_name);
     }
 
     //

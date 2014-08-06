@@ -65,6 +65,7 @@ const std::map<FlowEntry::FlowPolicyState, const char*>
 
 boost::uuids::random_generator FlowTable::rand_gen_ = boost::uuids::random_generator();
 tbb::atomic<int> FlowEntry::alloc_count_;
+SecurityGroupList FlowTable::default_sg_list_;
 
 static bool ShouldDrop(uint32_t action) {
     if ((action & TrafficAction::DROP_FLAGS) || (action & TrafficAction::IMPLICIT_DENY_FLAGS))
@@ -94,7 +95,8 @@ static void SetAclListAceId(const AclDBEntry *acl, const std::list<MatchAclParam
 
 FlowEntry::FlowEntry(const FlowKey &k) : 
     key_(k), data_(), stats_(), flow_handle_(kInvalidFlowHandle),
-    ksync_entry_(NULL), deleted_(false), flags_(0), linklocal_src_port_(),
+    ksync_entry_(NULL), deleted_(false), flags_(0), short_flow_reason_(SHORT_UNKNOWN),
+    linklocal_src_port_(),
     linklocal_src_port_fd_(PktFlowInfo::kLinkLocalInvalidFd) {
     flow_uuid_ = FlowTable::rand_gen_(); 
     egress_uuid_ = FlowTable::rand_gen_(); 
@@ -102,6 +104,39 @@ FlowEntry::FlowEntry(const FlowKey &k) :
     nw_ace_uuid_ = FlowPolicyStateStr.at(NOT_EVALUATED);
     sg_rule_uuid_= FlowPolicyStateStr.at(NOT_EVALUATED);
     alloc_count_.fetch_and_increment();
+}
+
+void FlowEntry::GetSourceRouteInfo(const Inet4UnicastRouteEntry *rt) {
+    const AgentPath *path = NULL;
+    if (rt) {
+        path = rt->GetActivePath();
+    }
+    if (path == NULL) {
+        data_.source_vn = FlowHandler::UnknownVn();
+        data_.source_sg_id_l = FlowTable::default_sg_list();
+        data_.source_plen = 0;
+    } else {
+        data_.source_vn = path->dest_vn_name();
+        data_.source_sg_id_l = path->sg_list();
+        data_.source_plen = rt->plen();
+    }
+}
+
+void FlowEntry::GetDestRouteInfo(const Inet4UnicastRouteEntry *rt) {
+    const AgentPath *path = NULL;
+    if (rt) {
+        path = rt->GetActivePath();
+    }
+
+    if (path == NULL) {
+        data_.dest_vn = FlowHandler::UnknownVn();
+        data_.dest_sg_id_l = FlowTable::default_sg_list();
+        data_.dest_plen = 0;
+    } else {
+        data_.dest_vn = path->dest_vn_name();
+        data_.dest_sg_id_l = path->sg_list();
+        data_.dest_plen = rt->plen();
+    }
 }
 
 uint32_t FlowEntry::MatchAcl(const PacketHeader &hdr,
@@ -196,14 +231,18 @@ bool FlowEntry::ActionRecompute() {
 
     action = data_.match_p.policy_action | data_.match_p.out_policy_action |
         data_.match_p.sg_action_summary |
-        data_.match_p.mirror_action | data_.match_p.out_mirror_action;
-    action &= ~(1 << TrafficAction::VRF_TRANSLATE);
-    action |= data_.match_p.vrf_assign_acl_action;
+        data_.match_p.mirror_action | data_.match_p.out_mirror_action |
+        data_.match_p.vrf_assign_acl_action;
 
     if (action & (1 << TrafficAction::VRF_TRANSLATE) && 
         data_.match_p.action_info.vrf_translate_action_.ignore_acl() == true) {
-        action = (1 << TrafficAction::VRF_TRANSLATE) |
-                 (1 << TrafficAction::PASS);
+        //In case of multi inline service chain, match condition generated on
+        //each of service instance interface takes higher priority than
+        //network ACL. Match condition on the interface would have ignore acl flag
+        //set to avoid applying two ACL for vrf translation
+        action = data_.match_p.vrf_assign_acl_action |
+            data_.match_p.sg_action_summary | data_.match_p.mirror_action |
+            data_.match_p.out_mirror_action;
     }
 
     // Force short flows to DROP
@@ -215,6 +254,23 @@ bool FlowEntry::ActionRecompute() {
     if (ShouldDrop(action)) {
         action = (action & ~TrafficAction::DROP_FLAGS & ~TrafficAction::PASS_FLAGS);
         action |= (1 << TrafficAction::DROP);
+        if (is_flags_set(FlowEntry::ShortFlow)) {
+            data_.drop_reason = short_flow_reason_;
+        } else if (ShouldDrop(data_.match_p.policy_action)) {
+            data_.drop_reason = DROP_POLICY;
+        } else if (ShouldDrop(data_.match_p.out_policy_action)){
+            data_.drop_reason = DROP_OUT_POLICY;
+        } else if (ShouldDrop(data_.match_p.sg_action)){
+            data_.drop_reason = DROP_SG;
+        } else if (ShouldDrop(data_.match_p.out_sg_action)){
+            data_.drop_reason = DROP_OUT_SG;
+        } else if (ShouldDrop(data_.match_p.reverse_sg_action)){
+            data_.drop_reason = DROP_REVERSE_SG;
+        } else if (ShouldDrop(data_.match_p.reverse_out_sg_action)){
+            data_.drop_reason = DROP_REVERSE_OUT_SG;
+        } else {
+            data_.drop_reason = DROP_UNKNOWN;
+        }
     }
 
     if (action & (1 << TrafficAction::TRAP)) {
@@ -464,10 +520,10 @@ void FlowEntry::SetVrfAssignEntry() {
     }
     if (data_.vrf_assign_evaluated && vrf_assigned_name !=
         data_.match_p.action_info.vrf_translate_action_.vrf_name()) {
-        MakeShortFlow();
+        MakeShortFlow(SHORT_VRF_CHANGE);
     }
     if (acl_assigned_vrf_index() == 0) {
-        MakeShortFlow();
+        MakeShortFlow(SHORT_VRF_CHANGE);
     }
     data_.vrf_assign_evaluated = true;
 }
@@ -777,10 +833,15 @@ void FlowEntry::UpdateKSync() {
     }
 }
 
-void FlowEntry::MakeShortFlow() {
-    set_flags(FlowEntry::ShortFlow);
-    if (reverse_flow_entry_) {
+void FlowEntry::MakeShortFlow(FlowShortReason reason) {
+    if (!is_flags_set(FlowEntry::ShortFlow)) {
+        set_flags(FlowEntry::ShortFlow);
+        short_flow_reason_ = reason;
+    }
+    if (reverse_flow_entry_ &&
+        !reverse_flow_entry_->is_flags_set(FlowEntry::ShortFlow)) {
         reverse_flow_entry_->set_flags(FlowEntry::ShortFlow);
+        reverse_flow_entry_->short_flow_reason_ = reason;
     }
 }
 
@@ -818,7 +879,9 @@ void FlowEntry::GetPolicyInfo() {
 
 void FlowTable::Add(FlowEntry *flow, FlowEntry *rflow) {
     flow->reset_flags(FlowEntry::ReverseFlow);
-    rflow->set_flags(FlowEntry::ReverseFlow);
+    /* reverse flow may not be aviable always, eg: Flow Audit */
+    if (rflow != NULL)
+        rflow->set_flags(FlowEntry::ReverseFlow);
     UpdateReverseFlow(flow, rflow);
 
     flow->GetPolicyInfo();
@@ -869,27 +932,27 @@ void FlowTable::UpdateReverseFlow(FlowEntry *flow, FlowEntry *rflow) {
     }
 
     if (flow_rev && (flow_rev->reverse_flow_entry() == NULL)) {
-        flow_rev->MakeShortFlow();
-        flow->MakeShortFlow();
+        flow_rev->MakeShortFlow(FlowEntry::SHORT_NO_REVERSE_FLOW);
+        flow->MakeShortFlow(FlowEntry::SHORT_REVERSE_FLOW_CHANGE);
     }
 
     if (rflow_rev && (rflow_rev->reverse_flow_entry() == NULL)) {
-        rflow_rev->MakeShortFlow();
-        flow->MakeShortFlow();
+        rflow_rev->MakeShortFlow(FlowEntry::SHORT_NO_REVERSE_FLOW);
+        flow->MakeShortFlow(FlowEntry::SHORT_REVERSE_FLOW_CHANGE);
     }
 
     if (flow->reverse_flow_entry() == NULL) {
-        flow->MakeShortFlow();
+        flow->MakeShortFlow(FlowEntry::SHORT_NO_REVERSE_FLOW);
     }
 
     if (rflow && rflow->reverse_flow_entry() == NULL) {
-        rflow->MakeShortFlow();
+        rflow->MakeShortFlow(FlowEntry::SHORT_NO_REVERSE_FLOW);
     }
 
     if (rflow) {
         if (flow->is_flags_set(FlowEntry::ShortFlow) ||
             rflow->is_flags_set(FlowEntry::ShortFlow)) {
-            flow->MakeShortFlow();
+            flow->MakeShortFlow(FlowEntry::SHORT_REVERSE_FLOW_CHANGE);
         }
         if (flow->is_flags_set(FlowEntry::Multicast)) {
             rflow->set_flags(FlowEntry::Multicast);
@@ -1110,8 +1173,7 @@ bool FlowEntry::SetRpfNH(const Inet4UnicastRouteEntry *rt) {
             //  If there are multiple instances of ECMP in local server
             //  then RPF NH would point to local composite NH(containing 
             //  local members only)
-        const CompositeNH *comp_nh = static_cast<const CompositeNH *>(nh);
-        nh = comp_nh->GetLocalNextHop();
+        nh = rt->GetLocalNextHop();
     }
 
     const NhState *nh_state = NULL;
@@ -1149,7 +1211,7 @@ bool FlowEntry::InitFlowCmn(const PktFlowInfo *info, const PktControlInfo *ctrl,
                             const PktControlInfo *rev_ctrl) {
     if (stats_.last_modified_time) {
         if (is_flags_set(FlowEntry::NatFlow) != info->nat_done) {
-            MakeShortFlow();
+            MakeShortFlow(SHORT_NAT_CHANGE);
             return false;
         }
         stats_.last_modified_time = UTCTimestampUsec();
@@ -1170,8 +1232,10 @@ bool FlowEntry::InitFlowCmn(const PktFlowInfo *info, const PktControlInfo *ctrl,
     }
     if (info->short_flow) {
         set_flags(FlowEntry::ShortFlow);
+        short_flow_reason_ = info->short_flow_reason;
     } else {
         reset_flags(FlowEntry::ShortFlow);
+        short_flow_reason_ = SHORT_UNKNOWN;
     }
     if (info->local_flow) {
         set_flags(FlowEntry::LocalFlow);
@@ -1224,10 +1288,7 @@ void FlowEntry::InitFwdFlow(const PktFlowInfo *info, const PktInfo *pkt,
     if (ctrl->rt_ != NULL) {
         SetRpfNH(ctrl->rt_);
     }
-    data_.source_vn = *(info->source_vn);
-    data_.dest_vn = *(info->dest_vn);
-    data_.source_sg_id_l = *(info->source_sg_id_l);
-    data_.dest_sg_id_l = *(info->dest_sg_id_l);
+
     data_.flow_source_vrf = info->flow_source_vrf;
     data_.flow_dest_vrf = info->flow_dest_vrf;
     data_.dest_vrf = info->dest_vrf;
@@ -1240,14 +1301,15 @@ void FlowEntry::InitFwdFlow(const PktFlowInfo *info, const PktInfo *pkt,
     }
     data_.component_nh_idx = info->out_component_nh_idx;
     reset_flags(FlowEntry::Trap);
-    data_.source_plen = info->source_plen;
-    data_.dest_plen = info->dest_plen;
     if (ctrl->rt_ && ctrl->rt_->is_multicast()) {
         set_flags(FlowEntry::Multicast);
     }
     if (rev_ctrl->rt_ && rev_ctrl->rt_->is_multicast()) {
         set_flags(FlowEntry::Multicast);
     }
+
+    GetSourceRouteInfo(ctrl->rt_);
+    GetDestRouteInfo(rev_ctrl->rt_);
 }
 
 void FlowEntry::InitRevFlow(const PktFlowInfo *info,
@@ -1274,10 +1336,7 @@ void FlowEntry::InitRevFlow(const PktFlowInfo *info,
     if (ctrl->rt_ != NULL) {
         SetRpfNH(ctrl->rt_);
     }
-    data_.source_vn = *(info->dest_vn);
-    data_.dest_vn = *(info->source_vn);
-    data_.source_sg_id_l = *(info->dest_sg_id_l);
-    data_.dest_sg_id_l = *(info->source_sg_id_l);
+
     data_.flow_source_vrf = info->flow_dest_vrf;
     data_.flow_dest_vrf = info->flow_source_vrf;
     data_.dest_vrf = info->nat_dest_vrf;
@@ -1293,18 +1352,19 @@ void FlowEntry::InitRevFlow(const PktFlowInfo *info,
     } else {
         reset_flags(FlowEntry::Trap);
     }
-    data_.source_plen = info->dest_plen;
-    data_.dest_plen = info->source_plen;
+
+    GetSourceRouteInfo(ctrl->rt_);
+    GetDestRouteInfo(rev_ctrl->rt_);
 }
 
 void FlowEntry::InitAuditFlow(uint32_t flow_idx) {
     flow_handle_ = flow_idx;
     set_flags(FlowEntry::ShortFlow);
-    data_.source_vn = *FlowHandler::UnknownVn();
-    data_.dest_vn = *FlowHandler::UnknownVn();
-    SecurityGroupList empty_sg_id_l;
-    data_.source_sg_id_l = empty_sg_id_l;
-    data_.dest_sg_id_l = empty_sg_id_l;
+    short_flow_reason_ = SHORT_AUDIT_ENTRY;
+    data_.source_vn = FlowHandler::UnknownVn();
+    data_.dest_vn = FlowHandler::UnknownVn();
+    data_.source_sg_id_l = FlowTable::default_sg_list();
+    data_.dest_sg_id_l = FlowTable::default_sg_list();
 }
 
 FlowEntry *FlowTable::Allocate(const FlowKey &key) {
@@ -1509,6 +1569,12 @@ void FlowTable::Init() {
         (boost::bind(&FlowTable::SetAclFlowSandeshData, this, _1, _2, _3));
 
     return;
+}
+
+void FlowTable::InitDone() {
+    max_vm_flows_ =
+        (agent_->ksync()->flowtable_ksync_obj()->flow_table_entries_count() *
+        (uint32_t) agent_->params()->max_vm_flows()) / 100;
 }
 
 void FlowTable::Shutdown() {
@@ -1741,9 +1807,7 @@ void Inet4RouteUpdate::UnicastNotify(DBTablePartBase *partition, DBEntryBase *e)
     if (active_nh->GetType() == NextHop::COMPOSITE) {
         //If destination is ecmp, all remote flow would
         //have RPF NH set to that local component NH
-        const CompositeNH *comp_nh = 
-            static_cast<const CompositeNH *>(active_nh);
-        local_nh = comp_nh->GetLocalCompositeNH();
+        local_nh = route->GetLocalNextHop();
     }
 
     if ((state->active_nh_ != active_nh) || (state->local_nh_ != local_nh)) {
@@ -2697,9 +2761,6 @@ FlowTable::FlowTable(Agent *agent) :
     intf_listener_id_(), vn_listener_id_(), vm_listener_id_(),
     vrf_listener_id_(), nh_listener_(NULL),
     route_key_(NULL, Ip4Address(), 32, false) {
-    max_vm_flows_ =
-        (agent->ksync()->flowtable_ksync_obj()->flow_table_entries_count() *
-        (uint32_t) agent->params()->max_vm_flows()) / 100;
 }
 
 FlowTable::~FlowTable() {
@@ -2710,4 +2771,3 @@ FlowTable::~FlowTable() {
     agent_->vrf_table()->Unregister(vrf_listener_id_);
     delete nh_listener_;
 }
-

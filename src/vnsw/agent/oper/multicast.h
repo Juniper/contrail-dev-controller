@@ -5,15 +5,12 @@
 #ifndef multicast_agent_oper_hpp
 #define multicast_agent_oper_hpp
 
-#include <oper/nexthop.h>
-#include <oper/route_common.h>
 #include <netinet/in.h>
 #include <net/ethernet.h>
 #include <cmn/agent_cmn.h>
-#include <oper/vrf.h>
-#include <oper/interface_common.h>
-#include <oper/agent_types.h>
-#include <sandesh/sandesh_trace.h>
+#include <cmn/agent.h>
+#include <oper/nexthop.h>
+#include <oper/vn.h>
 
 using namespace boost::uuids;
 
@@ -180,7 +177,7 @@ public:
         return obj_; 
     };
 
-    void AddChangeMultiProtocolCompositeNH(MulticastGroupObject *);
+    void AddChangeMultiProtocolCompositeNH(MulticastGroupObject *, uint32_t);
     void TriggerCompositeNHChange(MulticastGroupObject *);
     void TriggerL2CompositeNHChange(MulticastGroupObject *);
     void TriggerL3CompositeNHChange(MulticastGroupObject *);
@@ -192,7 +189,11 @@ public:
     MulticastGroupObject *FindFloodGroupObject(const std::string &vrf_name);
     MulticastGroupObject *FindGroupObject(const std::string &vrf_name,
                                           const Ip4Address &dip);
+    ComponentNHKeyList GetL3ComponentNHKeyList(MulticastGroupObject *obj);
+    ComponentNHKeyList GetL2ComponentNHKeyList(MulticastGroupObject *obj);
+    ComponentNHKeyList GetFabricComponentNHKeyList(MulticastGroupObject *obj);
     bool FlushPeerInfo(uint64_t peer_sequence);
+    void ChangeTunnelType();
 
     void Terminate();
 
@@ -257,7 +258,8 @@ private:
     { return vn_ipam_mapping_; };
 
     //broadcast rt add /delete
-    void AddL2BroadcastRoute(const std::string &vrf_name, 
+    void AddL2BroadcastRoute(MulticastGroupObject *obj,
+                             const std::string &vrf_name,
                              const std::string &vn_name,
                              const Ip4Address &addr,
                              int vxlan_id);

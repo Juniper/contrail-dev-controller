@@ -76,10 +76,18 @@ private:
     bool vgw_enable_;
     bool router_id_dep_enable_;
 
+    std::auto_ptr<OperDB> oper_;
+    std::auto_ptr<AgentConfig> cfg_;
+    std::auto_ptr<AgentStats> stats_;
+    std::auto_ptr<KSync> ksync_;
+    std::auto_ptr<AgentUve> uve_;
+
     std::auto_ptr<TaskTrigger> trigger_;
     std::auto_ptr<DiagTable> diag_table_;
     std::auto_ptr<ServicesModule> services_;
     std::auto_ptr<PktModule> pkt_;
+    std::auto_ptr<VNController> controller_;
+    std::auto_ptr<VirtualGateway> vgw_;
     DISALLOW_COPY_AND_ASSIGN(TestAgentInit);
 };
 

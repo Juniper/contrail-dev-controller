@@ -50,6 +50,8 @@
 using namespace std;
 using namespace boost::asio::ip;
 namespace opt = boost::program_options;
+using process::ConnectionStateManager;
+using process::GetProcessStateCb;
 
 static TaskTrigger *node_info_trigger;
 static Timer *node_info_log_timer;
@@ -108,7 +110,7 @@ static void ShutdownServers(
     WaitForIdle();
 
     // Wait until all XMPP connections are cleaned up.
-    for (cnt = 0; xmpp_server->ConnectionsCount() != 0 && cnt < 15; cnt++) {
+    for (cnt = 0; xmpp_server->ConnectionCount() != 0 && cnt < 15; cnt++) {
         sleep(1);
     }
 
@@ -130,7 +132,7 @@ static void ShutdownServers(
     // Shutdown Discovery Service Client
     ShutdownDiscoveryClient(dsclient);
 
-    ConnectionStateManager<ControlNodeStatus, ControlNodeProcessStatus>::
+    ConnectionStateManager<NodeStatusUVE, NodeStatus>::
         GetInstance()->Shutdown();
 
     // Do sandesh cleanup.
@@ -369,51 +371,6 @@ void ControlNodeShutdown() {
     evm.Shutdown();
 }
 
-// Get control-node's connectivity status with other servers which are critical
-// to the normnal operation. conenction_info library periodically sends this
-// information as UVEs to the collector for user visibility and assistance
-// during trouble-shooting.
-static void ControlNodeGetConnectivityStatus(
-    const std::vector<ConnectionInfo> &cinfos,
-    ConnectivityStatus::type &cstatus, std::string &message) {
-
-    // Determine if the number of connections is as expected. At the moment, we
-    // consider connections to collector, discovery server and IFMap (irond)
-    // servers as critical to the normal functionality of control-node.
-    //
-    // 1. Collector client
-    // 2. Discovery Server publish XmppServer
-    // 3. Discovery Server subscribe Collector
-    // 4. Discovery Server subscribe IfmapServer
-    // 5. IFMap Server (irond)
-    size_t expected_connections = 5;
-    size_t num_connections(cinfos.size());
-    if (num_connections != expected_connections) {
-        cstatus = ConnectivityStatus::NON_FUNCTIONAL;
-        message = "Number of connections:" + integerToString(num_connections) +
-                  ", Expected: " + integerToString(expected_connections);
-        return;
-    }
-    std::string cup(g_connection_info_constants.ConnectionStatusNames.
-                    find(ConnectionStatus::UP)->second);
-
-    // Iterate to determine process connectivity status
-    for (std::vector<ConnectionInfo>::const_iterator it = cinfos.begin();
-         it != cinfos.end(); it++) {
-        const ConnectionInfo &cinfo(*it);
-        const std::string &conn_status(cinfo.get_status());
-        if (conn_status != cup) {
-            cstatus = ConnectivityStatus::NON_FUNCTIONAL;
-            message = cinfo.get_type() + ":" + cinfo.get_name();
-            return;
-        }
-    }
-
-    // All critical connections are in good condition.
-    cstatus = ConnectivityStatus::FUNCTIONAL;
-    return;
-}
-
 int main(int argc, char *argv[]) {
     Options options;
     bool sandesh_generator_init = true;
@@ -424,12 +381,12 @@ int main(int argc, char *argv[]) {
     }
 
     ControlNode::SetProgramName(argv[0]);
-    if (options.log_file() == "<stdout>") {
-        LoggingInit();
-    } else {
-        LoggingInit(options.log_file(), options.log_file_size(),
-                    options.log_files_count());
-    }
+    Module::type module = Module::CONTROL_NODE;
+    string module_name = g_vns_constants.ModuleNames.find(module)->second;
+    LoggingInit(options.log_file(), options.log_file_size(),
+                options.log_files_count(), options.use_syslog(),
+                options.syslog_facility(), module_name);
+
     TaskScheduler::Initialize();
     ControlNode::SetDefaultSchedulingPolicy();
     BgpSandeshContext sandesh_context;
@@ -437,7 +394,7 @@ int main(int argc, char *argv[]) {
     /* If Sandesh initialization is not being done via discovery we need to
      * initialize here. We need to do sandesh initialization here for cases
      * (i) When both Discovery and Collectors are configured.
-     * (ii) When both are not configured (to initilialize introspect)
+     * (ii) When both are not configured (to initialize introspect)
      * (iii) When only collector is configured
      */
     if (!options.discovery_server().empty() &&
@@ -446,12 +403,11 @@ int main(int argc, char *argv[]) {
     }
 
     if (sandesh_generator_init) {
-        Module::type module = Module::CONTROL_NODE;
         NodeType::type node_type = 
             g_vns_constants.Module2NodeType.find(module)->second;
         if (options.collectors_configured()) {
             Sandesh::InitGenerator(
-                    g_vns_constants.ModuleNames.find(module)->second,
+                    module_name,
                     options.hostname(),
                     g_vns_constants.NodeTypeNames.find(node_type)->second,
                     g_vns_constants.INSTANCE_ID_DEFAULT,
@@ -581,11 +537,20 @@ int main(int argc, char *argv[]) {
 
     CpuLoadData::Init();
     start_time = UTCTimestampUsec();
-    ConnectionStateManager<ControlNodeStatus, ControlNodeProcessStatus>::
+    // Determine if the number of connections is as expected. At the moment, we
+    // consider connections to collector, discovery server and IFMap (irond)
+    // servers as critical to the normal functionality of control-node.
+    //
+    // 1. Collector client
+    // 2. Discovery Server publish XmppServer
+    // 3. Discovery Server subscribe Collector
+    // 4. Discovery Server subscribe IfmapServer
+    // 5. IFMap Server (irond)
+    ConnectionStateManager<NodeStatusUVE, NodeStatus>::
         GetInstance()->Init(*evm.io_service(), options.hostname(),
             g_vns_constants.ModuleNames.find(Module::CONTROL_NODE)->second,
             Sandesh::instance_id(),
-            boost::bind(&ControlNodeGetConnectivityStatus, _1, _2, _3));
+            boost::bind(&GetProcessStateCb, _1, _2, _3, 5));
     node_info_trigger = 
         new TaskTrigger(boost::bind(&ControlNodeInfoLogger, sandesh_context),
             TaskScheduler::GetInstance()->GetTaskId("bgp::Config"), 0);

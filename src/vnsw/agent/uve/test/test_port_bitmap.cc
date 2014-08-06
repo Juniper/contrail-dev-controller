@@ -13,8 +13,8 @@
 #include <base/task.h>
 #include <io/event_manager.h>
 #include <base/util.h>
-#include <ifmap_agent_parser.h>
-#include <ifmap_agent_table.h>
+#include <ifmap/ifmap_agent_parser.h>
+#include <ifmap/ifmap_agent_table.h>
 #include <oper/vn.h>
 #include <oper/vm.h>
 #include <oper/interface_common.h>
@@ -250,13 +250,9 @@ public:
         const VnEntry *vn = intf->vn();
         SecurityGroupList empty_sg_id_l;
 
-        boost::shared_ptr<PktInfo> pkt_info(new PktInfo(NULL, 0));
+        boost::shared_ptr<PktInfo> pkt_info(new PktInfo(NULL, 0, 0));
         PktFlowInfo info(pkt_info, Agent::GetInstance()->pkt()->flow_table());
         PktInfo *pkt = pkt_info.get();
-        info.source_vn = &vn->GetName();
-        info.dest_vn = dest_vn;
-        info.source_sg_id_l = &empty_sg_id_l;
-        info.dest_sg_id_l = &empty_sg_id_l;
 
         PktControlInfo ctrl;
         ctrl.vn_ = vn;

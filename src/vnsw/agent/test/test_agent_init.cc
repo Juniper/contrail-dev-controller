@@ -36,6 +36,7 @@
 #include <oper/vrf.h>
 #include <oper/multicast.h>
 #include <oper/mirror_table.h>
+#include <oper/sg.h>
 #include <controller/controller_init.h>
 #include <controller/controller_vrf_export.h>
 #include <pkt/pkt_init.h>
@@ -87,12 +88,22 @@ void TestAgentInit::InitCollector() {
 // Optional modules or modules that have different implementation are created
 // by init module
 void TestAgentInit::CreateModules() {
-    agent_->set_cfg(new AgentConfig(agent_));
-    agent_->set_stats(new AgentStats(agent_));
-    agent_->set_oper_db(new OperDB(agent_));
-    agent_->set_uve(AgentObjectFactory::Create<AgentUve>(
-                    agent_, AgentUve::kBandwidthInterval));
-    agent_->set_ksync(AgentObjectFactory::Create<KSync>(agent_));
+    cfg_.reset(new AgentConfig(agent_));
+    agent_->set_cfg(cfg_.get());
+
+    stats_.reset(new AgentStats(agent_));
+    agent_->set_stats(stats_.get());
+
+    oper_.reset(new OperDB(agent_));
+    agent_->set_oper_db(oper_.get());
+
+    uve_.reset(AgentObjectFactory::Create<AgentUve>
+               (agent_, AgentUve::kBandwidthInterval));
+    agent_->set_uve(uve_.get());
+
+    ksync_.reset(AgentObjectFactory::Create<KSync>(agent_));
+    agent_->set_ksync(ksync_.get());
+
     pkt_.reset(new PktModule(agent_));
     agent_->set_pkt(pkt_.get());
 
@@ -100,10 +111,12 @@ void TestAgentInit::CreateModules() {
                                        params_->metadata_shared_secret()));
     agent_->set_services(services_.get());
     if (vgw_enable_) {
-        agent_->set_vgw(new VirtualGateway(agent_));
+        vgw_.reset(new VirtualGateway(agent_));
+        agent_->set_vgw(vgw_.get());
     }
 
-    agent_->set_controller(new VNController(agent_));
+    controller_.reset(new VNController(agent_));
+    agent_->set_controller(controller_.get());
 }
 
 void TestAgentInit::CreateDBTables() {
@@ -277,6 +290,10 @@ void TestAgentInit::InitDone() {
     if (agent_->cfg()) {
         agent_->cfg()->InitDone();
     }
+
+    if (agent_->pkt()) {
+        agent_->pkt()->InitDone();
+    }
 }
 
 // Start init sequence
@@ -325,7 +342,8 @@ void TestAgentInit::Start() {
     if (params_->log_file() == "") {
         LoggingInit();
     } else {
-        LoggingInit(params_->log_file());
+        LoggingInit(params_->log_file(), 1000000, 3, false, std::string(),
+                    std::string());
     }
 
     params_->LogConfig();
@@ -391,6 +409,10 @@ DBTableWalker *TestAgentInit::DeleteAcls() {
 }
 
 void TestAgentInit::Shutdown() {
+    if (agent_->oper_db()) {
+        agent_->oper_db()->Shutdown();
+    }
+
     agent_->cfg()->Shutdown();
     agent_->diag_table()->Shutdown();
 }

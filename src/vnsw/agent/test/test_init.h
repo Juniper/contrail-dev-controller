@@ -26,19 +26,23 @@
 #include <io/event_manager.h>
 #include <base/util.h>
 
+#include "xmpp/xmpp_channel.h"
+
 #include <cmn/agent_cmn.h>
 #include <cfg/cfg_init.h>
 #include <cfg/cfg_interface.h>
+#include <cfg/cfg_listener.h>
 #include "cfg/cfg_mirror.h"
 
 #include <oper/operdb_init.h>
 #include <controller/controller_init.h>
+#include "controller/controller_peer.h"
 #include <controller/controller_vrf_export.h>
 #include <services/services_init.h>
 #include <ksync/ksync_init.h>
 #include <ksync/vnswif_listener.h>
-#include <ifmap_agent_parser.h>
-#include <ifmap_agent_table.h>
+#include <ifmap/ifmap_agent_parser.h>
+#include <ifmap/ifmap_agent_table.h>
 #include <cmn/agent_param.h>
 #include <oper/vn.h>
 #include <oper/multicast.h>
@@ -588,7 +592,7 @@ public:
 TestClient *TestInit(const char *init_file = NULL, bool ksync_init = false, 
                      bool pkt_init = true, bool services_init = true,
                      bool uve_init = true,
-                     int agent_stats_interval = AgentStatsCollector::AgentStatsInterval,
+                     int agent_stats_interval = AgentParam::AgentStatsInterval,
                      int flow_stats_interval = FlowStatsCollector::FlowStatsInterval,
                      bool asio = true, bool ksync_sync_mode = true);
 

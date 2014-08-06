@@ -4,15 +4,18 @@
 
 #include <algorithm>
 #include <boost/uuid/uuid_io.hpp>
+#include <cmn/agent_cmn.h>
+
 #include <base/parse_object.h>
 #include <ifmap/ifmap_link.h>
 #include <ifmap/ifmap_table.h>
 #include <vnc_cfg_types.h>
+#include <agent_types.h>
 
 #include <cfg/cfg_init.h>
 #include <cfg/cfg_interface.h>
 #include <cfg/cfg_mirror.h>
-#include <cmn/agent_cmn.h>
+#include <cfg/cfg_listener.h>
 
 #include <oper/route_common.h>
 #include <oper/interface_common.h>
@@ -22,6 +25,7 @@
 #include <oper/mirror_table.h>
 #include <oper/agent_sandesh.h>
 #include <oper/oper_dhcp_options.h>
+#include <filter/acl.h>
 
 using namespace autogen;
 using namespace std;
@@ -75,6 +79,15 @@ bool VnEntry::GetIpamName(const Ip4Address &vm_addr,
     return false;
 }
 
+const VnIpam *VnEntry::GetIpam(const Ip4Address &ip) const {
+    for (unsigned int i = 0; i < ipam_.size(); i++) {
+        if (ipam_[i].IsSubnetMember(ip)) {
+            return &ipam_[i];
+        }
+    }
+    return NULL;
+}
+
 bool VnEntry::GetIpamData(const Ip4Address &vm_addr, std::string *ipam_name,
                           autogen::IpamType *ipam_type) const {
     // This will be executed from non DB context; task policy will ensure that
@@ -100,6 +113,17 @@ bool VnEntry::GetIpamVdnsData(const Ip4Address &vm_addr,
         return false;
         
     return true;
+}
+
+std::string VnEntry::GetProject() const {
+    // TODO: update to get the project name from project-vn link.
+    // Currently, this info doesnt come to the agent
+    std::size_t start_pos = name_.find(":") + 1;
+    std::size_t end_pos = name_.find(":", start_pos);
+    if (end_pos == std::string::npos)
+        return "";
+
+    return name_.substr(start_pos, end_pos - start_pos);
 }
 
 int VnEntry::GetVxLanId() const {
@@ -936,4 +960,11 @@ bool DomainConfig::GetVDns(const std::string &vdns,
         return false;
     *vdns_type = it->second;
     return true;
+}
+
+DomainConfig::~DomainConfig() {
+    assert(ipam_config_.size() == 0);
+    assert(vdns_config_.size() == 0);
+    ipam_callback_.clear();
+    vdns_callback_.size();
 }

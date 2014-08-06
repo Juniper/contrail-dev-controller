@@ -51,6 +51,11 @@ except:
     #python2.6
     from ordereddict import OrderedDict
 import jsonpickle
+from pysandesh.connection_info import ConnectionState
+from pysandesh.gen_py.process_info.ttypes import ConnectionType, \
+    ConnectionStatus
+from cfgm_common.uve.cfgm_cpuinfo.ttypes import NodeStatusUVE, \
+    NodeStatus
 
 _BGP_RTGT_MAX_ID = 1 << 24
 _BGP_RTGT_ALLOC_PATH = "/id/bgp/route-targets/"
@@ -164,6 +169,9 @@ def _access_control_list_update(acl_obj, name, obj, entries):
             _sandesh._logger.debug(
                 "HTTP error while updating acl %s for %s: %d, %s",
                 name, obj.get_fq_name_str(), he.status_code, he.content)
+        except NoIdError:
+            _sandesh._logger.debug("NoIdError while updating acl %s for %s",
+                                   name, obj.get_fq_name_str())
     return acl_obj
 # end _access_control_list_update
 
@@ -283,13 +291,11 @@ class VirtualNetworkST(DictST):
             ri.obj.add_route_target(new_rtgt_obj, inst_tgt_data)
             _vnc_lib.routing_instance_update(ri.obj)
             for (prefix, nexthop) in vn.route_table.items():
-                primary_ri, left_ri = vn._get_routing_instances_from_route(
-                    next_hop)
-                if primary_ri is not None:
-                    primary_ri.update_route_target_list(
-                        set([new_rtgt_name]), set([old_rtgt_name]), "import")
+                left_ri = vn._get_routing_instance_from_route(next_hop)
                 if left_ri is None:
                     continue
+                left_ri.update_route_target_list(
+                    set([new_rtgt_name]), set([old_rtgt_name]), "import")
                 static_route_entries = left_ri.obj.get_static_route_entries()
                 if static_route_entries is None:
                     continue
@@ -426,7 +432,9 @@ class VirtualNetworkST(DictST):
         alloc_new = False
         if service_vm not in cls._sc_vlan_allocator_dict:
             cls._sc_vlan_allocator_dict[service_vm] = IndexAllocator(
-                _zookeeper_client, _SERVICE_CHAIN_VLAN_ALLOC_PATH + service_vm,
+                _zookeeper_client,
+                (SchemaTransformer._zk_path_prefix +
+                 _SERVICE_CHAIN_VLAN_ALLOC_PATH+service_vm),
                 _SERVICE_CHAIN_MAX_VLAN)
 
         vlan_ia = cls._sc_vlan_allocator_dict[service_vm]
@@ -649,11 +657,10 @@ class VirtualNetworkST(DictST):
             ri_obj.update_route_target_list(rt_add, rt_del,
                                             import_export='export')
         for (prefix, nexthop) in self.route_table.items():
-            primary_ri, _ = self._get_routing_instances_from_route(next_hop)
-            if primary_ri is None:
-                continue
-            primary_ri.update_route_target_list(
-                rt_add, rt_del, import_export='import')
+            left_ri = self._get_routing_instance_from_route(next_hop)
+            if left_ri is not None:
+                left_ri.update_route_target_list(rt_add, rt_del,
+                                                 import_export='import')
         for rt in rt_del:
             try:
                 _vnc_lib.route_target_delete(fq_name=[rt])
@@ -666,19 +673,19 @@ class VirtualNetworkST(DictST):
     # next-hop in a route contains fq-name of a service instance, which must
     # be an auto policy instance. This function will get the left vn for that
     # service instance and get the primary and service routing instances
-    def _get_routing_instances_from_route(self, next_hop):
+    def _get_routing_instance_from_route(self, next_hop):
         try:
             si = _vnc_lib.service_instance_read(fq_name_str=next_hop)
             si_props = si.get_service_instance_properties()
             if si_props is None:
-                return (None, None)
+                return None
         except NoIdError:
             _sandesh._logger.debug("Cannot read service instance %s", next_hop)
-            return (None, None)
+            return None
         if not si_props.auto_policy:
             _sandesh._logger.debug("%s: route table next hop must be service "
                                    "instance with auto policy", self.name)
-            return (None, None)
+            return None
         left_vn_str = svc_info.get_left_vn(si.get_parent_fq_name_str(),
             si_props.left_virtual_network)
         right_vn_str = svc_info.get_right_vn(si.get_parent_fq_name_str(),
@@ -687,29 +694,28 @@ class VirtualNetworkST(DictST):
             _sandesh._logger.debug("%s: route table next hop service instance "
                                    "must have left and right virtual networks",
                                    self.name)
-            return (None, None)
+            return None
         left_vn = VirtualNetworkST.get(left_vn_str)
         if left_vn is None:
             _sandesh._logger.debug("Virtual network %s not present",
                                    left_vn_str)
-            return (None, None)
+            return None
         sc = ServiceChain.find(left_vn_str, right_vn_str, '<>',
                                [PortType(0, -1)], [PortType(0, -1)], 'any')
         if sc is None:
             _sandesh._logger.debug("Service chain between %s and %s not "
                                    "present", left_vn_str, right_vn_str)
-            return (None, None)
+            return None
         left_ri_name = left_vn.get_service_name(sc.name, next_hop)
-        return (left_vn.get_primary_routing_instance(),
-                left_vn.rinst.get(left_ri_name))
-    # end _get_routing_instances_from_route
+        return left_vn.rinst.get(left_ri_name)
+    # end _get_routing_instance_from_route
 
     def add_route(self, prefix, next_hop):
         self.route_table[prefix] = next_hop
-        primary_ri, left_ri = self._get_routing_instances_from_route(next_hop)
-        if primary_ri is None or left_ri is None:
+        left_ri = self._get_routing_instance_from_route(next_hop)
+        if left_ri is None:
             _sandesh._logger.debug(
-                "primary/left routing instance is none for %s", next_hop)
+                "left routing instance is none for %s", next_hop)
             return
         service_info = left_ri.obj.get_service_chain_information()
         if service_info is None:
@@ -731,7 +737,7 @@ class VirtualNetworkST(DictST):
             static_route_entries.add_route(static_route)
         left_ri.obj.set_static_route_entries(static_route_entries)
         _vnc_lib.routing_instance_update(left_ri.obj)
-        primary_ri.update_route_target_list(
+        left_ri.update_route_target_list(
             rt_add=self.rt_list | set([self.get_route_target()]),
             import_export="import")
     # end add_route
@@ -741,14 +747,13 @@ class VirtualNetworkST(DictST):
             return
         next_hop = self.route_table[prefix]
         del self.route_table[prefix]
-        primary_ri, left_ri = self._get_routing_instances_from_route(next_hop)
-        if primary_ri is not None:
-            primary_ri.update_route_target_list(rt_add=set(),
-                                                rt_del=self.rt_list | set(
-                                                    [self.get_route_target()]),
-                                                import_export="import")
+        left_ri = self._get_routing_instance_from_route(next_hop)
         if left_ri is None:
             return
+        left_ri.update_route_target_list(rt_add=set(),
+                                         rt_del=self.rt_list | set(
+                                             [self.get_route_target()]),
+                                         import_export="import")
         static_route_entries = left_ri.obj.get_static_route_entries()
         for static_route in static_route_entries.get_route() or []:
             if static_route.prefix != prefix:
@@ -771,8 +776,8 @@ class VirtualNetworkST(DictST):
                 continue
             for route in route_table.routes or []:
                 if route.prefix in self.route_table:
-                    del stale[route.prefix]
-                    if route.next_hop == self.route_table[prefix]:
+                    stale.pop(route.prefix, None)
+                    if route.next_hop == self.route_table[route.prefix]:
                         continue
                     self.delete_route(route.prefix)
                 # end if route.prefix
@@ -2353,6 +2358,7 @@ class VirtualMachineInterfaceST(DictST):
         if smode not in ['in-network', 'in-network-nat']:
             return
 
+        policy_rule_count = 0
         si_name = si_obj.get_fq_name_str()
         for policy_name in vn.policies:
             policy = NetworkPolicyST.get(policy_name)
@@ -2380,7 +2386,7 @@ class VirtualMachineInterfaceST(DictST):
                                                           prule.src_ports,
                                                           prule.dst_ports,
                                                           proto)
-                        if service_chain is None:
+                        if service_chain is None or not service_chain.created:
                             continue
                         ri_name = vn.obj.get_fq_name_str() + ':' + \
                             vn.get_service_name(service_chain.name, si_name)
@@ -2395,13 +2401,17 @@ class VirtualMachineInterfaceST(DictST):
                                     routing_instance=ri_name,
                                     ignore_acl=True)
                                 vrf_table.add_vrf_assign_rule(vrf_rule)
+                                policy_rule_count += 1
             # end for prule
-            vmi_obj = _vnc_lib.virtual_machine_interface_read(
-                fq_name_str=self.name)
-            if (jsonpickle.encode(vrf_table) !=
-                jsonpickle.encode(vmi_obj.get_vrf_assign_table())):
-                    vmi_obj.set_vrf_assign_table(vrf_table)
-                    _vnc_lib.virtual_machine_interface_update(vmi_obj)
+        # end for policy_name
+
+        if policy_rule_count == 0:
+            vrf_table = None
+        if (jsonpickle.encode(vrf_table) !=
+            jsonpickle.encode(vmi_obj.get_vrf_assign_table())):
+                vmi_obj.set_vrf_assign_table(vrf_table)
+                _vnc_lib.virtual_machine_interface_update(vmi_obj)
+
     # end recreate_vrf_assign_table
 # end VirtualMachineInterfaceST
 
@@ -2420,7 +2430,7 @@ class LogicalRouterST(DictST):
             rtgt_num = int(rt_key.split(':')[-1])
             if rtgt_num < common.BGP_RTGT_MIN_ID:
                 _vnc_lib.route_target_delete(fq_name=[rt_key])
-            rt_ref = None
+                rt_ref = None
         if not rt_ref:
             rtgt_num = VirtualNetworkST._rt_allocator.alloc(name)
             rt_key = "target:%s:%d" % (
@@ -2447,8 +2457,8 @@ class LogicalRouterST(DictST):
     def add_interface(self, intf_name):
         self.interfaces.add(intf_name)
         vmi_obj = VirtualMachineInterfaceST.get(intf_name)
-        if vmi_obj is not None:
-            vn_set = self.virtual_networks | set(vmi_obj.virtual_network)
+        if vmi_obj is not None and vmi_obj.virtual_network is not None:
+            vn_set = self.virtual_networks | set([vmi_obj.virtual_network])
             self.set_virtual_networks(vn_set)
     # end add_interface
 
@@ -2514,24 +2524,33 @@ class SchemaTransformer(object):
     _SC_IP_CF = 'service_chain_ip_address_table'
     _SERVICE_CHAIN_CF = 'service_chain_table'
     _SERVICE_CHAIN_UUID_CF = 'service_chain_uuid_table'
+    _zk_path_prefix = ''
 
     def __init__(self, args=None):
         global _sandesh
         self._args = args
+
+        if args.cluster_id:
+            self._zk_path_pfx = args.cluster_id + '/'
+            SchemaTransformer._zk_path_prefix = self._zk_path_pfx
+            self._keyspace = '%s_%s' %(args.cluster_id, SchemaTransformer._KEYSPACE)
+        else:
+            self._zk_path_pfx = ''
+            self._keyspace = SchemaTransformer._KEYSPACE
 
         self._fabric_rt_inst_obj = None
         self._cassandra_init()
 
         # reset zookeeper config
         if self._args.reset_config:
-            _zookeeper_client.delete_node("/id", True)
+            _zookeeper_client.delete_node(self._zk_path_pfx + "/id", True)
 
         ServiceChain.init()
         VirtualNetworkST._vn_id_allocator = IndexAllocator(_zookeeper_client,
-                                                           _VN_ID_ALLOC_PATH,
-                                                           _VN_MAX_ID)
+            self._zk_path_pfx+_VN_ID_ALLOC_PATH,
+            _VN_MAX_ID)
         SecurityGroupST._sg_id_allocator = IndexAllocator(
-            _zookeeper_client, _SECURITY_GROUP_ID_ALLOC_PATH,
+            _zookeeper_client, self._zk_path_pfx+_SECURITY_GROUP_ID_ALLOC_PATH,
             _SECURITY_GROUP_MAX_ID)
         # 0 is not a valid sg id any more. So, if it was previously allocated,
         # delete it and reserve it
@@ -2539,7 +2558,7 @@ class SchemaTransformer(object):
             SecurityGroupST._sg_id_allocator.delete(0)
         SecurityGroupST._sg_id_allocator.reserve(0, '__reserved__')
         VirtualNetworkST._rt_allocator = IndexAllocator(
-            _zookeeper_client, _BGP_RTGT_ALLOC_PATH, _BGP_RTGT_MAX_ID,
+            _zookeeper_client, self._zk_path_pfx+_BGP_RTGT_ALLOC_PATH, _BGP_RTGT_MAX_ID,
             common.BGP_RTGT_MIN_ID)
 
         # Initialize discovery client
@@ -2563,8 +2582,9 @@ class SchemaTransformer(object):
         node_type = Module2NodeType[module]
         node_type_name = NodeTypeNames[node_type]
         instance_id = INSTANCE_ID_DEFAULT
+        hostname = socket.gethostname()
         _sandesh.init_generator(
-            module_name, socket.gethostname(), node_type_name, instance_id,
+            module_name, hostname, node_type_name, instance_id,
             self._args.collectors, 'to_bgp_context',
             int(args.http_server_port),
             ['cfgm_common', 'schema_transformer.sandesh'], self._disc)
@@ -2574,6 +2594,9 @@ class SchemaTransformer(object):
                                     file=args.log_file,
                                     enable_syslog=args.use_syslog,
                                     syslog_facility=args.syslog_facility)
+        ConnectionState.init(_sandesh, hostname, module_name,
+                instance_id, ConnectionState.get_process_state_cb,
+                NodeStatusUVE, NodeStatus)
 
         # create cpu_info object to send periodic updates
         sysinfo_req = False
@@ -2707,6 +2730,10 @@ class SchemaTransformer(object):
         network_name = idents['virtual-network']
         ipam_name = idents['network-ipam']
         virtual_network = VirtualNetworkST.locate(network_name)
+        if virtual_network is None:
+            _sandesh._logger.debug("Cannot read virtual network %s",
+                                   network_name)
+            return
         subnet = VnSubnetsType()
         subnet.build(meta)
         virtual_network.ipams[ipam_name] = subnet
@@ -2868,7 +2895,12 @@ class SchemaTransformer(object):
         if not si_props.auto_policy:
             self.delete_service_instance_properties(idents, meta)
             return
-        si = _vnc_lib.service_instance_read(fq_name_str=si_name)
+        try:
+            si = _vnc_lib.service_instance_read(fq_name_str=si_name)
+        except NoIdError:
+            _sandesh._logger.debug("NoIdError while reading service "
+                                   "instance %s", si_name)
+            return
         si_props = si.get_service_instance_properties()
         left_vn_str = svc_info.get_left_vn(si.get_parent_fq_name_str(),
                                            si_props.left_virtual_network)
@@ -2986,7 +3018,8 @@ class SchemaTransformer(object):
         vmi_name = idents['virtual-machine-interface']
 
         lr_obj = LogicalRouterST.locate(lr_name)
-        lr_obj.add_interface(vmi_name)
+        if lr_obj is not None:
+            lr_obj.add_interface(vmi_name)
     # end add_logical_router_interface
 
     def delete_logical_router_interface(self, idents, meta):
@@ -3014,12 +3047,8 @@ class SchemaTransformer(object):
             for meta in metas:
                 meta_name = re.sub('{.*}', '', meta.tag)
                 if result_type == 'deleteResult':
-                    _sandesh._logger.debug(
-                        "deleting %s/%s/%s", meta_name, idents, meta)
                     funcname = "delete_" + meta_name.replace('-', '_')
                 elif result_type in ['searchResult', 'updateResult']:
-                    _sandesh._logger.debug(
-                        "adding %s/%s/%s", meta_name, idents, meta)
                     funcname = "add_" + meta_name.replace('-', '_')
                 # end if result_type
                 try:
@@ -3027,6 +3056,9 @@ class SchemaTransformer(object):
                 except AttributeError:
                     pass
                 else:
+                    _sandesh._logger.debug("%s %s/%s/%s. Calling '%s'.",
+                                           result_type.split('Result')[0].title(),
+                                           meta_name, idents, meta, funcname)
                     func(idents, meta)
             # end for meta
         # end for result_type
@@ -3244,25 +3276,39 @@ class SchemaTransformer(object):
         server_idx = 0
         num_dbnodes = len(self._args.cassandra_server_list)
         connected = False
+        # Update connection info
+        ConnectionState.update(conn_type = ConnectionType.DATABASE,
+            name = 'Database', status = ConnectionStatus.INIT,
+            message = '', server_addrs = self._args.cassandra_server_list)
+
         while not connected:
             try:
                 cass_server = self._args.cassandra_server_list[server_idx]
                 sys_mgr = SystemManager(cass_server)
                 connected = True
             except Exception as e:
+                # Update connection info
+                ConnectionState.update(conn_type = ConnectionType.DATABASE,
+                    name = 'Database', status = ConnectionStatus.DOWN,
+                    message = '', server_addrs = [cass_server])
                 server_idx = (server_idx + 1) % num_dbnodes
                 time.sleep(3)
 
+       # Update connection info
+        ConnectionState.update(conn_type = ConnectionType.DATABASE,
+            name = 'Database', status = ConnectionStatus.UP,
+            message = '', server_addrs = self._args.cassandra_server_list)
+
         if self._args.reset_config:
             try:
-                sys_mgr.drop_keyspace(SchemaTransformer._KEYSPACE)
+                sys_mgr.drop_keyspace(self._keyspace)
             except pycassa.cassandra.ttypes.InvalidRequestException as e:
                 # TODO verify only EEXISTS
                 print "Warning! " + str(e)
 
         try:
             sys_mgr.create_keyspace(
-                SchemaTransformer._KEYSPACE, SIMPLE_STRATEGY,
+                self._keyspace, SIMPLE_STRATEGY,
                 {'replication_factor': str(num_dbnodes)})
         except pycassa.cassandra.ttypes.InvalidRequestException as e:
             # TODO verify only EEXISTS
@@ -3271,14 +3317,21 @@ class SchemaTransformer(object):
         column_families = [self._RT_CF, self._SC_IP_CF, self._SERVICE_CHAIN_CF,
                            self._SERVICE_CHAIN_UUID_CF]
         conn_pool = pycassa.ConnectionPool(
-            SchemaTransformer._KEYSPACE,
-            server_list=self._args.cassandra_server_list)
+            self._keyspace,
+            server_list=self._args.cassandra_server_list,
+            max_overflow=10,
+            use_threadlocal=True,
+            prefill=True,
+            pool_size=10,
+            pool_timeout=30,
+            max_retries=-1,
+            timeout=0.5)
 
         rd_consistency = pycassa.cassandra.ttypes.ConsistencyLevel.QUORUM
         wr_consistency = pycassa.cassandra.ttypes.ConsistencyLevel.QUORUM
         for cf in column_families:
             try:
-                sys_mgr.create_column_family(SchemaTransformer._KEYSPACE, cf)
+                sys_mgr.create_column_family(self._keyspace, cf)
             except pycassa.cassandra.ttypes.InvalidRequestException as e:
                 # TODO verify only EEXISTS
                 print "Warning! " + str(e)
@@ -3408,6 +3461,7 @@ def parse_args(args_str):
                          --log_file <stdout>
                          --use_syslog
                          --syslog_facility LOG_USER
+                         --cluster_id <testbed-name>
                          [--reset_config]
     '''
 
@@ -3439,6 +3493,7 @@ def parse_args(args_str):
         'log_file': Sandesh._DEFAULT_LOG_FILE,
         'use_syslog': False,
         'syslog_facility': Sandesh._DEFAULT_SYSLOG_FACILITY,
+        'cluster_id': '',
     }
     secopts = {
         'use_certs': False,
@@ -3529,6 +3584,8 @@ def parse_args(args_str):
                         help="Password of keystone admin user")
     parser.add_argument("--admin_tenant_name",
                         help="Tenant name for keystone admin user")
+    parser.add_argument("--cluster_id",
+                        help="Used for database keyspace separation")
     args = parser.parse_args(remaining_argv)
     if type(args.cassandra_server_list) is str:
         args.cassandra_server_list = args.cassandra_server_list.split()
@@ -3544,13 +3601,27 @@ def run_schema_transformer(args):
 
     # Retry till API server is up
     connected = False
+    ConnectionState.update(conn_type = ConnectionType.APISERVER,
+        name = 'ApiServer', status = ConnectionStatus.INIT,
+        message = '', server_addrs = ['%s:%s' % (args.api_server_ip,
+                                                 args.api_server_port)])
     while not connected:
         try:
             _vnc_lib = VncApi(
                 args.admin_user, args.admin_password, args.admin_tenant_name,
                 args.api_server_ip, args.api_server_port)
             connected = True
-        except requests.exceptions.ConnectionError:
+            ConnectionState.update(conn_type = ConnectionType.APISERVER,
+                name = 'ApiServer', status = ConnectionStatus.UP,
+                message = '', server_addrs = ['%s:%s    ' % (args.api_server_ip,
+                                                         args.api_server_port)])
+        except requests.exceptions.ConnectionError as e:
+            # Update connection info
+            ConnectionState.update(conn_type = ConnectionType.APISERVER,
+                name = 'ApiServer', status = ConnectionStatus.DOWN,
+                message = str(e),
+                server_addrs = ['%s:%s' % (args.api_server_ip,
+                                           args.api_server_port)])
             time.sleep(3)
         except ResourceExhaustionError:  # haproxy throws 503
             time.sleep(3)
@@ -3567,8 +3638,14 @@ def main(args_str=None):
     if not args_str:
         args_str = ' '.join(sys.argv[1:])
     args = parse_args(args_str)
-    _zookeeper_client = ZookeeperClient("schema", args.zk_server_ip)
-    _zookeeper_client.master_election("/schema-transformer", os.getpid(),
+    if args.cluster_id:
+        client_pfx = args.cluster_id + '-'
+        zk_path_pfx = args.cluster_id + '/'
+    else:
+        client_pfx = ''
+        zk_path_pfx = ''
+    _zookeeper_client = ZookeeperClient(client_pfx+"schema", args.zk_server_ip)
+    _zookeeper_client.master_election(zk_path_pfx+"/schema-transformer", os.getpid(),
                                       run_schema_transformer, args)
 # end main
 

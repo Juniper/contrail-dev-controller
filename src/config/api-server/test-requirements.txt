@@ -2,6 +2,7 @@ python-subunit
 testrepository
 flexmock
 coverage
+webtest
 pyaml
 python-keystoneclient
 ../../../../third_party/ifmap-python-client

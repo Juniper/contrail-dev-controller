@@ -219,7 +219,7 @@ public:
     static void FlowAdd(int hash_id, int vrf, const char *sip, const char *dip,
                         int proto, int sport, int dport, const char *nat_sip,
                         const char *nat_dip, int nat_vrf) {
-        boost::shared_ptr<PktInfo> pkt_1(new PktInfo(NULL, 0));
+        boost::shared_ptr<PktInfo> pkt_1(new PktInfo(NULL, 0, 0));
         PktFlowInfo flow_info_1(pkt_1, Agent::GetInstance()->pkt()->flow_table());
         PktFlowInfo *flow_info = &flow_info_1;
         MatchPolicy policy;
@@ -257,13 +257,6 @@ public:
             flow_info->nat_done = false;
         }
         pkt->agent_hdr.cmd_param = hash_id;
-        flow_info->source_vn = &svn;
-        flow_info->dest_vn = &dvn;
-
-        SecurityGroupList empty_sg_id_l;
-        flow_info->source_sg_id_l = &empty_sg_id_l;
-        flow_info->dest_sg_id_l = &empty_sg_id_l;
-
         PktControlInfo in;
         PktControlInfo out;
 

@@ -338,6 +338,8 @@ class AddrMgmt(object):
                     ipam_subnet.get('allocation_pools', None)
                 subnet_dict['enable_dhcp'] = ipam_subnet.get('enable_dhcp', True)
                 subnet_dict['dns_nameservers'] = ipam_subnet.get('dns_nameservers', None)
+                subnet_dict['addr_start'] = ipam_subnet.get('addr_from_start',
+                                                            False)
                 subnet_name = subnet_dict['ip_prefix'] + '/' + str(
                               subnet_dict['ip_prefix_len'])
                 subnet_dicts[subnet_name] = subnet_dict
@@ -363,7 +365,7 @@ class AddrMgmt(object):
                     allocation_pools = ipam_subnet.get('allocation_pools', None)
                     dhcp_config = ipam_subnet.get('enable_dhcp', True)
                     nameservers = ipam_subnet.get('dns_nameservers', None)
-                    addr_start = ipam_subnet.get('addr_from_start', None)
+                    addr_start = ipam_subnet.get('addr_from_start', False)
                     subnet_obj = Subnet(
                         '%s:%s' % (vn_fq_name_str, subnet_name),
                         subnet['ip_prefix'], str(subnet['ip_prefix_len']),
@@ -435,10 +437,7 @@ class AddrMgmt(object):
                 db_subnet = db_subnet_dicts[key]
                 if req_subnet['enable_dhcp'] is None:
                     req_subnet['enable_dhcp'] = True
-                if ((req_subnet['enable_dhcp'] != db_subnet['enable_dhcp']) or
-                    (req_subnet['gw'] != db_subnet['gw']) or
-                    (set(req_subnet.get('dns_nameservers') or []) !=
-                     set(db_subnet.get('dns_nameservers') or []))):
+                if (req_subnet['gw'] != db_subnet['gw']):
                     raise AddrMgmtSubnetInvalid(vn_fq_name_str, key)
 
                 req_alloc_list = req_subnet['allocation_pools'] or []
@@ -673,7 +672,8 @@ class AddrMgmt(object):
                                     gw=subnet_dict['gw'],
                                     enable_dhcp=subnet_dict['enable_dhcp'],
                                     dns_nameservers=subnet_dict['dns_nameservers'],
-                                    alloc_pool_list=subnet_dict['allocation_pools'])
+                                    alloc_pool_list=subnet_dict['allocation_pools'],
+                                    addr_from_start = subnet_dict['addr_start'])
                 self._subnet_objs[vn_fq_name_str][subnet_name] = subnet_obj
 
             if asked_ip_addr and not subnet_obj.ip_belongs(asked_ip_addr):
@@ -713,7 +713,8 @@ class AddrMgmt(object):
                                     gw=subnet_dict['gw'],
                                     enable_dhcp=subnet_dict['enable_dhcp'],
                                     dns_nameservers=subnet_dict['dns_nameservers'],
-                                    alloc_pool_list=subnet_dict['allocation_pools'])
+                                    alloc_pool_list=subnet_dict['allocation_pools'],
+                                    addr_from_start = subnet_dict['addr_start'])
                 self._subnet_objs[vn_fq_name_str][subnet_name] = subnet_obj
 
             if not subnet_obj.ip_belongs(ip_addr):
@@ -747,7 +748,8 @@ class AddrMgmt(object):
                                     gw=subnet_dict['gw'],
                                     enable_dhcp=subnet_dict['enable_dhcp'],
                                     dns_nameservers=subnet_dict['dns_nameservers'],
-                                    alloc_pool_list=subnet_dict['allocation_pools'])
+                                    alloc_pool_list=subnet_dict['allocation_pools'],
+                                    addr_from_start = subnet_dict['addr_start'])
                 self._subnet_objs[vn_fq_name_str][subnet_name] = subnet_obj
 
             if Subnet.ip_belongs_to(IPNetwork(subnet_name),
@@ -758,25 +760,8 @@ class AddrMgmt(object):
 
     def ip_free_notify(self, ip_addr, vn_fq_name):
         vn_fq_name_str = ':'.join(vn_fq_name)
-        subnet_dicts = self._get_subnet_dicts(vn_fq_name)
-        for subnet_name in subnet_dicts:
-            try:
-                subnet_obj = self._subnet_objs[vn_fq_name_str][subnet_name]
-            except KeyError:
-                if vn_fq_name_str not in self._subnet_objs:
-                    self._subnet_objs[vn_fq_name_str] = {}
-
-                subnet_dict = subnet_dicts[subnet_name]
-                subnet_obj = Subnet('%s:%s' % (vn_fq_name_str,
-                                               subnet_name),
-                                    subnet_dict['ip_prefix'],
-                                    subnet_dict['ip_prefix_len'],
-                                    gw=subnet_dict['gw'],
-                                    enable_dhcp=subnet_dict['enable_dhcp'],
-                                    dns_nameservers=subnet_dict['dns_nameservers'],
-                                    alloc_pool_list=subnet_dict['allocation_pools'])
-                self._subnet_objs[vn_fq_name_str][subnet_name] = subnet_obj
-
+        for subnet_name in self._subnet_objs[vn_fq_name_str]:
+            subnet_obj = self._subnet_objs[vn_fq_name_str][subnet_name]
             if Subnet.ip_belongs_to(IPNetwork(subnet_name),
                                     IPAddress(ip_addr)):
                 subnet_obj.ip_free(IPAddress(ip_addr))

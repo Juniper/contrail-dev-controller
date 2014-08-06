@@ -110,6 +110,8 @@ struct SandeshFlowData {
     42: u32 fip_vm_interface_idx;
     43: optional string sg_rule_uuid;
     44: optional string nw_ace_uuid;
+    45: i32 rpf_nh;
+    46: optional string drop_reason;
 }
 
 request sandesh FetchFlowRecord {
@@ -246,4 +248,13 @@ traceobject sandesh FlowRouteUpdate {
    6: bool marked_delete;
    7: u32 num_sg;
    8: list <i32> sg_list;
+}
+
+response sandesh FlowAgeTimeResp {
+   1: u32 old_age_time;
+   2: u32 new_age_time;
+}
+
+request sandesh FlowAgeTimeReq {
+   1: u32 new_age_time;
 }

@@ -174,6 +174,7 @@ public:
     void inc_rx_keepalive();
     void inc_rx_update();
     void inc_rx_notification();
+
     void inc_rx_route_update();
     void inc_rx_route_reach();
     void inc_rx_route_unreach();
@@ -182,6 +183,11 @@ public:
     size_t get_rx_keepalive();
     size_t get_rx_notification();
     size_t get_tr_keepalive();
+
+    void inc_rx_open_error();
+    void inc_rx_update_error();
+    size_t get_rx_open_error();
+    size_t get_rx_update_error();
 
     static void FillBgpNeighborDebugState(BgpNeighborResp &resp, const IPeerDebugStats *peer);
 
@@ -198,7 +204,7 @@ private:
     friend class BgpConfigTest;
     friend class BgpPeerTest;
     friend class BgpServerUnitTest;
-    friend class StateMachineTest;
+    friend class StateMachineUnitTest;
 
     class DeleteActor;
     class PeerClose;
@@ -276,6 +282,8 @@ private:
     uint32_t remote_bgp_id_;
     uint32_t local_bgp_id_;
     AddressFamilyList family_;
+    std::vector<std::string> configured_families_;
+    std::vector<std::string> negotiated_families_;
     BgpProto::BgpPeerType peer_type_;
     RibExportPolicy policy_;
     boost::scoped_ptr<PeerClose> peer_close_;

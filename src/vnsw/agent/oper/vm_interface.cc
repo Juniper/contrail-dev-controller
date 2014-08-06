@@ -13,6 +13,7 @@
 
 #include <cfg/cfg_init.h>
 #include <cfg/cfg_interface.h>
+#include <cfg/cfg_listener.h>
 #include <cmn/agent.h>
 #include <oper/operdb_init.h>
 #include <oper/route_common.h>
@@ -39,6 +40,52 @@ using namespace std;
 using namespace boost::uuids;
 using namespace autogen;
 
+VmInterface::VmInterface(const boost::uuids::uuid &uuid) :
+    Interface(Interface::VM_INTERFACE, uuid, "", NULL), vm_(NULL),
+    vn_(NULL), ip_addr_(0), mdata_addr_(0), subnet_bcast_addr_(0),
+    vm_mac_(""), policy_enabled_(false), mirror_entry_(NULL),
+    mirror_direction_(MIRROR_RX_TX), cfg_name_(""), fabric_port_(true),
+    need_linklocal_ip_(false), dhcp_enable_(true),
+    do_dhcp_relay_(false), vm_name_(),
+    vm_project_uuid_(nil_uuid()), vxlan_id_(0), layer2_forwarding_(true),
+    ipv4_forwarding_(true), mac_set_(false), ecmp_(false),
+    vlan_id_(kInvalidVlanId), parent_(NULL), oper_dhcp_options_(),
+    sg_list_(), floating_ip_list_(), service_vlan_list_(),
+    static_route_list_(), allowed_address_pair_list_(),
+    vrf_assign_rule_list_(), vrf_assign_acl_(NULL) {
+    ipv4_active_ = false;
+    l2_active_ = false;
+}
+
+VmInterface::VmInterface(const boost::uuids::uuid &uuid,
+                         const std::string &name,
+                         const Ip4Address &addr, const std::string &mac,
+                         const std::string &vm_name,
+                         const boost::uuids::uuid &vm_project_uuid,
+                         uint16_t vlan_id, Interface *parent) : 
+    Interface(Interface::VM_INTERFACE, uuid, name, NULL), vm_(NULL),
+    vn_(NULL), ip_addr_(addr), mdata_addr_(0), subnet_bcast_addr_(0),
+    vm_mac_(mac), policy_enabled_(false), mirror_entry_(NULL),
+    mirror_direction_(MIRROR_RX_TX), cfg_name_(""), fabric_port_(true),
+    need_linklocal_ip_(false), dhcp_enable_(true),
+    do_dhcp_relay_(false), vm_name_(vm_name),
+    vm_project_uuid_(vm_project_uuid), vxlan_id_(0),
+    layer2_forwarding_(true), ipv4_forwarding_(true), mac_set_(false),
+    ecmp_(false), vlan_id_(vlan_id), parent_(parent), oper_dhcp_options_(),
+    sg_list_(), floating_ip_list_(), service_vlan_list_(),
+    static_route_list_(), allowed_address_pair_list_(),
+    vrf_assign_rule_list_(), vrf_assign_acl_(NULL) {
+    ipv4_active_ = false;
+    l2_active_ = false;
+}
+
+VmInterface::~VmInterface() {
+}
+
+bool VmInterface::CmpInterface(const DBEntry &rhs) const {
+    const VmInterface &intf=static_cast<const VmInterface &>(rhs);
+    return uuid_ < intf.uuid_;
+}
 /////////////////////////////////////////////////////////////////////////////
 // Template function to audit two lists. This is used to synchronize the
 // operational and config list for Floating-IP, Service-Vlans, Static Routes
@@ -285,7 +332,7 @@ static void BuildVrfAndServiceVlanInfo(Agent *agent,
             }
             data->service_vlan_list_.list_.insert
                 (VmInterface::ServiceVlan(rule.vlan_tag, vrf_node->name(), addr,
-                                          32, smac, dmac, false));
+                                          32, smac, dmac));
         }
         break;
     }
@@ -637,6 +684,10 @@ DBEntryBase::KeyPtr VmInterface::GetDBRequestKey() const {
     InterfaceKey *key = new VmInterfaceKey(AgentKey::ADD_DEL_CHANGE, uuid_,
                                            name_);
     return DBEntryBase::KeyPtr(key);
+}
+
+const Peer *VmInterface::peer() const { 
+    return peer_.get();
 }
 
 bool VmInterface::OnChange(VmInterfaceData *data) {
@@ -1396,7 +1447,8 @@ void VmInterface::UpdateL3InterfaceRoute(bool old_ipv4_active, bool force_update
         // Add route if old was inactive or force_update is set
         if (old_ipv4_active == false || force_update == true ||
             old_addr != ip_addr_) {
-            AddRoute(vrf_->GetName(), ip_addr_, 32, policy_enabled_, ecmp_);
+            AddRoute(vrf_->GetName(), ip_addr_, 32, vn_->GetName(),
+                     policy_enabled_, ecmp_);
         } else if (policy_change == true) {
             // If old-l3-active and there is change in policy, invoke RESYNC of
             // route to account for change in NH policy
@@ -1761,7 +1813,8 @@ void VmInterface::CopySgIdList(SecurityGroupList *sg_id_list) const {
 //Add a route for VM port
 //If ECMP route, add new composite NH and mpls label for same
 void VmInterface::AddRoute(const std::string &vrf_name, const Ip4Address &addr,
-                           uint32_t plen, bool policy, bool ecmp) {
+                           uint32_t plen, const std::string &dest_vn,
+                           bool policy, bool ecmp) {
     SecurityGroupList sg_id_list;
     CopySgIdList(&sg_id_list);
     PathPreference path_preference;
@@ -1771,7 +1824,7 @@ void VmInterface::AddRoute(const std::string &vrf_name, const Ip4Address &addr,
     }
     Inet4UnicastAgentRouteTable::AddLocalVmRoute(peer_.get(), vrf_name, addr,
                                                  plen, GetUuid(),
-                                                 vn_->GetName(), label_,
+                                                 dest_vn, label_,
                                                  sg_id_list, false,
                                                  path_preference);
 
@@ -1787,6 +1840,42 @@ void VmInterface::DeleteRoute(const std::string &vrf_name,
 void VmInterface::UpdateL3Services(bool dhcp, bool dns) {
     dhcp_enabled_ = dhcp;
     dns_enabled_ = dns;
+}
+
+// Find DHCP options applicable to the Interface, based on following hierarchy
+// 1. Configured at the interface level
+// 2. Configured at subnet level
+// 3. Configured at ipam level
+bool VmInterface::GetDhcpOptions(
+                  std::vector<autogen::DhcpOptionType> *options) const {
+    if (oper_dhcp_options().are_dhcp_options_set()) {
+        *options = oper_dhcp_options().dhcp_options();
+        return true;
+    }
+
+    if (vn()) {
+        const std::vector<VnIpam> &vn_ipam = vn()->GetVnIpam();
+        uint32_t index;
+        for (index = 0; index < vn_ipam.size(); ++index) {
+            if (vn_ipam[index].IsSubnetMember(ip_addr())) {
+                break;
+            }
+        }
+        if (index < vn_ipam.size() &&
+            vn_ipam[index].oper_dhcp_options.are_dhcp_options_set()) {
+            *options = vn_ipam[index].oper_dhcp_options.dhcp_options();
+            return true;
+        }
+
+        std::string ipam_name;
+        autogen::IpamType ipam_type;
+        if (vn()->GetIpamData(ip_addr(), &ipam_name, &ipam_type)) {
+            *options = ipam_type.dhcp_option_list.dhcp_option;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1847,8 +1936,8 @@ void VmInterface::FloatingIp::Activate(VmInterface *interface,
         assert(vrf_.get());
     }
 
-    interface->AddRoute(vrf_.get()->GetName(), floating_ip_, 32, true,
-                        interface->ecmp());
+    interface->AddRoute(vrf_.get()->GetName(), floating_ip_, 32, vn_->GetName(),
+                        true, interface->ecmp());
     if (table->update_floatingip_cb().empty() == false) {
         table->update_floatingip_cb()(interface, vn_.get(), floating_ip_, false);
     }
@@ -1934,7 +2023,8 @@ void VmInterface::StaticRoute::Activate(VmInterface *interface,
     if (installed_ == true && policy_change) {
         Inet4UnicastAgentRouteTable::ReEvaluatePaths(vrf_, addr_, plen_);
     } else if (installed_ == false || force_update) {
-        interface->AddRoute(vrf_, addr_, plen_, interface->policy_enabled(),
+        interface->AddRoute(vrf_, addr_, plen_, interface->vn_->GetName(),
+                            interface->policy_enabled(),
                             interface->ecmp());
     }
 
@@ -2014,7 +2104,8 @@ void VmInterface::AllowedAddressPair::Activate(VmInterface *interface,
     if (installed_ == true && policy_change) {
         Inet4UnicastAgentRouteTable::ReEvaluatePaths(vrf_, addr_, plen_);
     } else if (installed_ == false || force_update) {
-        interface->AddRoute(vrf_, addr_, plen_, interface->policy_enabled(),
+        interface->AddRoute(vrf_, addr_, plen_, interface->vn_->GetName(),
+                            interface->policy_enabled(),
                             ecmp_);
     }
 
@@ -2112,18 +2203,16 @@ VmInterface::ServiceVlan::ServiceVlan() :
 VmInterface::ServiceVlan::ServiceVlan(const ServiceVlan &rhs) :
     ListEntry(rhs.installed_, rhs.del_pending_), tag_(rhs.tag_),
     vrf_name_(rhs.vrf_name_), addr_(rhs.addr_), plen_(rhs.plen_),
-    smac_(rhs.smac_), dmac_(rhs.dmac_), vrf_(rhs.vrf_), label_(rhs.label_),
-    ecmp_(rhs.ecmp_) {
+    smac_(rhs.smac_), dmac_(rhs.dmac_), vrf_(rhs.vrf_), label_(rhs.label_) {
 }
 
 VmInterface::ServiceVlan::ServiceVlan(uint16_t tag, const std::string &vrf_name,
                                       const Ip4Address &addr, uint8_t plen,
                                       const struct ether_addr &smac,
-                                      const struct ether_addr &dmac,
-                                      bool ecmp) :
+                                      const struct ether_addr &dmac) :
     ListEntry(), tag_(tag), vrf_name_(vrf_name), addr_(addr), plen_(plen),
-    smac_(smac), dmac_(dmac), vrf_(NULL), label_(MplsTable::kInvalidLabel),
-    ecmp_(ecmp) {
+    smac_(smac), dmac_(dmac), vrf_(NULL), label_(MplsTable::kInvalidLabel)
+    {
 }
 
 VmInterface::ServiceVlan::~ServiceVlan() {
@@ -2166,20 +2255,15 @@ void VmInterface::ServiceVlan::Activate(VmInterface *interface,
 }
 
 void VmInterface::ServiceVlan::DeActivate(VmInterface *interface) const {
-    if (del_pending_ && label_ != MplsTable::kInvalidLabel) {
+    if (label_ != MplsTable::kInvalidLabel) {
         VrfAssignTable::DeleteVlanReq(interface->GetUuid(), tag_);
         interface->ServiceVlanRouteDel(*this);
         MplsLabel::Delete(label_);
         label_ = MplsTable::kInvalidLabel;
         VlanNH::Delete(interface->GetUuid(), tag_);
-        return;
     }
-
-    if (installed_ == false)
-        return;
-
-    interface->ServiceVlanRouteDel(*this);
     installed_ = false;
+    return;
 }
 
 void VmInterface::ServiceVlanList::Insert(const ServiceVlan *rhs) {
@@ -2236,8 +2320,8 @@ void VmInterface::ServiceVlanRouteAdd(const ServiceVlan &entry) {
     SecurityGroupList sg_id_list;
     CopySgIdList(&sg_id_list);
     PathPreference path_preference;
-    path_preference.set_ecmp(entry.ecmp_);
-    if (entry.ecmp_) {
+    path_preference.set_ecmp(ecmp());
+    if (ecmp()) {
         path_preference.set_preference(PathPreference::HIGH);
     }
     Inet4UnicastAgentRouteTable::AddVlanNHRoute

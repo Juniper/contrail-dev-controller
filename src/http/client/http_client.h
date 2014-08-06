@@ -36,6 +36,7 @@ class HttpClientSession : public TcpSession {
 public:
     typedef boost::function<void(HttpClientSession *session,
                                  TcpSession::Event event)> SessionEventCb;
+    typedef boost::intrusive_ptr<TcpSession> TcpSessionPtr;
 
     HttpClientSession(HttpClient *client, Socket *socket);
     virtual ~HttpClientSession() { assert(delete_called_ != 0xdeadbeaf); delete_called_ = 0xdeadbeaf; }
@@ -48,6 +49,7 @@ public:
 
 private:
     void OnEvent(TcpSession *session, Event event);
+    void OnEventInternal(TcpSessionPtr session, Event event);
     HttpConnection *connection_;
     uint32_t delete_called_;
     tbb::mutex mutex_;
@@ -64,6 +66,7 @@ public:
     int Initialize();
 
     typedef boost::function<void(std::string &, boost::system::error_code &)> HttpCb;
+
     int HttpPut(const std::string &put_string, std::string &path, HttpCb);
     int HttpPut(const std::string &put_string, std::string &path,
                 bool header, bool timeout,
@@ -77,8 +80,10 @@ public:
                 std::vector<std::string> &hdr_options, HttpCb cb);
     int HttpHead(std::string &path, bool header, bool timeout,
                  std::vector<std::string> &hdr_options, HttpCb cb);
-    int HttpDelete(std::string &path, bool header, bool timeout,
+    int HttpDelete(const std::string &path, HttpCb);
+    int HttpDelete(const std::string &path, bool header, bool timeout,
                    std::vector<std::string> &hdr_options, HttpCb cb);
+    void ClearCallback();
 
     struct _ConnInfo *curl_handle() { return curl_handle_; }
     HttpClient *client() { return client_; }
@@ -99,6 +104,7 @@ public:
 
 private:
     std::string make_url(std::string &path);
+
     void HttpProcessInternal(const std::string body, std::string path,
                              bool header, bool timeout,
                              std::vector<std::string> hdr_options,
@@ -122,6 +128,8 @@ private:
 // Http Client class
 class HttpClient : public TcpServer {
 public:
+    static const uint32_t kDefaultTimeout = 1;  // one millisec
+
     explicit HttpClient(EventManager *evm);
     virtual ~HttpClient();
 

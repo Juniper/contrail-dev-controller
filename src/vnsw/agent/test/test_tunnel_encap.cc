@@ -51,8 +51,10 @@ public:
     TunnelEncapTest() : default_tunnel_type_(TunnelType::MPLS_GRE) { 
         vrf_name_ = "vrf1";
         server1_ip_ = Ip4Address::from_string("10.1.1.11");
+        server2_ip_ = Ip4Address::from_string("10.1.1.12");
         local_vm_ip_ = Ip4Address::from_string("1.1.1.10");
         remote_vm_ip_ = Ip4Address::from_string("1.1.1.11");
+        remote_ecmp_vm_ip_ = Ip4Address::from_string("1.1.1.12");
         local_vm_mac_ = (struct ether_addr *)malloc(sizeof(struct ether_addr));
         remote_vm_mac_ = (struct ether_addr *)malloc(sizeof(struct ether_addr));
         memcpy (local_vm_mac_, ether_aton("00:00:01:01:01:10"), 
@@ -60,7 +62,10 @@ public:
         memcpy (remote_vm_mac_, ether_aton("00:00:01:01:01:11"), 
                 sizeof(struct ether_addr));
     };
-    ~TunnelEncapTest() { };
+    ~TunnelEncapTest() {
+        free(local_vm_mac_);
+        free(remote_vm_mac_);
+    }
 
     virtual void SetUp() {
         agent = Agent::GetInstance();
@@ -121,6 +126,7 @@ public:
 
     void AddRemoteVmRoute(TunnelType::TypeBmap l3_bmap, 
                           TunnelType::TypeBmap l2_bmap) {
+
         Inet4TunnelRouteAdd(Agent::GetInstance()->local_peer(), 
                             vrf_name_, remote_vm_ip_, 32, server1_ip_,
                             l3_bmap, 1000, vrf_name_,
@@ -129,6 +135,28 @@ public:
 
         Layer2TunnelRouteAdd(Agent::GetInstance()->local_peer(), vrf_name_,
                              l2_bmap, server1_ip_, 2000, *remote_vm_mac_, remote_vm_ip_, 32);
+        client->WaitForIdle();
+
+        //Add an ecmp route
+        ComponentNHKeyPtr nh_data1(new ComponentNHKey(20, agent->fabric_vrf_name(),
+                                                      agent->router_id(),
+                                                      server1_ip_,
+                                                      false,
+                                                      TunnelType::DefaultType()));
+        ComponentNHKeyPtr nh_data2(new ComponentNHKey(20, agent->fabric_vrf_name(),
+                                                      agent->router_id(),
+                                                      server2_ip_,
+                                                      false,
+                                                      TunnelType::DefaultType()));
+        ComponentNHKeyList comp_nh_list1;
+        comp_nh_list1.push_back(nh_data1);
+        comp_nh_list1.push_back(nh_data2);
+
+        SecurityGroupList sg_id_list;
+        EcmpTunnelRouteAdd(agent->local_peer(), vrf_name_,
+                           remote_ecmp_vm_ip_, 32,
+                           comp_nh_list1, false, "vn1",
+                           sg_id_list, PathPreference());
         client->WaitForIdle();
 
         TunnelOlist olist_map;
@@ -157,6 +185,11 @@ public:
                                          vrf_name_,
                                          *remote_vm_mac_, NULL);
         client->WaitForIdle();
+        agent->fabric_inet4_unicast_table()->
+            DeleteReq(agent->local_peer(), vrf_name_,
+                      remote_ecmp_vm_ip_, 32, NULL);
+        client->WaitForIdle();
+
         DelArp("8.8.8.8", "00:00:08:08:08:08", 
                Agent::GetInstance()->fabric_interface_name().c_str());
         client->WaitForIdle();
@@ -205,7 +238,27 @@ public:
                 const TunnelNH *tnh = static_cast<const TunnelNH *>(nh);
                 ASSERT_TRUE(type == tnh->GetTunnelType().GetType());
             }
-        } 
+        }
+
+        route = RouteGet(vrf_name_, remote_ecmp_vm_ip_, 32);
+        for(Route::PathList::iterator it = route->GetPathList().begin();
+            it != route->GetPathList().end(); it++) {
+            const AgentPath *path =
+                static_cast<const AgentPath *>(it.operator->());
+            const NextHop *nh = path->nexthop(agent);
+            ASSERT_TRUE(nh->GetType() == NextHop::COMPOSITE);
+            if (nh->GetType() == NextHop::COMPOSITE) {
+                const CompositeNH *comp_nh =
+                    static_cast<const CompositeNH *>(nh);
+                for (ComponentNHList::const_iterator it =
+                     comp_nh->begin(); it != comp_nh->end();
+                     it++) {
+                    const TunnelNH *tnh =
+                        static_cast<const TunnelNH *>((*it)->nh());
+                    ASSERT_TRUE(type == tnh->GetTunnelType().GetType());
+                }
+            }
+        }
     }
 
     void VerifyLayer2UnicastRoutes(TunnelType::Type type) {
@@ -237,36 +290,25 @@ public:
     void VerifyMulticastRoutes(TunnelType::Type type) {
         Inet4MulticastRouteEntry *mc_rt = MCRouteGet("vrf1", "255.255.255.255");
         ASSERT_TRUE(mc_rt != NULL);
-        CompositeNHKey flood_fabric_key(vrf_name_, 
-                           IpAddress::from_string("255.255.255.255").to_v4(), 
-                           IpAddress::from_string("0.0.0.0").to_v4(), false,
-                           Composite::FABRIC);
-        const CompositeNH *flood_fabric_cnh = 
-            static_cast<CompositeNH *>(Agent::GetInstance()->nexthop_table()->
-                                       FindActiveEntry(&flood_fabric_key));
-        ASSERT_TRUE(flood_fabric_cnh != NULL);
-        const ComponentNH *component_nh = 
-            static_cast<const ComponentNH *>(flood_fabric_cnh->
-                                          GetComponentNHList()->Get(0));
-        ASSERT_TRUE(flood_fabric_cnh->ComponentNHCount() == 1);
-        const TunnelNH *tnh = 
-            static_cast<const TunnelNH *>(component_nh->GetNH());
+        const CompositeNH *flood_cnh =
+            static_cast<const CompositeNH *>(mc_rt->GetActiveNextHop());
+        ASSERT_TRUE(flood_cnh != NULL);
+        ASSERT_TRUE(flood_cnh->ComponentNHCount() == 2);
+        const CompositeNH *flood_fabric_cnh =
+            dynamic_cast<const CompositeNH *>(flood_cnh->GetNH(0));
+        const TunnelNH *tnh = dynamic_cast<const TunnelNH *>(
+            flood_fabric_cnh->GetNH(0));
         ASSERT_TRUE(tnh->GetTunnelType().GetType() == type);
 
-        CompositeNHKey subnet_fabric_key(vrf_name_, 
-                           IpAddress::from_string("1.1.1.255").to_v4(), 
-                           IpAddress::from_string("0.0.0.0").to_v4(), false,
-                           Composite::FABRIC);
-        const CompositeNH *subnet_fabric_cnh = 
-            static_cast<const CompositeNH *>(Agent::GetInstance()->
-                                             nexthop_table()->
-                                       FindActiveEntry(&subnet_fabric_key));
-        ASSERT_TRUE(subnet_fabric_cnh != NULL);
-        ASSERT_TRUE(subnet_fabric_cnh->ComponentNHCount() == 1);
-        component_nh = 
-            static_cast<const ComponentNH *>(subnet_fabric_cnh->
-                                             GetComponentNHList()->Get(0));
-        tnh = static_cast<const TunnelNH *>(component_nh->GetNH());
+        Ip4Address subnet_broadcast = Ip4Address::from_string("1.1.1.255");
+        Inet4UnicastRouteEntry *uc_rt =
+            RouteGet("vrf1", subnet_broadcast, 32);
+        const CompositeNH *subnet_cnh =
+            static_cast<const CompositeNH *>(mc_rt->GetActiveNextHop());
+        ASSERT_TRUE(subnet_cnh->ComponentNHCount() == 2);
+        const CompositeNH *subnet_fabric_cnh =
+            dynamic_cast<const CompositeNH *>(subnet_cnh->GetNH(0));
+        tnh = dynamic_cast<const TunnelNH *>(subnet_fabric_cnh->GetNH(0));
         ASSERT_TRUE(tnh->GetTunnelType().GetType() == type);
     }
 
@@ -276,6 +318,8 @@ public:
     Ip4Address  local_vm_ip_;
     Ip4Address  remote_vm_ip_;
     Ip4Address  server1_ip_;
+    Ip4Address  server2_ip_;
+    Ip4Address  remote_ecmp_vm_ip_;
     struct ether_addr *local_vm_mac_;
     struct ether_addr *remote_vm_mac_;
     static TunnelType::Type type_;

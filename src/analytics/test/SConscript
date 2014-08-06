@@ -41,6 +41,11 @@ vizd_flow_test = env.Program('vizd_flow_test',
                              )
 env.Alias('src/analytics:vizd_flow_test', vizd_flow_test)
 
+stat_walker_test = env.UnitTest('stat_walker_test',
+                              ['stat_walker_test.cc',
+                               '../stat_walker.o'])
+env.Alias('src/analytics:stat_walker_test', stat_walker_test)
+
 viz_message_test = env.UnitTest('viz_message_test',
                               ['viz_message_test.cc',
                               '../viz_message.o']
@@ -58,6 +63,7 @@ syslog_test = env.UnitTest('syslog_test',
                                   '../vizd_table_desc.o',
                                   '../viz_message.o',
                                   '../ruleeng.o',
+                                  '../stat_walker.o',
                                   '../db_handler.o',
                                   '../parser_util.o',
                                   '../viz_constants.o',
@@ -114,10 +120,24 @@ env.Alias('src/analytics:options_test', options_test)
 #       )
 #env.Alias('src/analytics:vizd_test', vizd_test)
 
+protobufEnv = env.Clone()
+protobufEnv.Append(LIBS=['protobuf'])
+protobufEnv.Append(LIBPATH=['/usr/lib/'])
+protobuf_test_gen_files = protobufEnv.ProtocGenCpp('self_describing_message_test.proto')
+protobuf_test_gen_files += protobufEnv.ProtocGenCpp('test_message.proto')
+protobuf_test_gen_srcs = protobufEnv.ExtractCpp(protobuf_test_gen_files)
+protobuf_test_desc_files = protobufEnv.ProtocGenDesc('test_message.proto')
+protobuf_test = protobufEnv.UnitTest('protobuf_test', protobuf_test_gen_srcs +
+      ['protobuf_test.cc'])
+env.Requires(protobuf_test, env['TOP'] + '/analytics/test/test_message.desc')
+protobufEnv.Alias('src/analytics:protobuf_test', protobuf_test)
+
 test_suite = [ 
                options_test,
                viz_message_test,
                db_handler_test,
+               stat_walker_test,
+               protobuf_test,
              ]
 test = env.TestSuite('analytics-test', test_suite)
 
@@ -125,6 +145,9 @@ env.Alias('controller/src/analytics:test', [
     test,
     'controller/src/analytics/ruleparser:test',
 ])
-env.Alias('controller/src/analytics:flaky-test', [ syslog_test ])
+
+flaky_test_suite = [ syslog_test ]
+flaky_test = env.TestSuite('analytics-flaky-test', flaky_test_suite)
+env.Alias('controller/src/analytics:flaky-test', flaky_test)
 
 Return('test_suite')

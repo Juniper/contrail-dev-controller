@@ -664,16 +664,44 @@ bool DbHandler::StatTableWrite(uint32_t t2,
     }
 }
 
-// This function writes Stats samples to the DB.
-// It returns a list of select terms to use for full aggregation
+// This returns a list of select terms to use for full aggregation
 // for the given row
-std::vector<std::string>  DbHandler::StatTableInsert(uint64_t ts, 
+std::vector<std::string>
+DbHandler::StatTableSelectStr(
+        const std::string& statName, const std::string& statAttr,
+        const AttribMap & attribs) {
+    std::vector<std::string> aggstr;
+    aggstr.push_back(string("COUNT(") + statAttr + string(")"));
+    for (AttribMap::const_iterator it = attribs.begin();
+            it != attribs.end(); it++) {
+        switch (it->second.type) {
+            case STRING: {
+                    aggstr.push_back(statAttr + "." + it->first);
+                }
+                break;
+            case UINT64: {
+                    aggstr.push_back(string("SUM(") + statAttr + "." + it->first + string(")"));
+                }
+                break;
+            case DOUBLE: {
+                    aggstr.push_back(string("SUM(") + statAttr + "." + it->first + string(")"));
+                }
+                break;                
+            default:
+                continue;
+        }
+    }
+    return aggstr;
+}
+
+// This function writes Stats samples to the DB.
+void
+DbHandler::StatTableInsert(uint64_t ts, 
         const std::string& statName,
         const std::string& statAttr,
         const TagMap & attribs_tag,
         const AttribMap & attribs) {
 
-    std::vector<std::string> aggstr;
     uint64_t temp_u64 = ts;
     uint32_t temp_u32 = temp_u64 >> g_viz_constants.RowTimeInBits;
     boost::uuids::uuid unm;
@@ -693,7 +721,6 @@ std::vector<std::string>  DbHandler::StatTableInsert(uint64_t ts,
     rapidjson::Document dd;
     dd.SetObject();
 
-    aggstr.push_back(string("COUNT(") + statAttr + string(")"));
     AttribMap attribs_buf;
     for (AttribMap::const_iterator it = attribs.begin();
             it != attribs.end(); it++) {
@@ -705,7 +732,6 @@ std::vector<std::string>  DbHandler::StatTableInsert(uint64_t ts,
                         attribs_buf.insert(make_pair(nm, it->second));
                     val.SetString(it->second.str.c_str());
                     dd.AddMember(rt.first->first.c_str(), val, dd.GetAllocator());
-                    aggstr.push_back(it->first);
                 }
                 break;
             case UINT64: {
@@ -715,7 +741,6 @@ std::vector<std::string>  DbHandler::StatTableInsert(uint64_t ts,
                         attribs_buf.insert(make_pair(nm, it->second));
                     val.SetUint64(it->second.num);
                     dd.AddMember(rt.first->first.c_str(), val, dd.GetAllocator());
-                    aggstr.push_back(string("SUM(") + it->first + string(")"));
                 }
                 break;
             case DOUBLE: {
@@ -725,7 +750,6 @@ std::vector<std::string>  DbHandler::StatTableInsert(uint64_t ts,
                         attribs_buf.insert(make_pair(nm, it->second));
                     val.SetDouble(it->second.dbl);
                     dd.AddMember(rt.first->first.c_str(), val, dd.GetAllocator());
-                    aggstr.push_back(string("SUM(") + it->first + string(")"));
                 }
                 break;                
             default:
@@ -764,7 +788,6 @@ std::vector<std::string>  DbHandler::StatTableInsert(uint64_t ts,
         }
 
     }
-    return aggstr;
 
 }
 
@@ -798,7 +821,9 @@ static const std::vector<FlowRecordFields::type> FlowRecordTableColumns =
     (FlowRecordFields::FLOWREC_BYTES)
     (FlowRecordFields::FLOWREC_PACKETS)
     (FlowRecordFields::FLOWREC_DATA_SAMPLE)
-    (FlowRecordFields::FLOWREC_ACTION);
+    (FlowRecordFields::FLOWREC_ACTION)
+    (FlowRecordFields::FLOWREC_SG_RULE_UUID)
+    (FlowRecordFields::FLOWREC_NW_ACE_UUID);
 
 static void PopulateFlowRecordTableColumns(
     const std::vector<FlowRecordFields::type> &frvt,
@@ -1017,7 +1042,15 @@ bool FlowDataIpv4ObjectWalker<T>::for_each(pugi::xml_node& node) {
         case GenDb::DbDataType::LexicalUUIDType:
         case GenDb::DbDataType::TimeUUIDType:
             {
-                values_[ftinfo.get<0>()] = s_gen_(node.child_value());
+                std::stringstream ss;
+                ss << node.child_value();
+                boost::uuids::uuid u;
+                ss >> u;
+                if (ss.fail()) {
+                    LOG(ERROR, "FlowRecordTable: " << col_name << ": (" << 
+                        node.child_value() << ") INVALID");
+                }     
+                values_[ftinfo.get<0>()] = u;
                 break;
             }
         case GenDb::DbDataType::AsciiType:
@@ -1040,8 +1073,7 @@ bool DbHandler::FlowTableInsert(const pugi::xml_node &parent,
     const SandeshHeader& header) {
     // Traverse and populate the flow entry values
     FlowValueArray flow_entry_values;
-    FlowDataIpv4ObjectWalker<FlowValueArray> flow_msg_walker(flow_entry_values,
-        s_gen_);
+    FlowDataIpv4ObjectWalker<FlowValueArray> flow_msg_walker(flow_entry_values);
     pugi::xml_node &mnode = const_cast<pugi::xml_node &>(parent);
     if (!mnode.traverse(flow_msg_walker)) {
         VIZD_ASSERT(0);

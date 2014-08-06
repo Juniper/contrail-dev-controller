@@ -28,11 +28,13 @@ import kombu
 
 from vnc_api.vnc_api import *
 from vnc_api.common import exceptions as vnc_exceptions
-from cfgm_common.test_utils import *
 import vnc_api.gen.vnc_api_test_gen
 from vnc_api.gen.resource_test import *
 
+sys.path.append('../common/tests')
+from test_utils import *
 import test_common
+import test_case
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -135,12 +137,7 @@ class TestFixtures(object):
     # end tearDown
 
     def assertThat(self, *args):
-        try:
-            super(TestFixtures, self).assertThat(*args)
-        except MismatchError as e:
-            import pdb
-            pdb.set_trace()
-            raise e
+        super(TestFixtures, self).assertThat(*args)
     # end assertThat
 
     def test_fixture_ref(self):
@@ -268,12 +265,7 @@ class TestNetAddrAlloc(object):
     # end tearDown
 
     def assertThat(self, *args):
-        try:
-            super(TestNetAddrAlloc, self).assertThat(*args)
-        except MismatchError as e:
-            import pdb
-            pdb.set_trace()
-            raise e
+        super(TestNetAddrAlloc, self).assertThat(*args)
     # end assertThat
 
     def test_ip_alloc_on_net(self):
@@ -506,7 +498,7 @@ class TestRefUpdate(object):
 # end class TestRefUpdate
 
 
-class TestListUpdate(test_common.TestCase):
+class TestListUpdate(test_case.ApiServerTestCase):
     def test_policy_create_w_rules(self):
         proj_fixt = self.useFixture(ProjectTestFixtureGen(self._vnc_lib))
 
@@ -590,12 +582,9 @@ class TestListUpdate(test_common.TestCase):
 
 # end class TestListUpdate
 
-class TestVncCfgApiServer(test_common.TestCase):
+class TestVncCfgApiServer(test_case.ApiServerTestCase):
     def test_fq_name_to_id_http_post(self):
-        test_vn_name = self.id() + '-vn'
-        test_obj = VirtualNetwork(test_vn_name)
-        self.addDetail('creating-object', content.text_content(test_vn_name))
-        self._vnc_lib.virtual_network_create(test_obj)
+        test_obj = self._create_test_object()
         test_uuid = self._vnc_lib.fq_name_to_id('virtual-network', test_obj.get_fq_name())
         # check that format is correct
         try:
@@ -607,9 +596,7 @@ class TestVncCfgApiServer(test_common.TestCase):
             test_uuid = self._vnc_lib.fq_name_to_id('project', test_obj.get_fq_name())
 
     def test_id_to_fq_name_http_post(self):
-        test_vn_name = self.id() + '-vn'
-        test_obj = VirtualNetwork(test_vn_name)
-        self.addDetail('creating-object', content.text_content(test_vn_name))
+        test_obj = self._create_test_object()
         self._vnc_lib.virtual_network_create(test_obj)
         fq_name = self._vnc_lib.id_to_fq_name(test_obj.uuid)
         self.assertEqual(test_obj.fq_name, fq_name)
@@ -637,6 +624,77 @@ class TestVncCfgApiServer(test_common.TestCase):
         (code, msg) = self._http_post('/useragent-kv', test_body)
         self.assertEqual(code, 404)
         
+    def test_err_on_max_rabbit_pending(self):
+        api_server = test_common.vnc_cfg_api_server.server
+        max_pend_upd = 10
+        api_server._args.rabbit_max_pending_updates = str(max_pend_upd)
+        orig_rabbitq_put = api_server._db_conn._msgbus._obj_update_q.put
+        try:
+            def err_rabbitq_put(*args, **kwargs):
+                raise Exception("Faking Rabbit Exception")
+            api_server._db_conn._msgbus._obj_update_q.put = err_rabbitq_put
+
+            logger.info("Creating objects to hit max rabbit pending.")
+            # every create updates project quota
+            test_objs = self._create_test_objects(count=max_pend_upd/2+1)
+
+            def asserts_on_max_pending():
+                self.assertEqual(e.status_code, 500)
+                self.assertIn("Too many pending updates", e.content)
+
+            logger.info("Creating one more object expecting failure.")
+            obj = VirtualNetwork('vn-to-fail')
+            self.addDetail('expecting-failed-create', content.text_content(obj.name))
+            try:
+                self._vnc_lib.virtual_network_create(obj)
+            except HttpError as e:
+                asserts_on_max_pending()
+
+            logger.info("Update of object should fail.")
+            test_objs[0].display_name = 'foo'
+            try:
+                self._vnc_lib.virtual_network_update(test_objs[0])
+            except HttpError as e:
+                asserts_on_max_pending()
+
+            logger.info("Delete of object should fail.")
+            test_objs[0].display_name = 'foo'
+            try:
+                self._vnc_lib.virtual_network_delete(id=test_objs[0].uuid)
+            except HttpError as e:
+                asserts_on_max_pending()
+
+            logger.info("Read obj object should be ok.")
+            self._vnc_lib.virtual_network_read(id=test_objs[0].uuid)
+
+        finally:
+            api_server._db_conn._msgbus._obj_update_q.put = orig_rabbitq_put
+ 
+    def test_handle_trap_on_exception(self):
+        api_server = test_common.vnc_cfg_api_server.server
+
+        def exception_on_log_error(*args, **kwargs):
+            self.assertTrue(False)
+
+        def exception_on_vn_read(*args, **kwargs):
+            raise Exception("fake vn read exception")
+
+        try:
+            orig_config_log_error = api_server.config_log_error
+            api_server.config_log_error = exception_on_log_error
+            with ExpectedException(NoIdError):
+                self._vnc_lib.virtual_network_read(fq_name=['foo', 'bar', 'baz'])
+        finally:
+            api_server.config_log_error = orig_config_log_error
+
+        try:
+            orig_vn_read = api_server._db_conn._cassandra_db._cassandra_virtual_network_read
+            test_obj = self._create_test_object()
+            api_server._db_conn._cassandra_db._cassandra_virtual_network_read = exception_on_vn_read
+            with ExpectedException(HttpError):
+                self._vnc_lib.virtual_network_read(fq_name=test_obj.get_fq_name())
+        finally:
+            api_server._db_conn._cassandra_db._cassandra_virtual_network_read = orig_vn_read
 # end class TestVncCfgApiServer
 
 if __name__ == '__main__':

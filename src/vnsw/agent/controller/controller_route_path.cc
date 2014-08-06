@@ -25,42 +25,47 @@
 using namespace std;
 using namespace boost::asio;
 
-ControllerPeerPath::ControllerPeerPath(const Peer *peer) :
-    AgentRouteData(false), peer_(peer) {
-    //TODO Test cases send NULL peer, fix them, for non bgp peer ignore.
-    if ((peer == NULL) || (peer->GetType() != Peer::BGP_PEER) ) {
-        channel_ = NULL;
-        sequence_number_ = VNController::kInvalidPeerIdentifier;
-    } else { 
-        const BgpPeer *bgp_peer = static_cast<const BgpPeer *>(peer);
-        channel_ = bgp_peer->GetBgpXmppPeerConst();
-
-        assert(channel_);
-        sequence_number_ = bgp_peer->GetBgpXmppPeerConst()->
-            unicast_sequence_number();
-    }
-}
-
-bool ControllerPeerPath::CheckPeerValidity() const {
+/*
+ * Common routine for all controller route data types
+ * to verify peer validity.
+ */
+bool CheckPeerValidity(const AgentXmppChannel *channel,
+                       uint64_t sequence_number) {
     //TODO reaching here as test case route add called with NULL peer
-    if (sequence_number_ == VNController::kInvalidPeerIdentifier)
+    if (sequence_number == ControllerPeerPath::kInvalidPeerIdentifier)
         return true;
 
-    assert(channel_);
-    if (channel_->bgp_peer_id() == NULL)
+    assert(channel);
+    if (channel->bgp_peer_id() == NULL)
        return false;
 
-    if (sequence_number_ == channel_->unicast_sequence_number())
+    if (sequence_number == channel->unicast_sequence_number())
         return true;
 
     return false;
 }
 
+ControllerPeerPath::ControllerPeerPath(const Peer *peer) :
+    AgentRouteData(false), peer_(peer) {
+    if ((peer != NULL) && (peer->GetType() == Peer::BGP_PEER) ) {
+        const BgpPeer *bgp_peer = static_cast<const BgpPeer *>(peer);
+        channel_ = bgp_peer->GetBgpXmppPeerConst();
+        sequence_number_ = channel_->unicast_sequence_number();
+    } else {
+        channel_ = NULL;
+        sequence_number_ = kInvalidPeerIdentifier;
+    }
+}
+
 bool ControllerEcmpRoute::IsPeerValid() const {
-    return CheckPeerValidity();
+    return CheckPeerValidity(channel(), sequence_number());
 }
 
 bool ControllerEcmpRoute::AddChangePath(Agent *agent, AgentPath *path) {
+    CompositeNHKey *comp_key = static_cast<CompositeNHKey *>(nh_req_.key.get());
+    //Reorder the component NH list, and add a reference to local composite mpls
+    //label if any
+    path->SetCompositeNH(agent, comp_key, false);
     return Inet4UnicastRouteEntry::ModifyEcmpPath(dest_addr_, plen_, vn_name_,
                                                   label_, local_ecmp_nh_,
                                                   vrf_name_, sg_list_,
@@ -92,7 +97,7 @@ ControllerVmRoute *ControllerVmRoute::MakeControllerVmRoute(const Peer *peer,
 }
 
 bool ControllerVmRoute::IsPeerValid() const {
-    return CheckPeerValidity();
+    return CheckPeerValidity(channel(), sequence_number());
 }
 
 bool ControllerVmRoute::AddChangePath(Agent *agent, AgentPath *path) {
@@ -160,5 +165,57 @@ bool ControllerVmRoute::AddChangePath(Agent *agent, AgentPath *path) {
         ret = true;
     }
 
+    //If a transition of path happens from ECMP to non ECMP
+    //reset local mpls label reference and composite nh key
+    if (path->composite_nh_key()) {
+        path->set_composite_nh_key(NULL);
+        path->set_local_ecmp_mpls_label(NULL);
+    }
+
     return ret;
+}
+
+ControllerLocalVmRoute::ControllerLocalVmRoute(const VmInterfaceKey &intf,
+                                               uint32_t mpls_label,
+                                               uint32_t vxlan_id,
+                                               bool force_policy,
+                                               const string &vn_name,
+                                               uint8_t flags,
+                                               const SecurityGroupList &sg_list,
+                                               const PathPreference &path_preference,
+                                               uint64_t sequence_number,
+                                               const AgentXmppChannel *channel) :
+    LocalVmRoute(intf, mpls_label, vxlan_id, force_policy, vn_name, flags, sg_list,
+                 path_preference), sequence_number_(sequence_number), channel_(channel) { }
+
+bool ControllerLocalVmRoute::IsPeerValid() const {
+    return CheckPeerValidity(channel_, sequence_number_);
+}
+
+ControllerVlanNhRoute::ControllerVlanNhRoute(const VmInterfaceKey &intf,
+                                             uint32_t tag,
+                                             uint32_t label,
+                                             const string &dest_vn_name,
+                                             const SecurityGroupList &sg_list,
+                                             const PathPreference &path_preference,
+                                             uint64_t sequence_number,
+                                             const AgentXmppChannel *channel) :
+    VlanNhRoute(intf, tag, label, dest_vn_name, sg_list, path_preference),
+    sequence_number_(sequence_number), channel_(channel) { }
+
+bool ControllerVlanNhRoute::IsPeerValid() const {
+    return CheckPeerValidity(channel_, sequence_number_);
+}
+
+ControllerInetInterfaceRoute::ControllerInetInterfaceRoute(const InetInterfaceKey &intf,
+                                                           uint32_t label,
+                                                           int tunnel_bmap,
+                                                           const string &dest_vn_name,
+                                                           uint64_t sequence_number,
+                                                           const AgentXmppChannel *channel) :
+    InetInterfaceRoute(intf, label, tunnel_bmap, dest_vn_name),
+    sequence_number_(sequence_number), channel_(channel) { }
+
+bool ControllerInetInterfaceRoute::IsPeerValid() const {
+    return CheckPeerValidity(channel_, sequence_number_);
 }

@@ -106,8 +106,8 @@ protected:
     // Passively accepted a new session. Returns true if the session is
     // accepted, false otherwise.
     //
-    // XXX If the session is not accepted, tcp_server.cc shall delete the
-    // newly created session.
+    // If the session is not accepted, tcp_server.cc deletes the newly
+    // created session.
     //
     virtual bool AcceptSession(TcpSession *session);
 
@@ -164,6 +164,8 @@ private:
     DISALLOW_COPY_AND_ASSIGN(TcpServer);
 };
 
+typedef boost::intrusive_ptr<TcpServer> TcpServerPtr;
+
 inline void intrusive_ptr_add_ref(TcpServer *server) {
     server->refcount_.fetch_and_increment();
 }
@@ -193,7 +195,6 @@ public:
     static void DeleteServer(TcpServer *server);
 
 private:
-    typedef boost::intrusive_ptr<TcpServer> TcpServerPtr;
     struct TcpServerPtrCmp {
         bool operator()(const TcpServerPtr &lhs,
                         const TcpServerPtr &rhs) const {

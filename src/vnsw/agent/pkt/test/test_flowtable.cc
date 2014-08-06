@@ -238,14 +238,9 @@ public:
         t->InitFlowKey(&key);
         FlowEntry *flow = Agent::GetInstance()->pkt()->flow_table()->Allocate(key);
 
-        boost::shared_ptr<PktInfo> pkt_info(new PktInfo(NULL, 0));
+        boost::shared_ptr<PktInfo> pkt_info(new PktInfo(NULL, 0, 0));
         PktFlowInfo info(pkt_info, Agent::GetInstance()->pkt()->flow_table());
         PktInfo *pkt = pkt_info.get();
-        info.source_vn = t->svn_;
-        info.dest_vn = t->dvn_;
-        SecurityGroupList empty_sg_id_l;
-        info.source_sg_id_l = &empty_sg_id_l;
-        info.dest_sg_id_l = &empty_sg_id_l;
 
         PktControlInfo ctrl;
         ctrl.vn_ = VnGet(t->vn_);
@@ -410,7 +405,7 @@ int main(int argc, char *argv[]) {
     GETUSERARGS();
 
     client = TestInit(init_file, ksync_init, true, true, true, (1000000 * 60 * 10),
-            FlowStatsCollector::FlowStatsInterval, true, false);
+            AgentParam::FlowStatsInterval, true, false);
     if (vm.count("config")) {
         FlowTableTest::eth_itf = Agent::GetInstance()->fabric_interface_name();
     } else {

@@ -96,8 +96,7 @@ class BgpPeer::PeerClose : public IPeerClose {
         //
         assert(!from_timer);
 
-        BgpServer *server = peer_->server_;
-        server->lifetime_manager()->Enqueue(peer_->deleter());
+        peer_->deleter()->RetryDelete();
         is_closed_ = true;
         return true;
     }
@@ -204,9 +203,12 @@ public:
     virtual void UpdateTxReachRoute(uint32_t count) {
         update_stats_[1].reach += count;
     }
+
 private:
     friend class BgpPeer;
+
     BgpPeer *peer_;
+    ErrorStats error_stats_;
     ProtoStats proto_stats_[2];
     UpdateStats update_stats_[2];
 };
@@ -327,7 +329,9 @@ BgpPeer::BgpPeer(BgpServer *server, RoutingInstance *instance,
     local_bgp_id_ = id.to_ulong();
 
     refcount_ = 0;
-    BOOST_FOREACH(string family, config->address_families()) {
+    configured_families_ = config->address_families();
+    sort(configured_families_.begin(), configured_families_.end());
+    BOOST_FOREACH(string family, configured_families_) {
         Address::Family fmly = Address::FamilyFromString(family);
         assert(fmly != Address::UNSPEC);
         family_.insert(fmly);
@@ -373,7 +377,9 @@ void BgpPeer::ConfigUpdate(const BgpNeighborConfig *config) {
     if (!config_) return;
 
     AddressFamilyList new_families;
-    BOOST_FOREACH(string family, config->address_families()) {
+    configured_families_ = config->address_families();
+    sort(configured_families_.begin(), configured_families_.end());
+    BOOST_FOREACH(string family, configured_families_) {
         Address::Family fmly = Address::FamilyFromString(family);
         assert(fmly != Address::UNSPEC);
         new_families.insert(fmly);
@@ -514,6 +520,7 @@ uint32_t BgpPeer::bgp_identifier() const {
 //
 void BgpPeer::CustomClose() {
     assert(vpn_tables_registered_);
+    negotiated_families_.clear();
     ResetCapabilities();
     keepalive_timer_->Cancel();
     end_of_rib_timer_->Cancel();
@@ -838,16 +845,17 @@ void BgpPeer::SetCapabilities(const BgpProto::OpenMessage *msg) {
     }
     peer_info.set_families(families);
 
-    std::vector<std::string> negotiated_families;
+    negotiated_families_.clear();
     BOOST_FOREACH(Address::Family family, family_) {
         uint16_t afi;
         uint8_t safi;
         BgpAf::FamilyToAfiSafi(family, afi, safi);
         if (!MpNlriAllowed(afi, safi))
             continue;
-        negotiated_families.push_back(Address::FamilyToString(family));
+        negotiated_families_.push_back(Address::FamilyToString(family));
     }
-    peer_info.set_negotiated_families(negotiated_families);
+    sort(negotiated_families_.begin(), negotiated_families_.end());
+    peer_info.set_negotiated_families(negotiated_families_);
 
     BGPPeerInfo::Send(peer_info);
 }
@@ -1429,7 +1437,7 @@ void BgpPeer::FillBgpNeighborDebugState(BgpNeighborResp &resp,
 
 void BgpPeer::FillNeighborInfo(std::vector<BgpNeighborResp> &nbr_list) const {
     BgpNeighborResp nbr;
-    nbr.set_peer(ToString());
+    nbr.set_peer(peer_name_.substr(rtinstance_->name().size() + 1));
     nbr.set_peer_address(peer_key_.endpoint.address().to_string());
     nbr.set_deleted(IsDeleted());
     nbr.set_peer_asn(peer_as());
@@ -1438,9 +1446,12 @@ void BgpPeer::FillNeighborInfo(std::vector<BgpNeighborResp> &nbr_list) const {
     nbr.set_peer_type(PeerType() == BgpProto::IBGP ? "internal" : "external");
     nbr.set_encoding("BGP");
     nbr.set_state(state_machine_->StateName());
-    nbr.set_peer_id(remote_bgp_id_);
-    nbr.set_local_id(local_bgp_id_);
-    nbr.set_active_holdtime(state_machine_->hold_time());
+    nbr.set_peer_id(Ip4Address(remote_bgp_id_).to_string());
+    nbr.set_local_id(Ip4Address(local_bgp_id_).to_string());
+    nbr.set_configured_address_families(configured_families_);
+    nbr.set_negotiated_address_families(negotiated_families_);
+    nbr.set_configured_hold_time(state_machine_->GetConfiguredHoldTime());
+    nbr.set_negotiated_hold_time(state_machine_->hold_time());
 
     FillBgpNeighborDebugState(nbr, peer_stats_.get());
 
@@ -1493,6 +1504,22 @@ void BgpPeer::inc_rx_route_reach() {
 
 void BgpPeer::inc_rx_route_unreach() {
     peer_stats_->update_stats_[0].unreach++;
+}
+
+void BgpPeer::inc_rx_open_error() {
+    peer_stats_->error_stats_.open++;
+}
+
+void BgpPeer::inc_rx_update_error() {
+    peer_stats_->error_stats_.update++;
+}
+
+size_t BgpPeer::get_rx_open_error() {
+    return peer_stats_->error_stats_.open;
+}
+
+size_t BgpPeer::get_rx_update_error() {
+    return peer_stats_->error_stats_.update;
 }
 
 std::string BgpPeer::last_flap_at() const { 

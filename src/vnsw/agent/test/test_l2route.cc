@@ -77,6 +77,11 @@ protected:
                 sizeof(struct ether_addr));
     }
 
+    ~RouteTest() {
+        free(local_vm_mac_);
+        free(remote_vm_mac_);
+    }
+
     virtual void SetUp() {
         client->Reset();
         //Create a VRF
@@ -517,7 +522,8 @@ TEST_F(RouteTest, Vxlan_basic) {
     EXPECT_TRUE(vxlan_id->vxlan_id() == 102);
     vxlan_id->SetKey(&vxlan_id_key);
     EXPECT_TRUE(vxlan_id->vxlan_id() == 101);
-    VxLanIdKey *db_key = static_cast<VxLanIdKey *>(vxlan_id->GetDBRequestKey().release());
+    DBEntryBase::KeyPtr key = vxlan_id->GetDBRequestKey();
+    VxLanIdKey *db_key = static_cast<VxLanIdKey *>(key.get());
     EXPECT_TRUE(vxlan_id->vxlan_id() == db_key->vxlan_id());
 
     DeleteVmportEnv(input, 1, true);
@@ -552,15 +558,55 @@ TEST_F(RouteTest, vxlan_network_id_change_for_non_l2_interface) {
     client->WaitForIdle();
 }
 
+TEST_F(RouteTest, Enqueue_l2_route_add_on_deleted_vrf) {
+    struct PortInfo input[] = {
+        {"vnet1", 1, "1.1.1.10", "00:00:00:01:01:01", 1, 1},
+    };
+
+    client->Reset();
+    CreateVmportEnv(input, 1);
+    client->WaitForIdle();
+
+    VrfEntryRef vrf_ref = VrfGet(vrf_name_.c_str());
+    DeleteVmportEnv(input, 1, true);
+    client->WaitForIdle();
+    TaskScheduler::GetInstance()->Stop();
+    ComponentNHKeyList component_nh_key_list;
+    Layer2AgentRouteTable::AddRemoteVmRouteReq(agent_->local_vm_peer(),
+                                               vrf_name_, *local_vm_mac_,
+                                               local_vm_ip_, 32, NULL);
+
+    vrf_ref = NULL;
+    TaskScheduler::GetInstance()->Start();
+    client->WaitForIdle();
+}
+
+TEST_F(RouteTest, Enqueue_l2_route_del_on_deleted_vrf) {
+    struct PortInfo input[] = {
+        {"vnet1", 1, "1.1.1.10", "00:00:00:01:01:01", 1, 1},
+    };
+
+    client->Reset();
+    CreateVmportEnv(input, 1);
+    client->WaitForIdle();
+
+    VrfEntryRef vrf_ref = VrfGet(vrf_name_.c_str());
+    DeleteVmportEnv(input, 1, true);
+    client->WaitForIdle();
+    TaskScheduler::GetInstance()->Stop();
+    Layer2AgentRouteTable::DeleteReq(agent_->local_vm_peer(), vrf_name_,
+                                     *local_vm_mac_,
+                                     NULL);
+    vrf_ref = NULL;
+    TaskScheduler::GetInstance()->Start();
+    client->WaitForIdle();
+}
+
 int main(int argc, char *argv[]) {
     ::testing::InitGoogleTest(&argc, argv);
     GETUSERARGS();
     client = TestInit(init_file, ksync_init, true, false);
-    if (vm.count("config")) {
-        eth_itf = Agent::GetInstance()->fabric_interface_name();
-    } else {
-        eth_itf = "eth0";
-    }
+    eth_itf = Agent::GetInstance()->fabric_interface_name();
 
     RouteTest::SetTunnelType(TunnelType::MPLS_GRE);
     int ret = RUN_ALL_TESTS();

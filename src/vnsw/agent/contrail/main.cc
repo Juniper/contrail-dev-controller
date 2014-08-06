@@ -94,9 +94,16 @@ int main(int argc, char *argv[]) {
         ("DEFAULT.log_file", 
          opt::value<string>()->default_value(Agent::GetInstance()->log_file()),
          "Filename for the logs to be written to")
+        ("DEFAULT.log_files_count", opt::value<int>()->default_value(10),
+         "Maximum log file roll over index")
+        ("DEFAULT.log_file_size", opt::value<long>()->default_value(1024*1024),
+         "Maximum size of the log file")
         ("DEFAULT.log_level", opt::value<string>()->default_value("SYS_DEBUG"),
          "Severity level for local logging of sandesh messages")
         ("DEFAULT.log_local", "Enable local logging of sandesh messages")
+        ("DEFAULT.use_syslog", "Enable logging to syslog")
+        ("DEFAULT.syslog_facility", opt::value<string>()->default_value("LOG_LOCAL0"),
+         "Syslog facility to receive log lines")
         ("DEFAULT.tunnel_type", opt::value<string>()->default_value("MPLSoGRE"),
          "Tunnel Encapsulation type <MPLSoGRE|MPLSoUDP|VXLAN>")
         ("DISCOVERY.server", opt::value<string>(), 
@@ -132,6 +139,12 @@ int main(int argc, char *argv[]) {
          "Gateway IP address for virtual host")
         ("VIRTUAL-HOST-INTERFACE.physical_interface", opt::value<string>(), 
          "Physical interface name to which virtual host interface maps to")
+        ("SERVICE-INSTANCE.netns_command", opt::value<string>(),
+         "Script path used when a service instance is spawned with network namespace")
+        ("SERVICE-INSTANCE.netns_timeout", opt::value<string>(),
+         "Timeout used to set a netns command as failing and to destroy it")
+        ("SERVICE-INSTANCE.netns_workers", opt::value<string>(),
+         "Number of workers used to spawn netns command")
         ;
     opt::variables_map var_map;
     try {

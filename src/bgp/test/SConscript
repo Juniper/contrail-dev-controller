@@ -62,7 +62,7 @@ env.Prepend(LIBS = ['control_test', 'bgptest', 'bgp', 'peer_sandesh',
 		    'ifmap_server', 'ifmap_common',
                     'ifmapio', 'ds', 'pugixml', 'httpc', 'curl',
                     'crypto', 'ssl', 'sandesh', 'http', 'http_parser',
-                    'db', 'sandeshvns', 'connection_info', 'io', 'base', 'gunit'])
+                    'db', 'sandeshvns', 'process_info', 'io', 'base', 'gunit'])
 
 
 if sys.platform == 'darwin':
@@ -162,7 +162,7 @@ env.Alias('src/bgp:bgp_peer_close_test', bgp_peer_close_test)
 
 bgp_peer_membership_test = env.UnitTest('bgp_peer_membership_test',
                                         ['bgp_peer_membership_test.cc'])
-env.Alias('src/bgp:bgp_membership_test', bgp_peer_membership_test)
+env.Alias('src/bgp:bgp_peer_membership_test', bgp_peer_membership_test)
 
 bgp_proto_test = env.UnitTest('bgp_proto_test',
                             ['bgp_proto_test.cc'])
@@ -207,6 +207,10 @@ env.Alias('src/bgp:bgp_update_rx_test', bgp_update_rx_test)
 bgp_update_test = env.UnitTest('bgp_update_test',
                                  ['bgp_update_test.cc'])
 env.Alias('src/bgp:bgp_update_test', bgp_update_test)
+
+bgp_xmpp_basic_test = env.UnitTest('bgp_xmpp_basic_test',
+                                   ['bgp_xmpp_basic_test.cc'])
+env.Alias('src/bgp:bgp_xmpp_basic_test', bgp_xmpp_basic_test)
 
 bgp_xmpp_channel_test = env.UnitTest('bgp_xmpp_channel_test',
                                      ['bgp_xmpp_channel_test.cc'])
@@ -305,7 +309,6 @@ test_suite = [
     bgp_attr_test,
     bgp_condition_listener_test,
     bgp_config_listener_test,
-    bgp_config_manager_test,
     bgp_config_test,
     bgp_export_nostate_test,
     bgp_export_rstate_test,
@@ -313,7 +316,6 @@ test_suite = [
     bgp_export_uplist_test,
     bgp_msg_builder_test,
     bgp_multicast_test,
-    bgp_peer_membership_test,
     bgp_proto_test,
     bgp_ribout_updates_test,
     bgp_route_test,
@@ -352,7 +354,10 @@ env.Alias('controller/src/bgp:test', [
 ])
 
 flaky_test_suite = [
+    bgp_config_manager_test,
     bgp_peer_close_test,
+    bgp_peer_membership_test,
+    bgp_xmpp_basic_test,
     bgp_xmpp_deferq_test,
     bgp_xmpp_evpn_test,
     rtarget_peer_test,
