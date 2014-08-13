@@ -609,7 +609,8 @@ Interface *VmInterfaceKey::AllocEntry(const InterfaceTable *table,
         static_cast<const VmInterfaceAddData *>(data);
 
     Interface *parent = NULL;
-    if (add_data->vlan_id_ != VmInterface::kInvalidVlanId &&
+    if (add_data->tx_vlan_id_ != VmInterface::kInvalidVlanId &&
+        add_data->rx_vlan_id_ != VmInterface::kInvalidVlanId &&
         add_data->parent_ != Agent::NullString()) {
         PhysicalInterfaceKey key(add_data->parent_);
         parent = static_cast<Interface *>
@@ -619,7 +620,7 @@ Interface *VmInterfaceKey::AllocEntry(const InterfaceTable *table,
 
     return new VmInterface(uuid_, name_, add_data->ip_addr_, add_data->vm_mac_,
                            add_data->vm_name_, add_data->vm_project_uuid_,
-                           add_data->vlan_id_, parent);
+                           add_data->tx_vlan_id_, add_data->rx_vlan_id_, parent);
 }
 
 InterfaceKey *VmInterfaceKey::Clone() const {
@@ -1104,7 +1105,8 @@ bool VmInterface::ResyncOsOperState(const VmInterfaceOsOperStateData *data) {
 /////////////////////////////////////////////////////////////////////////////
 
 void VmInterface::GetOsParams(Agent *agent) {
-    if (vlan_id_ == VmInterface::kInvalidVlanId) {
+    if (rx_vlan_id_ == VmInterface::kInvalidVlanId) {
+        assert(tx_vlan_id_ == VmInterface::kInvalidVlanId);
         Interface::GetOsParams(agent);
         return;
     }
@@ -1133,7 +1135,8 @@ bool VmInterface::IsActive()  const {
         return false;
     }
 
-    if (vlan_id_ != VmInterface::kInvalidVlanId) {
+    if (rx_vlan_id_ != VmInterface::kInvalidVlanId) {
+       assert(tx_vlan_id_ != VmInterface::kInvalidVlanId);
        return true;
     }
 
@@ -2526,13 +2529,13 @@ void VmInterface::SendTrace(Trace event) {
 void VmInterface::Add(InterfaceTable *table, const uuid &intf_uuid,
                       const string &os_name, const Ip4Address &addr,
                       const string &mac, const string &vm_name,
-                      const uuid &vm_project_uuid, uint16_t vlan_id,
-                      const std::string &parent) {
+                      const uuid &vm_project_uuid, uint16_t tx_vlan_id,
+                      uint16_t rx_vlan_id, const std::string &parent) {
     DBRequest req(DBRequest::DB_ENTRY_ADD_CHANGE);
     req.key.reset(new VmInterfaceKey(AgentKey::ADD_DEL_CHANGE, intf_uuid,
                                      os_name));
     req.data.reset(new VmInterfaceAddData(addr, mac, vm_name, vm_project_uuid,
-                                          vlan_id, parent));
+                                          tx_vlan_id, rx_vlan_id, parent));
     table->Enqueue(&req);
 }
 

@@ -90,7 +90,8 @@ private:
     size_t os_index_;
     KSyncEntryPtr parent_;
     bool policy_enabled_;
-    uint16_t vlan_id_;
+    uint16_t rx_vlan_id_;
+    uint16_t tx_vlan_id_;
     uint32_t vrf_id_;
     bool persistent_;
     KSyncEntryPtr xconnect_;

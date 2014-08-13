@@ -809,9 +809,9 @@ uint16_t DhcpHandler::FillDhcpResponse(unsigned char *dest_mac,
     pkt_info_->eth = (ethhdr *)(pkt_info_->pkt + IPC_HDR_LEN);
     EthHdr(agent()->pkt()->pkt_handler()->mac_address(), dest_mac, 0x800);
     uint16_t header_len = sizeof(ethhdr);
-    if (vm_itf_->vlan_id() != VmInterface::kInvalidVlanId) {
+    if (vm_itf_->tx_vlan_id() != VmInterface::kInvalidVlanId) {
         // cfi and priority are zero
-        VlanHdr(pkt_info_->pkt + IPC_HDR_LEN + 12, vm_itf_->vlan_id());
+        VlanHdr(pkt_info_->pkt + IPC_HDR_LEN + 12, vm_itf_->tx_vlan_id());
         header_len += sizeof(vlanhdr);
     }
 

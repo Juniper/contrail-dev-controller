@@ -63,7 +63,8 @@ InterfaceKSyncEntry::InterfaceKSyncEntry(InterfaceKSyncObject *obj,
     os_index_(Interface::kInvalidIndex),
     parent_(entry->parent_),
     policy_enabled_(entry->policy_enabled_),
-    vlan_id_(entry->vlan_id_),
+    rx_vlan_id_(entry->rx_vlan_id_),
+    tx_vlan_id_(entry->tx_vlan_id_),
     vrf_id_(entry->vrf_id_),
     persistent_(entry->persistent_),
     xconnect_(entry->xconnect_) {
@@ -94,7 +95,8 @@ InterfaceKSyncEntry::InterfaceKSyncEntry(InterfaceKSyncObject *obj,
     os_index_(intf->os_index()),
     parent_(NULL),
     policy_enabled_(false),
-    vlan_id_(VmInterface::kInvalidVlanId),
+    rx_vlan_id_(VmInterface::kInvalidVlanId),
+    tx_vlan_id_(VmInterface::kInvalidVlanId),
     vrf_id_(intf->vrf_id()),
     persistent_(false),
     xconnect_(NULL) {
@@ -110,7 +112,8 @@ InterfaceKSyncEntry::InterfaceKSyncEntry(InterfaceKSyncObject *obj,
             ip_ = vmitf->ip_addr().to_ulong();
         }
         network_id_ = vmitf->vxlan_id();
-        vlan_id_ = vmitf->vlan_id();
+        rx_vlan_id_ = vmitf->rx_vlan_id();
+        tx_vlan_id_ = vmitf->tx_vlan_id();
         if (vmitf->parent()) {
             InterfaceKSyncEntry tmp(ksync_obj_, vmitf->parent());
             parent_ = ksync_obj_->GetReference(&tmp);
@@ -315,7 +318,9 @@ bool InterfaceKSyncEntry::Sync(DBEntry *e) {
     memset(src_mac, 0, sizeof(src_mac));
     if (intf->type() == Interface::VM_INTERFACE &&
         ksync_obj_->ksync()->agent()->isVmwareVcenterMode()) {
-        memcpy(src_mac, intf->mac().ether_addr_octet, ETHER_ADDR_LEN);
+        const VmInterface *vm_intf = static_cast<const VmInterface *>(intf);
+        struct ether_addr *eth = ether_aton(vm_intf->vm_mac().c_str());
+        memcpy(src_mac, eth->ether_addr_octet, ETHER_ADDR_LEN);
     }
 
     if (memcmp(src_mac, smac_.ether_addr_octet, ETHER_ADDR_LEN)) {
@@ -353,7 +358,7 @@ KSyncEntry *InterfaceKSyncEntry::UnresolvedReference() {
         return NULL;
     }
 
-    if (vlan_id_ == VmInterface::kInvalidVlanId)
+    if (rx_vlan_id_ == VmInterface::kInvalidVlanId)
         return NULL;
 
     if (parent_.get() && !parent_->IsResolved()) {
@@ -380,7 +385,7 @@ int InterfaceKSyncEntry::Encode(sandesh_op::type op, char *buf, int buf_len) {
     int encode_len, error;
 
     // Dont send message if interface index not known
-    if (IsValidOsIndex(os_index_, type_, vlan_id_) == false) {
+    if (IsValidOsIndex(os_index_, type_, rx_vlan_id_) == false) {
         return 0;
     }
 
@@ -395,13 +400,14 @@ int InterfaceKSyncEntry::Encode(sandesh_op::type op, char *buf, int buf_len) {
             flags |= VIF_FLAG_L2_ENABLED;
         }
         int8_t mac[ETHER_ADDR_LEN];
-        if (vlan_id_ == VmInterface::kInvalidVlanId) {
+        if (rx_vlan_id_ == VmInterface::kInvalidVlanId) {
             memcpy(mac, ksync_obj_->ksync()->agent()->vrrp_mac(),
                    ETHER_ADDR_LEN);
             encoder.set_vifr_type(VIF_TYPE_VIRTUAL);
         } else {
             encoder.set_vifr_type(VIF_TYPE_VIRTUAL_VLAN);
-            encoder.set_vifr_vlan_id(vlan_id_);
+            encoder.set_vifr_vlan_id(rx_vlan_id_);
+            encoder.set_vifr_ovlan_id(tx_vlan_id_);
             InterfaceKSyncEntry *parent =
                 (static_cast<InterfaceKSyncEntry *> (parent_.get()));
             encoder.set_vifr_parent_vif_idx(parent->interface_id());

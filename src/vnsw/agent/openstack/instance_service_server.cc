@@ -80,22 +80,40 @@ InstanceServiceAsyncHandler::AddPort(const PortList& port_list) {
         req.key.reset(new CfgIntKey(port_id));
         
         CfgIntData *cfg_int_data = new CfgIntData();
-        uint16_t vlan_id = VmInterface::kInvalidVlanId;
+        uint16_t tx_vlan_id = VmInterface::kInvalidVlanId;
+        // Set vlan_id as tx_vlan_id
         if (port.__isset.vlan_id) {
-            vlan_id = port.vlan_id;
+            tx_vlan_id = port.vlan_id;
+        }
+
+        // Backward compatibility. If only vlan_id is specified, set both
+        // rx_vlan_id and tx_vlan_id to same value
+        uint16_t rx_vlan_id = VmInterface::kInvalidVlanId;
+        if (port.__isset.isolated_vlan_id) {
+            rx_vlan_id = port.isolated_vlan_id;
+        } else {
+            rx_vlan_id = tx_vlan_id;
+        }
+
+        // Sanity check. We should not have isolated_vlan_id set and vlan_id
+        // unset
+        if (port.__isset.isolated_vlan_id && !port.__isset.vlan_id) {
+            CFG_TRACE(IntfInfo, "Invalid request. isolated_vlan_id set, "
+                     "but vlan_id not set");
+            return false;
         }
 
         cfg_int_data->Init(instance_id, vn_id, vm_project_id,
                            port.tap_name, ip,
                            port.mac_address,
-                           port.display_name, vlan_id, version_);
+                           port.display_name, tx_vlan_id, rx_vlan_id, version_);
         req.data.reset(cfg_int_data);
         ctable->Enqueue(&req);
         CFG_TRACE(OpenstackAddPort, "Add", UuidToString(port_id),
                   UuidToString(instance_id), UuidToString(vn_id),
                   port.ip_address, port.tap_name, port.mac_address,
                   port.display_name, port.hostname, port.host, version_,
-                  vlan_id, UuidToString(vm_project_id));
+                  tx_vlan_id, rx_vlan_id, UuidToString(vm_project_id));
     }
     return true;
 }
@@ -498,7 +516,8 @@ void AddPortReq::HandleRequest() const {
     uuid vm_project_uuid = StringToUuid(get_vm_project_uuid());
     string vm_name = get_vm_name();
     string tap_name = get_tap_name();
-    uint16_t vlan_id = get_vlan_id();
+    uint16_t tx_vlan_id = get_tx_vlan_id();
+    uint16_t rx_vlan_id = get_rx_vlan_id();
 
     boost::system::error_code ec;
     IpAddress ip(IpAddress::from_string(get_ip_address(), ec));
@@ -540,7 +559,7 @@ void AddPortReq::HandleRequest() const {
     cfg_int_data->Init(instance_uuid, vn_uuid, vm_project_uuid,
                        tap_name, ip,
                        mac_address,
-                       vm_name, vlan_id, 0);
+                       vm_name, tx_vlan_id, rx_vlan_id, 0);
     req.data.reset(cfg_int_data);
     req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
     ctable->Enqueue(&req);

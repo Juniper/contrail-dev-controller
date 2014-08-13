@@ -253,10 +253,11 @@ public:
         do_dhcp_relay_(false), vm_name_(),
         vm_project_uuid_(nil_uuid()), vxlan_id_(0), layer2_forwarding_(true),
         ipv4_forwarding_(true), mac_set_(false), ecmp_(false),
-        vlan_id_(kInvalidVlanId), parent_(NULL), oper_dhcp_options_(),
-        sg_list_(), floating_ip_list_(), service_vlan_list_(),
-        static_route_list_(), allowed_address_pair_list_(),
-        vrf_assign_rule_list_(), vrf_assign_acl_(NULL) {
+        tx_vlan_id_(kInvalidVlanId), rx_vlan_id_(kInvalidVlanId),
+        parent_(NULL), oper_dhcp_options_(), sg_list_(), floating_ip_list_(),
+        service_vlan_list_(), static_route_list_(),
+        allowed_address_pair_list_(), vrf_assign_rule_list_(),
+        vrf_assign_acl_(NULL) {
         ipv4_active_ = false;
         l2_active_ = false;
     }
@@ -264,8 +265,8 @@ public:
     VmInterface(const boost::uuids::uuid &uuid, const std::string &name,
                 const Ip4Address &addr, const std::string &mac,
                 const std::string &vm_name,
-                const boost::uuids::uuid &vm_project_uuid, uint16_t vlan_id,
-                Interface *parent) : 
+                const boost::uuids::uuid &vm_project_uuid, uint16_t tx_vlan_id,
+                uint16_t rx_vlan_id, Interface *parent) : 
         Interface(Interface::VM_INTERFACE, uuid, name, NULL), vm_(NULL),
         vn_(NULL), ip_addr_(addr), mdata_addr_(0), subnet_bcast_addr_(0),
         vm_mac_(mac), policy_enabled_(false), mirror_entry_(NULL),
@@ -274,10 +275,11 @@ public:
         do_dhcp_relay_(false), vm_name_(vm_name),
         vm_project_uuid_(vm_project_uuid), vxlan_id_(0),
         layer2_forwarding_(true), ipv4_forwarding_(true), mac_set_(false),
-        ecmp_(false), vlan_id_(vlan_id), parent_(parent), oper_dhcp_options_(),
-        sg_list_(), floating_ip_list_(), service_vlan_list_(),
-        static_route_list_(), allowed_address_pair_list_(),
-        vrf_assign_rule_list_(), vrf_assign_acl_(NULL) {
+        ecmp_(false), tx_vlan_id_(tx_vlan_id), rx_vlan_id_(rx_vlan_id),
+        parent_(parent), oper_dhcp_options_(), sg_list_(),
+        floating_ip_list_(), service_vlan_list_(), static_route_list_(),
+        allowed_address_pair_list_(), vrf_assign_rule_list_(),
+        vrf_assign_acl_(NULL) {
         ipv4_active_ = false;
         l2_active_ = false;
     }
@@ -319,7 +321,8 @@ public:
     const std::string &vm_name() const { return vm_name_; }
     const boost::uuids::uuid &vm_project_uuid() const { return vm_project_uuid_; }
     const std::string &cfg_name() const { return cfg_name_; }
-    uint16_t vlan_id() const { return vlan_id_; }
+    uint16_t tx_vlan_id() const { return tx_vlan_id_; }
+    uint16_t rx_vlan_id() const { return rx_vlan_id_; }
     const Interface *parent() const { return parent_.get(); }
     bool ecmp() const { return ecmp_;}
     const OperDhcpOptions &oper_dhcp_options() const { return oper_dhcp_options_; }
@@ -387,7 +390,8 @@ public:
                     const std::string &os_name, const Ip4Address &addr,
                     const std::string &mac, const std::string &vn_name,
                     const boost::uuids::uuid &vm_project_uuid,
-                    uint16_t vlan_id_, const std::string &parent);
+                    uint16_t tx_vlan_id, uint16_t rx_vlan_id,
+                    const std::string &parent);
     // Del a vm-interface
     static void Delete(InterfaceTable *table,
                        const boost::uuids::uuid &intf_uuid);
@@ -518,7 +522,8 @@ private:
     bool mac_set_;
     bool ecmp_;
     // VLAN Tag and the parent interface when VLAN is enabled
-    uint16_t vlan_id_;
+    uint16_t tx_vlan_id_;
+    uint16_t rx_vlan_id_;
     InterfaceRef parent_;
     // DHCP options defined for the interface
     OperDhcpOptions oper_dhcp_options_;
@@ -591,9 +596,11 @@ struct VmInterfaceAddData : public VmInterfaceData {
                        const std::string &vm_mac,
                        const std::string &vm_name,
                        const boost::uuids::uuid &vm_project_uuid,
-                       const uint16_t vlan_id, const std::string &parent) :
+                       const uint16_t tx_vlan_id, const uint16_t rx_vlan_id,
+                       const std::string &parent) :
         VmInterfaceData(ADD_DEL_CHANGE), ip_addr_(ip_addr), vm_mac_(vm_mac),
-        vm_name_(vm_name), vm_project_uuid_(vm_project_uuid), vlan_id_(vlan_id),
+        vm_name_(vm_name), vm_project_uuid_(vm_project_uuid),
+        tx_vlan_id_(tx_vlan_id), rx_vlan_id_(rx_vlan_id),
         parent_(parent) {
     }
 
@@ -603,7 +610,8 @@ struct VmInterfaceAddData : public VmInterfaceData {
     std::string vm_mac_;
     std::string vm_name_;
     boost::uuids::uuid vm_project_uuid_;
-    uint16_t vlan_id_;
+    uint16_t tx_vlan_id_;
+    uint16_t rx_vlan_id_;
     std::string parent_;
 };
 

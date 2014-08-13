@@ -26,7 +26,8 @@ static void NovaIntfAdd(int id, const char *name, const char *addr,
     VmInterface::Add(Agent::GetInstance()->interface_table(),
                      MakeUuid(id), name, ip.to_v4(), mac, "",
                      MakeUuid(kProjectUuid),
-                     VmInterface::kInvalidVlanId, Agent::NullString());
+                     VmInterface::kInvalidVlanId, VmInterface::kInvalidVlanId,
+		     Agent::NullString());
 }
 
 static void NovaDel(int id) {
