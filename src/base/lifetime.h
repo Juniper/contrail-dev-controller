@@ -118,8 +118,8 @@ public:
     LifetimeActor(LifetimeManager *manager);
     virtual ~LifetimeActor();
 
-    // trigger the deletion of a an object.
-    // may be called from any thread.
+    // Trigger the deletion of an object.
+    // May be called from any thread.
     virtual void Delete();
 
     void RetryDelete();
@@ -129,6 +129,7 @@ public:
     void ResumeDelete();
 
     bool IsDeleted() const { return deleted_; }
+    bool HasDependents() const { return !dependents_.empty(); }
 
     const uint64_t create_time_stamp_usecs() const {
         return create_time_stamp_usecs_;
@@ -190,6 +191,9 @@ public:
 
     // Return the number of times work queue task executions were deferred.
     size_t GetQueueDeferCount() { return defer_count_; }
+
+protected:
+    virtual void SetQueueDisable(bool disabled);
 
 private:
     friend class LifetimeActor;

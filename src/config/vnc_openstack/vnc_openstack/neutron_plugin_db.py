@@ -171,6 +171,10 @@ class RouterExternalGatewayInUseByFloatingIp(exceptions.InUse):
                 "gateway to external network %(net_id)s is required by one or "
                 "more floating IPs.")
 
+# Allowed Address Pair
+class AddressPairMatchesPortFixedIPAndMac(exceptions.InvalidInput):
+    message = _("Port's Fixed IP and Mac Address match an address pair entry.")
+
 class DBInterface(object):
     """
     An instance of this class forwards requests to vnc cfg api (web)server
@@ -179,7 +183,8 @@ class DBInterface(object):
 
     def __init__(self, admin_name, admin_password, admin_tenant_name,
                  api_srvr_ip, api_srvr_port, user_info=None,
-                 contrail_extensions_enabled=True):
+                 contrail_extensions_enabled=True,
+                 list_optimization_enabled=False):
         self._api_srvr_ip = api_srvr_ip
         self._api_srvr_port = api_srvr_port
 
@@ -205,6 +210,7 @@ class DBInterface(object):
         self._db_cache['vnc_routers'] = {}
 
         self._contrail_extensions_enabled = contrail_extensions_enabled
+        self._list_optimization_enabled = list_optimization_enabled
 
         # Retry till a api-server is up
         connected = False
@@ -394,9 +400,12 @@ class DBInterface(object):
             # Seed the cache and return
             if q_type == 'port':
                 port_obj = self._virtual_machine_interface_read(obj_uuid)
-                net_id = port_obj.get_virtual_network_refs()[0]['uuid']
-                # recurse up type-hierarchy
-                tenant_id = self._get_obj_tenant_id('network', net_id)
+                if port_obj.parent_type != "project":
+                    net_id = port_obj.get_virtual_network_refs()[0]['uuid']
+                    # recurse up type-hierarchy
+                    tenant_id = self._get_obj_tenant_id('network', net_id)
+                else:
+                    tenant_id = port_obj.parent_uuid.replace('-', '')
                 self._set_obj_tenant_id(obj_uuid, tenant_id)
                 return tenant_id
 
@@ -530,6 +539,9 @@ class DBInterface(object):
             obj.name += '-' + obj.uuid
             obj.fq_name[-1] += '-' + obj.uuid
             obj_uuid = getattr(self._vnc_lib, resource_type + '_create')(obj)
+        except PermissionDenied as e:
+            exc_info = {'type': 'BadRequest', 'message': str(e)}
+            bottle.abort(400, json.dumps(exc_info))
 
         return obj_uuid
     #end _resource_create
@@ -562,7 +574,15 @@ class DBInterface(object):
     #end _virtual_network_read
 
     def _virtual_network_update(self, net_obj):
-        self._vnc_lib.virtual_network_update(net_obj)
+        try:
+            self._vnc_lib.virtual_network_update(net_obj)
+        except PermissionDenied as e:
+            exc_info = {'type': 'BadRequest', 'message': str(e)}
+            bottle.abort(400, json.dumps(exc_info))
+        except RefsExistError as e:
+            self._raise_contrail_exception(400, exceptions.BadRequest(
+                resource='network', msg=str(e)))
+
         # read back to get subnet gw allocated by api-server
         fq_name_str = json.dumps(net_obj.get_fq_name())
 
@@ -608,13 +628,19 @@ class DBInterface(object):
 
     def _virtual_machine_interface_read(self, port_id=None, fq_name=None,
                                         fields=None):
+        back_ref_fields = ['logical_router_back_refs', 'instance_ip_back_refs', 'floating_ip_back_refs']
+        if fields:
+            n_extra_fields = list(set(fields + back_ref_fields))
+        else:
+            n_extra_fields = back_ref_fields
+
         if port_id:
             try:
                 # return self._db_cache['vnc_ports'][port_id]
                 raise KeyError
             except KeyError:
                 port_obj = self._vnc_lib.virtual_machine_interface_read(
-                    id=port_id, fields=fields)
+                    id=port_id, fields=n_extra_fields)
                 fq_name_str = json.dumps(port_obj.get_fq_name())
                 self._db_cache['vnc_ports'][port_id] = port_obj
                 self._db_cache['vnc_ports'][fq_name_str] = port_obj
@@ -627,7 +653,7 @@ class DBInterface(object):
                 raise KeyError
             except KeyError:
                 port_obj = self._vnc_lib.virtual_machine_interface_read(
-                    fq_name=fq_name, fields=fields)
+                    fq_name=fq_name, fields=n_extra_fields)
                 self._db_cache['vnc_ports'][fq_name_str] = port_obj
                 self._db_cache['vnc_ports'][port_obj.uuid] = port_obj
                 return port_obj
@@ -662,12 +688,17 @@ class DBInterface(object):
 
     def _virtual_machine_interface_list(self, parent_id=None, back_ref_id=None,
                                         obj_uuids=None, fields=None):
+        back_ref_fields = ['logical_router_back_refs', 'instance_ip_back_refs', 'floating_ip_back_refs']
+        if fields:
+            n_extra_fields = list(set(fields + back_ref_fields))
+        else:
+            n_extra_fields = back_ref_fields
         vmi_objs = self._vnc_lib.virtual_machine_interfaces_list(
                                                      parent_id=parent_id,
                                                      back_ref_id=back_ref_id,
                                                      obj_uuids=obj_uuids,
                                                      detail=True,
-                                                     fields=fields)
+                                                     fields=n_extra_fields)
         return vmi_objs
     #end _virtual_machine_interface_list
 
@@ -816,11 +847,11 @@ class DBInterface(object):
 
     def _security_group_entries_list_sg(self, sg_id):
         try:
-            sg_uuid = str(uuid.UUID(project_id))
+            sg_uuid = str(uuid.UUID(sg_id))
         except Exception:
             print "Error in converting SG uuid %s" % (sg_id)
 
-        resp_dict = self._vnc_lib.security_groups_list(parent_id=project_uuid)
+        resp_dict = self._vnc_lib.security_groups_list(obj_uuids=[sg_uuid])
 
         return resp_dict['security-groups']
     #end _security_group_entries_list_sg
@@ -1010,8 +1041,7 @@ class DBInterface(object):
             return ret_list
 
         net_ids = [net_obj.uuid for net_obj in net_objs]
-        port_objs = self._virtual_machine_interface_list(back_ref_id=net_ids,
-                                          fields=['instance_ip_back_refs'])
+        port_objs = self._virtual_machine_interface_list(back_ref_id=net_ids)
         iip_objs = self._instance_ip_list(back_ref_id=net_ids)
 
         return self._port_list(net_objs, port_objs, iip_objs)
@@ -1019,32 +1049,36 @@ class DBInterface(object):
 
     # find port ids on a given project
     def _port_list_project(self, project_id, count=False):
-        if count:
-            ret_val = 0
+        if self._list_optimization_enabled:
+            port_objs = self._virtual_machine_interface_list(parent_id=project_id,
+                                                             fields=['instance_ip_back_refs'])
+            if count:
+                return len(port_objs)
+
+            iip_objs = self._instance_ip_list()
+            return self._port_list([], port_objs, iip_objs)
         else:
-            ret_val = []
+            if count:
+                ret_val = 0
+            else:
+                ret_val = []
+            net_objs = self._virtual_network_list(project_id,
+                            fields=['virtual_machine_interface_back_refs'],
+                            detail=True)
+            if not net_objs:
+                return ret_val
 
-        net_objs = self._virtual_network_list(project_id,
-                         fields=['virtual_machine_interface_back_refs'],
-                         detail=True)
-        if not net_objs:
-            return ret_val
+            if count:
+                for net_obj in net_objs:
+                    port_back_refs = (
+                        net_obj.get_virtual_machine_interface_back_refs() or [])
+                    ret_val = ret_val + len(port_back_refs)
+                return ret_val
 
-        if count:
-            for net_obj in net_objs:
-                port_back_refs = (
-                    net_obj.get_virtual_machine_interface_back_refs() or [])
-                ret_val = ret_val + len(port_back_refs)
-            return ret_val
-
-        net_ids = [net_obj.uuid for net_obj in net_objs]
-        port_objs = self._virtual_machine_interface_list(back_ref_id=net_ids,
-                                          fields=['instance_ip_back_refs'])
-        iip_objs = self._instance_ip_list(back_ref_id=net_ids)
-
-        ret_val = self._port_list(net_objs, port_objs, iip_objs)
-
-        return ret_val
+            net_ids = [net_obj.uuid for net_obj in net_objs]
+            port_objs = self._virtual_machine_interface_list(back_ref_id=net_ids)
+            iip_objs = self._instance_ip_list(back_ref_id=net_ids)
+            return self._port_list(net_objs, port_objs, iip_objs)
     #end _port_list_project
 
     # Returns True if
@@ -1378,8 +1412,10 @@ class DBInterface(object):
                 addr.get_security_group() != 'local':
                 remote_sg = addr.get_security_group()
                 try:
-                    remote_sg_obj = self._vnc_lib.security_group_read(
-                        fq_name_str=remote_sg)
+                    if remote_sg != ':'.join(sg_obj.get_fq_name()):
+                        remote_sg_obj = self._vnc_lib.security_group_read(fq_name_str=remote_sg)
+                    else:
+                        remote_sg_obj = sg_obj
                     remote_sg_uuid = remote_sg_obj.uuid
                 except NoIdError:
                     pass
@@ -1551,8 +1587,12 @@ class DBInterface(object):
 
             net_policy_refs = net_obj.get_network_policy_refs()
             if net_policy_refs:
+                sorted_refs = sorted(
+                    net_policy_refs,
+                    key=lambda t:(t['attr'].sequence.major,
+                                  t['attr'].sequence.minor))
                 extra_dict['contrail:policys'] = \
-                    [np_ref['to'] for np_ref in net_policy_refs]
+                    [np_ref['to'] for np_ref in sorted_refs]
 
         rt_refs = net_obj.get_route_table_refs()
         if rt_refs:
@@ -1581,15 +1621,19 @@ class DBInterface(object):
     #end _network_vnc_to_neutron
 
     def _subnet_neutron_to_vnc(self, subnet_q):
-        cidr = subnet_q['cidr'].split('/')
-        pfx = cidr[0]
-        pfx_len = int(cidr[1])
+        cidr = IPNetwork(subnet_q['cidr'])
+        pfx = str(cidr.network)
+        pfx_len = int(cidr.prefixlen)
+        if cidr.version != 4:
+            exc_info = {'type': 'BadRequest',
+                        'message': "Bad subnet request: IPv6 is not supported"}
+            bottle.abort(400, json.dumps(exc_info))
+
         if 'gateway_ip' in subnet_q:
             default_gw = subnet_q['gateway_ip']
         else:
             # Assigned first+1 from cidr
-            network = IPNetwork('%s/%s' % (pfx, pfx_len))
-            default_gw = str(IPAddress(network.first + 1))
+            default_gw = str(IPAddress(cidr.first + 1))
 
         if 'allocation_pools' in subnet_q:
             alloc_pools = subnet_q['allocation_pools']
@@ -1847,7 +1891,6 @@ class DBInterface(object):
                 # retrieve a floating ip pool from a private network.
                 self._raise_contrail_exception(404, Exception(
                     "Network %s doesn't provide a floatingip pool", net_id))
-            fq_name = self._fip_pool_list_network(net_id)[0]['fq_name']
             fip_pool_obj = self._vnc_lib.floating_ip_pool_read(fq_name=fq_name)
             fip_name = str(uuid.uuid4())
             fip_obj = FloatingIp(fip_name, fip_pool_obj)
@@ -1946,10 +1989,7 @@ class DBInterface(object):
                 sg_obj = SecurityGroup("default", proj_obj)
                 port_obj.add_security_group(sg_obj)
         else:  # READ/UPDATE/DELETE
-            port_obj = self._virtual_machine_interface_read(
-                port_id=port_q['id'], fields=['instance_ip_back_refs',
-                                              'floating_ip_back_refs',
-                                              'logical_router_back_refs'])
+            port_obj = self._virtual_machine_interface_read(port_id=port_q['id'])
 
         if 'name' in port_q and port_q['name']:
             port_obj.display_name = port_q['name']
@@ -1963,6 +2003,9 @@ class DBInterface(object):
                 except RefsExistError as e:
                     exc_info = {'type': 'BadRequest', 'message': str(e)}
                     bottle.abort(400, json.dumps(exc_info))
+
+        if 'device_owner' in port_q:
+            port_obj.set_virtual_machine_interface_device_owner(port_q.get('device_owner'))
 
         if 'security_groups' in port_q:
             port_obj.set_security_group_list([])
@@ -1990,29 +2033,60 @@ class DBInterface(object):
             else:
                 port_obj.set_virtual_machine_interface_dhcp_option_list(None)
 
-        if ('allowed_address_pairs' in port_q and
-           port_q['allowed_address_pairs']):
-            aaps = AllowedAddressPairs()
+        if ('allowed_address_pairs' in port_q):
             aap_array = []
-            for address_pair in port_q['allowed_address_pairs']:
-                mode = u'active-active';
-                if 'mac_address' not in address_pair:
+            if port_q['allowed_address_pairs']:
+                for address_pair in port_q['allowed_address_pairs']:
+                    mac_refs = \
+                        port_obj.get_virtual_machine_interface_mac_addresses()
                     mode = u'active-standby';
-                    mac_refs = port_obj.get_virtual_machine_interface_mac_addresses()
-                    if mac_refs:
-                        address_pair['mac_address'] = mac_refs.mac_address[0]
+                    if 'mac_address' not in address_pair:
+                        if mac_refs:
+                            address_pair['mac_address'] = mac_refs.mac_address[0]
 
-                cidr = address_pair['ip_address'].split('/')
-                if len(cidr) == 1:
-                    subnet=SubnetType(cidr[0], 32);
-                elif len(cidr) == 2:
-                    subnet=SubnetType(cidr[0], int(cidr[1]));
-                else:
-                    raise exceptions.BadRequest(resource='port', msg="Invalid address pair argument")
-                aap = AllowedAddressPair(subnet, address_pair['mac_address'], mode)
-                aap_array.append(aap)
-            aaps.set_allowed_address_pair(aap_array)
-            port_obj.set_virtual_machine_interface_allowed_address_pairs(aaps)
+                    cidr = address_pair['ip_address'].split('/')
+                    if len(cidr) == 1:
+                        subnet=SubnetType(cidr[0], 32);
+                    elif len(cidr) == 2:
+                        subnet=SubnetType(cidr[0], int(cidr[1]));
+                    else:
+                        self._raise_contrail_exception(400,
+                               exceptions.BadRequest(resource='port',
+                                         msg='Invalid address pair argument'))
+                    ip_back_refs = port_obj.get_instance_ip_back_refs()
+                    if ip_back_refs:
+                        for ip_back_ref in ip_back_refs:
+                            iip_uuid = ip_back_ref['uuid']
+                            try:
+                                ip_obj = self._instance_ip_read(instance_ip_id=\
+                                                            ip_back_ref['uuid'])
+                            except NoIdError:
+                                continue
+                            ip_addr = ip_obj.get_instance_ip_address()
+                            if ((ip_addr == address_pair['ip_address']) and
+                                (mac_refs.mac_address[0] == address_pair['mac_address'])):
+                                self._raise_contrail_exception(400,
+                                       AddressPairMatchesPortFixedIPAndMac())
+                    aap = AllowedAddressPair(subnet,
+                                             address_pair['mac_address'], mode)
+                    aap_array.append(aap)
+            if aap_array:
+                aaps = AllowedAddressPairs()
+                aaps.set_allowed_address_pair(aap_array)
+                port_obj.set_virtual_machine_interface_allowed_address_pairs(aaps)
+            else:
+                port_obj.set_virtual_machine_interface_allowed_address_pairs(None)
+
+        if 'fixed_ips' in port_q:
+            net_id = (port_q.get('network_id') or
+                      port_obj.get_virtual_network_refs()[0]['uuid'])
+            for fixed_ip in port_q.get('fixed_ips', []):
+                if 'ip_address' in fixed_ip:
+                    ip_addr = fixed_ip['ip_address']
+                    if self._ip_addr_in_net_id(ip_addr, net_id):
+                        self._raise_contrail_exception(
+                            409, exceptions.IpAddressInUse(net_id=net_id,
+                                                           ip_address=ip_addr))
 
         return port_obj
     #end _port_neutron_to_vnc
@@ -2053,7 +2127,10 @@ class DBInterface(object):
             subnets_info = self._virtual_network_to_subnets(net_obj)
             port_req_memo['subnets'][net_id] = subnets_info
 
-        proj_id = net_obj.parent_uuid.replace('-', '')
+        if port_obj.parent_type != "project":
+            proj_id = net_obj.parent_uuid.replace('-', '')
+        else:
+            proj_id = port_obj.parent_uuid.replace('-', '')
         self._set_obj_tenant_id(port_obj.uuid, proj_id)
 
         port_q_dict['tenant_id'] = proj_id
@@ -2085,7 +2162,7 @@ class DBInterface(object):
             port_q_dict['allowed_address_pairs'] = address_pairs
 
         port_q_dict['fixed_ips'] = []
-        ip_back_refs = port_obj.get_instance_ip_back_refs()
+        ip_back_refs = getattr(port_obj, 'instance_ip_back_refs', None)
         if ip_back_refs:
             for ip_back_ref in ip_back_refs:
                 iip_uuid = ip_back_ref['uuid']
@@ -2116,25 +2193,27 @@ class DBInterface(object):
             port_q_dict['security_groups'].append(sg_ref['uuid'])
 
         port_q_dict['admin_state_up'] = port_obj.get_id_perms().enable
-        port_q_dict['status'] = constants.PORT_STATUS_ACTIVE
 
         # port can be router interface or vm interface
         # for perf read logical_router_back_ref only when we have to
         port_parent_name = port_obj.parent_name
-        router_refs = port_obj.get_logical_router_back_refs()
+        router_refs = getattr(port_obj, 'logical_router_back_refs', None)
         if router_refs is not None:
-            port_q_dict['device_owner'] = constants.DEVICE_OWNER_ROUTER_INTF
             port_q_dict['device_id'] = router_refs[0]['uuid']
         elif port_obj.parent_type == 'virtual-machine':
-            port_q_dict['device_owner'] = ''
             port_q_dict['device_id'] = port_obj.parent_name
         elif port_obj.get_virtual_machine_refs() is not None:
             port_q_dict['device_id'] = \
                 port_obj.get_virtual_machine_refs()[0]['to'][-1]
-            port_q_dict['device_owner'] = ''
         else:
             port_q_dict['device_id'] = ''
-            port_q_dict['device_owner'] = ''
+
+        port_q_dict['device_owner'] = \
+                port_obj.get_virtual_machine_interface_device_owner();
+        if port_q_dict['device_id']:
+            port_q_dict['status'] = constants.PORT_STATUS_ACTIVE
+        else:
+            port_q_dict['status'] = constants.PORT_STATUS_DOWN
 
         if self._contrail_extensions_enabled:
             port_q_dict.update(extra_dict)
@@ -2280,6 +2359,12 @@ class DBInterface(object):
                     net_info = self._network_vnc_to_neutron(net,
                                                             net_repr='LIST')
                     ret_dict[net.uuid] = net_info
+        elif filters and 'router:external' in filters:
+            nets = self._network_list_router_external()
+            if filters['router:external'][0] == True:
+                for net in nets:
+                    net_info = self._network_vnc_to_neutron(net, net_repr='LIST')
+                    ret_dict[net.uuid] = net_info
         else:
             # read all networks in all projects
             dom_projects = self._project_list_domain(None)
@@ -2333,8 +2418,8 @@ class DBInterface(object):
         net_id = subnet_q['network_id']
         net_obj = self._virtual_network_read(net_id=net_id)
 
-        ipam_fq_name = subnet_q.get('contrail:ipam_fq_name', '')
-        if ipam_fq_name != '':
+        ipam_fq_name = subnet_q.get('contrail:ipam_fq_name')
+        if ipam_fq_name:
             domain_name, project_name, ipam_name = ipam_fq_name
 
             domain_obj = Domain(domain_name)
@@ -3210,7 +3295,11 @@ class DBInterface(object):
                     'network.') % (fip_q['floating_network_id'])
             exc_info = {'type': 'BadRequest', 'message': msg}
             bottle.abort(400, json.dumps(exc_info))
-        fip_uuid = self._vnc_lib.floating_ip_create(fip_obj)
+        try:
+            fip_uuid = self._vnc_lib.floating_ip_create(fip_obj)
+        except Exception as e:
+            self._raise_contrail_exception(409,
+                   exceptions.IpAddressGenerationFailure(net_id=fip_q['floating_network_id']))
         fip_obj = self._vnc_lib.floating_ip_read(id=fip_uuid)
 
         return self._floatingip_vnc_to_neutron(fip_obj)
@@ -3283,63 +3372,65 @@ class DBInterface(object):
                                 self._instance_ip_list(back_ref_id=[net_id])]
         return ip_addr in net_ip_list
 
+    def _create_instance_ip(self, net_obj, port_obj, ip_addr=None):
+        ip_name = str(uuid.uuid4())
+        ip_obj = InstanceIp(name=ip_name)
+        ip_obj.uuid = ip_name
+        ip_obj.set_virtual_machine_interface(port_obj)
+        ip_obj.set_virtual_network(net_obj)
+        if ip_addr:
+            ip_obj.set_instance_ip_address(ip_addr)
+
+        ip_id = self._instance_ip_create(ip_obj)
+        return ip_id
+    # end _create_instance_ip
+
+    def _port_create_instance_ip(self, net_obj, port_obj, port_q):
+        created_iip_ids = []
+        fixed_ips = port_q.get('fixed_ips')
+        if fixed_ips is None:
+            return
+        for fixed_ip in fixed_ips:
+            try:
+                ip_addr = fixed_ip.get('ip_address')
+                subnet_id = fixed_ip.get('subnet_id')
+                if not ip_addr and 'subnet_id' in fixed_ip:
+                    subnet_key = self._subnet_vnc_read_mapping(id=subnet_id)
+                    ip_addr = self._vnc_lib.virtual_network_ip_alloc(net_obj,
+                                            subnet=subnet_key.split()[1])[0]
+
+                ip_id = self._create_instance_ip(net_obj, port_obj, ip_addr)
+                created_iip_ids.append(ip_id)
+            except Exception as e:
+                # Resources are not available
+                for iip_id in created_iip_ids:
+                    self._instance_ip_delete(instance_ip_id=iip_id)
+                self._raise_contrail_exception(409,
+                    exceptions.IpAddressGenerationFailure(net_id=net_obj.uuid))
+        for iip in getattr(port_obj, 'instance_ip_back_refs', []):
+            if iip['uuid'] not in created_iip_ids:
+                iip_obj = self._instance_ip_delete(instance_ip_id=iip['uuid'])
+    # end _port_create_instance_ip
+
     # port api handlers
     def port_create(self, port_q):
         net_id = port_q['network_id']
         net_obj = self._network_read(net_id)
-        proj_id = net_obj.parent_uuid
+        proj_id = str(uuid.UUID(port_q['tenant_id']))
 
         # initialize port object
         port_obj = self._port_neutron_to_vnc(port_q, net_obj, CREATE)
 
-        # if ip address passed then use it
-        req_ip_addrs = []
-        if 'fixed_ips' in port_q:
-            for fixed_ip in port_q['fixed_ips'] or []:
-                if 'ip_address' in fixed_ip:
-                    ip_addr = fixed_ip['ip_address']
-                    if self._ip_addr_in_net_id(ip_addr, net_id):
-                        self._raise_contrail_exception(409, exceptions.IpAddressInUse(net_id=net_id,
-                                                        ip_address=ip_addr))
-                    req_ip_addrs.append(ip_addr)
-
         # create the object
         port_id = self._resource_create('virtual_machine_interface', port_obj)
-
-        # initialize ip object
-        if net_obj.get_network_ipam_refs():
-            def _create_instance_ip(port_obj, ip_addr=None):
-                ip_name = str(uuid.uuid4())
-                ip_obj = InstanceIp(name=ip_name)
-                ip_obj.uuid = ip_name
-                ip_obj.set_virtual_machine_interface(port_obj)
-                ip_obj.set_virtual_network(net_obj)
-                if ip_addr:
-                    ip_obj.set_instance_ip_address(ip_addr)
-
-                ip_id = self._instance_ip_create(ip_obj)
-                return ip_id
-
-            created_iip_ids = []
-            try:
-                if req_ip_addrs:
-                    for req_ip in req_ip_addrs:
-                        created_iip_ids.append(_create_instance_ip(port_obj, req_ip))
-                else:
-                    _create_instance_ip(port_obj)
-            except Exception as e:
-                # ResourceExhaustionError, resources are not available
-                for iip_id in created_iip_ids:
-                    self._instance_ip_delete(instance_ip_id=iip_id)
-                self._virtual_machine_interface_delete(port_id=port_id)
-                self._raise_contrail_exception(503, exceptions.ResourceExhausted())
-
+        if 'fixed_ips' in port_q:
+            self._port_create_instance_ip(net_obj, port_obj, port_q)
+        else:
+            self._port_create_instance_ip(net_obj, port_obj,
+                                          {'fixed_ips':[{'ip_address': None}]})
         # TODO below reads back default parent name, fix it
-        port_obj = self._virtual_machine_interface_read(port_id=port_id,
-                                 fields=['instance_ip_back_refs'])
-
+        port_obj = self._virtual_machine_interface_read(port_id=port_id)
         ret_port_q = self._port_vnc_to_neutron(port_obj)
-        #self._db_cache['q_ports'][port_id] = ret_port_q
         self._set_obj_tenant_id(port_id, proj_id)
 
         # update cache on successful creation
@@ -3374,59 +3465,11 @@ class DBInterface(object):
         port_q['id'] = port_id
         port_obj = self._port_neutron_to_vnc(port_q, None, UPDATE)
         net_id = port_obj.get_virtual_network_refs()[0]['uuid']
-        fixed_ips = port_q.get('fixed_ips', [])
-        for fixed_ip in fixed_ips:
-            if 'ip_address' in fixed_ip:
-                ip_addr = fixed_ip['ip_address']
-                if self._ip_addr_in_net_id(ip_addr, net_id):
-                    self._raise_contrail_exception(409, exceptions.IpAddressInUse(net_id=net_id,
-                                                    ip_address=ip_addr))
-                req_ip_addrs.append(ip_addr)
-            elif 'subnet_id' in fixed_ip:
-                req_ip_subnets.append(fixed_ip['subnet_id'])
-
+        net_obj = self._network_read(net_id)
         self._virtual_machine_interface_update(port_obj)
-
-        if req_ip_addrs or req_ip_subnets:
-            net_obj = self._network_read(net_id)
-            # initialize ip object
-            if net_obj.get_network_ipam_refs():
-                def _create_instance_ip(port_obj, ip_addr=None):
-                    ip_name = str(uuid.uuid4())
-                    ip_obj = InstanceIp(name=ip_name)
-                    ip_obj.uuid = ip_name
-                    ip_obj.set_virtual_machine_interface(port_obj)
-                    ip_obj.set_virtual_network(net_obj)
-                    if ip_addr:
-                        ip_obj.set_instance_ip_address(ip_addr)
-
-                    ip_id = self._instance_ip_create(ip_obj)
-                    return ip_id
-
-                created_iip_ids = []
-                try:
-                    for subnet_id in req_ip_subnets:
-                        subnet_key = self._subnet_vnc_read_mapping(id=subnet_id)
-                        ip_addr = self._vnc_lib.virtual_network_ip_alloc(net_obj,
-                                                subnet=subnet_key.split()[1])
-                        req_ip_addrs.extend(ip_addr)
-
-                    for iip in port_obj.get_instance_ip_back_refs():
-                        iip_obj = self._instance_ip_delete(instance_ip_id=iip['uuid'])
-
-                    for new_ip in req_ip_addrs:
-                        created_iip_ids.append(_create_instance_ip(port_obj, new_ip))
-
-                except Exception as e:
-                    # ResourceExhaustionError, resources are not available
-                    for iip_id in created_iip_ids:
-                        self._instance_ip_delete(instance_ip_id=iip_id)
-                    self._raise_contrail_exception(503, exceptions.ResourceExhausted())
-
-                port_obj = self._virtual_machine_interface_read(port_id=port_id,
-                                         fields=['instance_ip_back_refs'])
-
+        self._port_create_instance_ip(net_obj, port_obj, port_q)
         ret_port_q = self._port_vnc_to_neutron(port_obj)
+        port_obj = self._virtual_machine_interface_read(port_id=port_id)
         self._db_cache['q_ports'][port_id] = ret_port_q
 
         return ret_port_q
@@ -3516,10 +3559,15 @@ class DBInterface(object):
                     project_id = None
 
                 # read all VMI and IIP in detail one-shot
-                all_port_gevent = gevent.spawn(self._virtual_machine_interface_list,
-                                               fields=['instance_ip_back_refs'])
+                if self._list_optimization_enabled:
+                    all_port_gevent = gevent.spawn(self._virtual_machine_interface_list,
+                                                   parent_id=project_id)
+                else:
+                    all_port_gevent = gevent.spawn(self._virtual_machine_interface_list)
                 port_iip_gevent = gevent.spawn(self._instance_ip_list)
-                port_net_gevent = gevent.spawn(self._virtual_network_list, detail=True)
+                port_net_gevent = gevent.spawn(self._virtual_network_list,
+                                               parent_id=project_id,
+                                               detail=True)
 
                 gevent.joinall([all_port_gevent, port_iip_gevent, port_net_gevent])
 
@@ -3566,8 +3614,7 @@ class DBInterface(object):
                 # TODO optimize
                 port_objs = self._virtual_machine_interface_list(
                                               parent_id=dev_id,
-                                              back_ref_id=dev_id,
-                                              fields=['instance_ip_back_refs'])
+                                              back_ref_id=dev_id)
                 if not port_objs:
                     raise NoIdError(None)
                 for port_obj in port_objs:
@@ -3703,7 +3750,7 @@ class DBInterface(object):
                 if not self._filters_is_present(filters, 'id', sg_obj.uuid):
                     continue
                 if not self._filters_is_present(filters, 'name',
-                                                sg_obj.get_display_name()):
+                                                sg_obj.get_display_name() or sg_obj.name):
                     continue
                 sg_info = self._security_group_vnc_to_neutron(sg_obj)
                 ret_list.append(sg_info)

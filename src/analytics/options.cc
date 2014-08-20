@@ -32,7 +32,7 @@ bool Options::Parse(EventManager &evm, int argc, char *argv[]) {
 
 // Initialize collector's command line option tags with appropriate default
 // values. Options can from a config file as well. By default, we read
-// options from /etc/contrail/collector.conf
+// options from /etc/contrail/contrail-collector.conf
 void Options::Initialize(EventManager &evm,
                          opt::options_description &cmdline_options) {
     boost::system::error_code error;
@@ -44,16 +44,16 @@ void Options::Initialize(EventManager &evm,
     // Command line only options.
     generic.add_options()
         ("conf_file", opt::value<string>()->default_value(
-                                            "/etc/contrail/collector.conf"),
+                                            "/etc/contrail/contrail-collector.conf"),
              "Configuration file")
          ("help", "help message")
         ("version", "Display version information")
     ;
 
-    uint16_t default_redis_port = ContrailPorts::RedisUvePort;
-    uint16_t default_collector_port = ContrailPorts::CollectorPort;
-    uint16_t default_http_server_port = ContrailPorts::HttpPortCollector;
-    uint16_t default_discovery_port = ContrailPorts::DiscoveryServerPort;
+    uint16_t default_redis_port = ContrailPorts::RedisUvePort();
+    uint16_t default_collector_port = ContrailPorts::CollectorPort();
+    uint16_t default_http_server_port = ContrailPorts::HttpPortCollector();
+    uint16_t default_discovery_port = ContrailPorts::DiscoveryServerPort();
 
     vector<string> default_cassandra_server_list;
     default_cassandra_server_list.push_back("127.0.0.1:9160");

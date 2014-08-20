@@ -54,7 +54,8 @@ void WaitForInitDone(Agent *agent) {
 TestClient *TestInit(const char *init_file, bool ksync_init, bool pkt_init,
                      bool services_init, bool uve_init,
                      int agent_stats_interval, int flow_stats_interval,
-                     bool asio, bool ksync_sync_mode) {
+                     bool asio, bool ksync_sync_mode,
+                     int vrouter_stats_interval) {
     if (TaskScheduler::GetInstance() == NULL) {
         TaskScheduler::Initialize();
     }
@@ -69,6 +70,7 @@ TestClient *TestInit(const char *init_file, bool ksync_init, bool pkt_init,
     param->Init(init_file, "test", var_map);
     param->set_agent_stats_interval(agent_stats_interval);
     param->set_flow_stats_interval(flow_stats_interval);
+    param->set_vrouter_stats_interval(vrouter_stats_interval);
 
     // Initialize the agent-init control class
     int sandesh_port = 0;
@@ -120,60 +122,6 @@ TestClient *TestInit(const char *init_file, bool ksync_init, bool pkt_init,
              Agent::GetInstance()->fabric_vrf_name(), "vhost0",
              Agent::GetInstance()->router_id(), 32, "", false);
     }
-
-    return client;
-}
-
-TestClient *StatsTestInit() {
-    if (TaskScheduler::GetInstance() == NULL) {
-        TaskScheduler::Initialize();
-    }
-    Agent *agent = new Agent();
-    TestClient *client = new TestClient(agent);
-    AgentParam *param = client->param();
-    TestAgentInit *init = client->agent_init();
-
-    // Read agent parameters from config file and arguments
-    opt::variables_map var_map;
-    param->Init("controller/src/vnsw/agent/test/vnswa_cfg.ini", "test", var_map);
-
-    // Initialize the agent-init control class
-    int sandesh_port = 0;
-    Sandesh::InitGeneratorTest("VNSWAgent", "Agent", "Test", "Test",
-                               Agent::GetInstance()->event_manager(),
-                               sandesh_port, NULL);
-
-    InitTestFactory();
-    init->Init(param, agent, var_map);
-    init->set_ksync_enable(true);
-    init->set_packet_enable(true);
-    init->set_services_enable(true);
-    init->set_create_vhost(false);
-    init->set_uve_enable(false);
-    init->set_vgw_enable(false);
-    init->set_router_id_dep_enable(false);
-    param->set_test_mode(true);
-
-    // Initialize agent and kick start initialization
-    agent->CopyConfig(param);
-    init->Start();
-
-    WaitForInitDone(agent);
-
-    AsioRun();
-
-    sleep(1);
-    Agent::GetInstance()->set_vhost_interface_name("vhost0");
-    InetInterface::CreateReq(Agent::GetInstance()->interface_table(),
-                             "vhost0", InetInterface::VHOST,
-                             Agent::GetInstance()->fabric_vrf_name(),
-                             Ip4Address(0), 0, Ip4Address(0), param->eth_port(), "");
-
-    boost::system::error_code ec;
-    Agent::GetInstance()->set_router_id(Ip4Address::from_string("10.1.1.1", ec));
-
-    // Wait for host and vhost interface creation
-    client->WaitForIdle();
 
     return client;
 }
@@ -267,8 +215,8 @@ void TestClient::Shutdown() {
     agent_init_.Shutdown();
     Agent::GetInstance()->uve()->Shutdown();
     KSyncTest *ksync = static_cast<KSyncTest *>(Agent::GetInstance()->ksync());
-    ksync->NetlinkShutdownTest();
-    Agent::GetInstance()->ksync()->Shutdown();
+    if (ksync)
+        ksync->Shutdown();
     Agent::GetInstance()->pkt()->Shutdown();  
     MulticastHandler::Shutdown();
     //Agent::GetInstance()->oper_db()->Shutdown();
@@ -276,8 +224,29 @@ void TestClient::Shutdown() {
     Agent::GetInstance()->db()->ClearFactoryRegistry();
 }
 
+void ShutdownAgentController(Agent *agent) {
+    TaskScheduler::GetInstance()->Stop();
+    agent->controller()->multicast_cleanup_timer().cleanup_timer_->Fire();
+    agent->controller()->unicast_cleanup_timer().cleanup_timer_->Fire();
+    agent->controller()->config_cleanup_timer().cleanup_timer_->Fire();
+    TaskScheduler::GetInstance()->Start();
+    client->WaitForIdle();
+    agent->controller()->Cleanup();
+    client->WaitForIdle();
+    agent->set_controller_ifmap_xmpp_client(NULL, 0);
+    agent->set_controller_ifmap_xmpp_init(NULL, 0);
+    agent->set_controller_ifmap_xmpp_client(NULL, 1);
+    agent->set_controller_ifmap_xmpp_init(NULL, 1);
+}
+
+static bool DeleteRoutes(TestAgentInit *init) {
+    init->DeleteRoutes();
+    return true;
+}
+
 void TestShutdown() {
     TestAgentInit *init = client->agent_init();
+    Agent *agent = Agent::GetInstance();
     client->WaitForIdle();
 
     init->IoShutdown();
@@ -286,8 +255,14 @@ void TestShutdown() {
     init->FlushFlows();
     client->WaitForIdle();
 
-    init->DeleteRoutes();
+    TaskScheduler *scheduler = TaskScheduler::GetInstance();
+    std::auto_ptr<TaskTrigger> trigger
+        (new TaskTrigger(boost::bind(&DeleteRoutes, init),
+                         scheduler->GetTaskId("db::DBTable"), 0));
+    trigger->Set();
     client->WaitForIdle();
+
+    WAIT_FOR(1000, 1000, (agent->vrf_table()->shutdown_walk() == NULL));
 
     if (Agent::GetInstance()->vgw()) {
         Agent::GetInstance()->vgw()->Shutdown();

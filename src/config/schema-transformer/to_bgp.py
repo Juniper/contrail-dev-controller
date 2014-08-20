@@ -56,6 +56,7 @@ from pysandesh.gen_py.process_info.ttypes import ConnectionType, \
     ConnectionStatus
 from cfgm_common.uve.cfgm_cpuinfo.ttypes import NodeStatusUVE, \
     NodeStatus
+from cStringIO import StringIO
 
 _BGP_RTGT_MAX_ID = 1 << 24
 _BGP_RTGT_ALLOC_PATH = "/id/bgp/route-targets/"
@@ -291,7 +292,7 @@ class VirtualNetworkST(DictST):
             ri.obj.add_route_target(new_rtgt_obj, inst_tgt_data)
             _vnc_lib.routing_instance_update(ri.obj)
             for (prefix, nexthop) in vn.route_table.items():
-                left_ri = vn._get_routing_instance_from_route(next_hop)
+                left_ri = vn._get_routing_instance_from_route(nexthop)
                 if left_ri is None:
                     continue
                 left_ri.update_route_target_list(
@@ -410,9 +411,10 @@ class VirtualNetworkST(DictST):
             try:
                 sc_ip_address = _vnc_lib.virtual_network_ip_alloc(
                     self.obj, count=1)[0]
-            except NoIdError:
+            except (NoIdError, RefsExistError) as e:
                 _sandesh._logger.debug(
-                    "NoIdError while allocating ip in network %s", self.name)
+                    "Error while allocating ip in network %s: %s", self.name,
+                    str(e))
                 return None
             self._sc_ip_cf.insert(sc_name, {'ip_address': sc_ip_address})
         return sc_ip_address
@@ -657,7 +659,7 @@ class VirtualNetworkST(DictST):
             ri_obj.update_route_target_list(rt_add, rt_del,
                                             import_export='export')
         for (prefix, nexthop) in self.route_table.items():
-            left_ri = self._get_routing_instance_from_route(next_hop)
+            left_ri = self._get_routing_instance_from_route(nexthop)
             if left_ri is not None:
                 left_ri.update_route_target_list(rt_add, rt_del,
                                                  import_export='import')
@@ -762,6 +764,7 @@ class VirtualNetworkST(DictST):
                 static_route.route_target.remove(self.get_route_target())
                 if static_route.route_target == []:
                     static_route_entries.delete_route(static_route)
+                left_ri.obj._pending_field_updates.add('static_route_entries')
                 _vnc_lib.routing_instance_update(left_ri.obj)
                 return
     # end delete_route
@@ -1471,7 +1474,8 @@ class ServiceChain(DictST):
             elif mode == "in-network-nat":
                 transparent = False
                 self.nat_service = True
-
+            else:
+                transparent = True
             _sandesh._logger.debug("service chain %s: creating %s chain",
                                    self.name, mode)
 
@@ -2595,7 +2599,8 @@ class SchemaTransformer(object):
                                     enable_syslog=args.use_syslog,
                                     syslog_facility=args.syslog_facility)
         ConnectionState.init(_sandesh, hostname, module_name,
-                instance_id, ConnectionState.get_process_state_cb,
+                instance_id,
+                staticmethod(ConnectionState.get_process_state_cb),
                 NodeStatusUVE, NodeStatus)
 
         # create cpu_info object to send periodic updates
@@ -2796,6 +2801,15 @@ class SchemaTransformer(object):
         vn.set_route_target_list(rt_list)
         self.current_network_set.add(vn_name)
     # end add_route_target_list
+
+    def delete_route_target_list(self, idents, meta):
+        vn_name = idents['virtual-network']
+        vn = VirtualNetworkST.get(vn_name)
+        if vn:
+            rt_list = RouteTargetList()
+            vn.set_route_target_list(rt_list)
+            self.current_network_set.add(vn_name)
+    # end delete_route_target_list
 
     def add_bgp_router_parameters(self, idents, meta):
         router_name = idents['bgp-router']
@@ -3425,10 +3439,17 @@ def launch_arc(transformer, ssrc_mapc):
         try:
             transformer.process_poll_result(result)
         except Exception as e:
+            string_buf = StringIO()
             cgitb.Hook(
+                file=string_buf,
                 format="text",
-                file=open('/var/log/contrail/schema.err',
-                          'a')).handle(sys.exc_info())
+                ).handle(sys.exc_info())
+            try:
+                with open('/var/log/contrail/schema.err', 'a') as err_file:
+                    err_file.write(string_buf.getvalue())
+            except IOError:
+                with open('./schema.err', 'a') as err_file:
+                    err_file.write(string_buf.getvalue())
             raise e
 # end launch_arc
 

@@ -6,6 +6,7 @@
 #include "test/test_init.h"
 #include "oper/mirror_table.h"
 #include "uve/test/vn_uve_table_test.h"
+#include "uve/test/vn_uve_table_test.h"
 
 #define MAX_TESTNAME_LEN 80
 
@@ -85,7 +86,8 @@ void DelLinkString(char *buff, int &len, const char *node_name1,
 }
 
 void AddNodeString(char *buff, int &len, const char *node_name,
-                   const char *name, int id, const char *attr) {
+                   const char *name, int id, const char *attr,
+                   bool admin_state) {
     sprintf(buff + len, 
             "       <node type=\"%s\">\n"
             "           <name>%s</name>\n"
@@ -101,10 +103,11 @@ void AddNodeString(char *buff, int &len, const char *node_name,
             "                   <uuid-mslong>0</uuid-mslong>\n"
             "                   <uuid-lslong>%d</uuid-lslong>\n"
             "               </uuid>\n"
-            "               <enable>true</enable>\n"
+            "               <enable>%s</enable>\n"
             "           </id-perms>\n"
             "           %s\n"
-            "       </node>\n", node_name, name, id, attr);
+            "       </node>\n", node_name, name, id,
+                                (admin_state == true) ? "true" : "false", attr);
     len = strlen(buff);
 }
 
@@ -298,13 +301,14 @@ void AddNodeByStatus(const char *node_name, const char *name, int id, bool statu
     return;
 }
 
+// admin_state is true by default
 void AddNode(const char *node_name, const char *name, int id, 
-                    const char *attr) {
+                    const char *attr, bool admin_state) {
     char buff[10240];
     int len = 0;
 
     AddXmlHdr(buff, len);
-    AddNodeString(buff, len, node_name, name, id, attr);
+    AddNodeString(buff, len, node_name, name, id, attr, admin_state);
     AddXmlTail(buff, len);
     pugi::xml_document xdoc_;
     pugi::xml_parse_result result = xdoc_.load(buff);
@@ -363,14 +367,14 @@ void IntfCfgAdd(int intf_id, const string &name, const string ipaddr,
     char vm_name[MAX_TESTNAME_LEN];
     sprintf(vm_name, "vm%d", vm_id);
     data->Init(MakeUuid(vm_id), MakeUuid(vn_id), MakeUuid(project_id),
-               name, ip, mac, vm_name, vlan, 0);
+               name, ip, mac, vm_name, vlan, CfgIntEntry::CfgIntVMPort, 0);
 
     DBRequest req;
     req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
     req.key.reset(key);
     req.data.reset(data);
     Agent::GetInstance()->interface_config_table()->Enqueue(&req);
-    usleep(1000);
+    client->WaitForIdle();
 }
 
 void IntfCfgAdd(int intf_id, const string &name, const string ipaddr,
@@ -911,7 +915,8 @@ void VnAddReq(int id, const char *name) {
     std::vector<VnIpam> ipam;
     VnData::VnIpamDataMap vn_ipam_data;
     Agent::GetInstance()->vn_table()->AddVn(MakeUuid(id), name, nil_uuid(),
-                                              name, ipam, vn_ipam_data, id);
+                                              name, ipam, vn_ipam_data, id,
+                                              true);
     usleep(1000);
 }
 
@@ -920,7 +925,8 @@ void VnAddReq(int id, const char *name, int acl_id) {
     VnData::VnIpamDataMap vn_ipam_data;
     Agent::GetInstance()->vn_table()->AddVn(MakeUuid(id), name, 
                                               MakeUuid(acl_id),
-                                              name, ipam, vn_ipam_data, id);
+                                              name, ipam, vn_ipam_data, id,
+                                              true);
     usleep(1000);
 }
 
@@ -929,7 +935,7 @@ void VnAddReq(int id, const char *name, int acl_id, const char *vrf_name) {
     VnData::VnIpamDataMap vn_ipam_data;
     Agent::GetInstance()->vn_table()->AddVn(MakeUuid(id), name, 
                                               MakeUuid(acl_id), vrf_name, ipam,
-                                              vn_ipam_data, id);
+                                              vn_ipam_data, id, true);
     usleep(1000);
 }
 
@@ -937,7 +943,8 @@ void VnAddReq(int id, const char *name, const char *vrf_name) {
     std::vector<VnIpam> ipam;
     VnData::VnIpamDataMap vn_ipam_data;
     Agent::GetInstance()->vn_table()->AddVn(MakeUuid(id), name, nil_uuid(), 
-                                              vrf_name, ipam, vn_ipam_data, id);
+                                              vrf_name, ipam, vn_ipam_data, id,
+                                              true);
     usleep(1000);
 }
 
@@ -1364,7 +1371,8 @@ void AddL2Vn(const char *name, int id) {
     AddNode("virtual-network", name, id, str.str().c_str());
 }
 
-void AddVn(const char *name, int id) {
+// default admin_state is true
+void AddVn(const char *name, int id, bool admin_state) {
     std::stringstream str;
     str << "<virtual-network-properties>" << endl;
     str << "    <network-id>" << id << "</network-id>" << endl;
@@ -1372,7 +1380,7 @@ void AddVn(const char *name, int id) {
     str << "    <forwarding-mode>l2_l3</forwarding-mode>" << endl;
     str << "</virtual-network-properties>" << endl;
 
-    AddNode("virtual-network", name, id, str.str().c_str());
+    AddNode("virtual-network", name, id, str.str().c_str(), admin_state);
 }
 
 void DelVn(const char *name) {
@@ -2044,7 +2052,8 @@ void CreateVmportFIpEnv(struct PortInfo *input, int count, int acl_id,
 void CreateVmportEnvInternal(struct PortInfo *input, int count, int acl_id, 
                      const char *vn, const char *vrf,
                      const char *vm_interface_attr,
-                     bool l2_vn, bool with_ip, bool ecmp) {
+                     bool l2_vn, bool with_ip, bool ecmp,
+                     bool vn_admin_state) {
     char vn_name[MAX_TESTNAME_LEN];
     char vm_name[MAX_TESTNAME_LEN];
     char vrf_name[MAX_TESTNAME_LEN];
@@ -2072,7 +2081,7 @@ void CreateVmportEnvInternal(struct PortInfo *input, int count, int acl_id,
         sprintf(vm_name, "vm%d", input[i].vm_id);
         sprintf(instance_ip, "instance%d", input[i].vm_id);
         if (!l2_vn) {
-            AddVn(vn_name, input[i].vn_id);
+            AddVn(vn_name, input[i].vn_id, vn_admin_state);
             AddVrf(vrf_name);
         }
         AddVm(vm_name, input[i].vm_id);
@@ -2115,26 +2124,28 @@ void CreateVmportEnvInternal(struct PortInfo *input, int count, int acl_id,
 void CreateVmportEnvWithoutIp(struct PortInfo *input, int count, int acl_id, 
                               const char *vn, const char *vrf) {
     CreateVmportEnvInternal(input, count, acl_id, vn, vrf, NULL, false, false,
-                            false);
+                            false, true);
 }
 
 void CreateVmportEnv(struct PortInfo *input, int count, int acl_id, 
                      const char *vn, const char *vrf,
-                     const char *vm_interface_attr) {
+                     const char *vm_interface_attr,
+                     bool vn_admin_state) {
     CreateVmportEnvInternal(input, count, acl_id, vn, vrf,
-                            vm_interface_attr, false, true, false);
+                            vm_interface_attr, false, true, false,
+                            vn_admin_state);
 }
 
 void CreateL2VmportEnv(struct PortInfo *input, int count, int acl_id, 
                      const char *vn, const char *vrf) {
     CreateVmportEnvInternal(input, count, acl_id, vn, vrf, NULL, true,
-                            true, false);
+                            true, false, true);
 }
 
 void CreateVmportWithEcmp(struct PortInfo *input, int count, int acl_id,
                           const char *vn, const char *vrf) {
     CreateVmportEnvInternal(input, count, acl_id, vn, vrf, NULL, false,
-                            true, true);
+                            true, true, true);
 }
 
 void FlushFlowTable() {
@@ -2847,8 +2858,9 @@ BgpPeer *CreateBgpPeer(const Ip4Address &addr, std::string name) {
     AgentXmppChannel *channel;
     Agent::GetInstance()->set_controller_ifmap_xmpp_server(addr.to_string(), 0);
     
-    channel = new AgentXmppChannel(Agent::GetInstance(), xmpp_channel, 
+    channel = new AgentXmppChannel(Agent::GetInstance(),
                                    "XMPP Server", "", 0);
+    channel->RegisterXmppChannel(xmpp_channel);
     AgentXmppChannel::HandleAgentXmppClientChannelEvent(channel, xmps::READY);
     client->WaitForIdle();
     return channel->bgp_peer_id();
