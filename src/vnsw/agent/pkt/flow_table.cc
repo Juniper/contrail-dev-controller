@@ -829,7 +829,18 @@ void FlowEntry::UpdateKSync() {
         ksync_entry_ =
             static_cast<FlowTableKSyncEntry *>(ksync_obj->Create(&key));
     } else {
-        ksync_obj->Change(ksync_entry_);    
+        if (flow_handle_ != ksync_entry_->hash_id()) {
+            /*
+             * if flow handle changes delete the previous record from
+             * vrouter and install new
+             */
+            ksync_obj->Delete(ksync_entry_);
+            FlowTableKSyncEntry key(ksync_obj, this, flow_handle_);
+            ksync_entry_ =
+                static_cast<FlowTableKSyncEntry *>(ksync_obj->Create(&key));
+        } else {
+            ksync_obj->Change(ksync_entry_);
+        }
     }
 }
 
@@ -1975,6 +1986,25 @@ void FlowTable::ResyncRouteFlows(RouteFlowKey &key, SecurityGroupList &sg_l)
                        + integerToString(key.vrf) 
                        + " ip:"
                        + Ip4Address(key.ip.ipv4).to_string());
+        }
+        //Update SG id for reverse flow
+        //So that SG match rules can be applied on the
+        //latest sg id of forward and reverse flow
+        FlowEntry *rev_flow = fe->reverse_flow_entry();
+        if (rev_flow && rev_flow->FlowSrcMatch(key)) {
+            rev_flow->set_source_sg_id_l(sg_l);
+        } else if (rev_flow && rev_flow->FlowDestMatch(key)) {
+            rev_flow->set_dest_sg_id_l(sg_l);
+        }
+
+        //SG id for a reverse flow is updated
+        //Reevaluate forward flow
+        if (fe->is_flags_set(FlowEntry::ReverseFlow)) {
+            FlowEntry *fwd_flow = fe->reverse_flow_entry();
+            if (fwd_flow) {
+                ResyncAFlow(fwd_flow);
+                AddFlowInfo(fwd_flow);
+            }
         }
         ResyncAFlow(fe);
         AddFlowInfo(fe);

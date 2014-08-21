@@ -457,6 +457,17 @@ class DBInterface(object):
                 return proj_obj
     #end _project_read
 
+    def _get_tenant_id_for_create(self, context, resource):
+        if context['is_admin'] and 'tenant_id' in resource:
+            tenant_id = resource['tenant_id']
+        elif ('tenant_id' in resource and
+              resource['tenant_id'] != context['tenant_id']):
+            reason = _('Cannot create resource for another tenant')
+            self._raise_contrail_exception(400, exceptions.AdminRequired(reason=reason))
+        else:
+            tenant_id = context['tenant_id']
+        return tenant_id
+
     def _raise_contrail_exception(self, code, exc):
         exc_info = {'message': str(exc)}
         bottle.abort(code, json.dumps(exc_info))
@@ -807,11 +818,15 @@ class DBInterface(object):
     #end _network_list_project
 
     # find router ids on a given project
-    def _router_list_project(self, project_id):
-        try:
-            project_uuid = str(uuid.UUID(project_id))
-        except Exception:
-            print "Error in converting uuid %s" % (project_id)
+    def _router_list_project(self, project_id=None):
+        if project_id:
+            try:
+                project_uuid = str(uuid.UUID(project_id))
+            except Exception:
+                print "Error in converting uuid %s" % (project_id)
+                return []
+        else:
+            project_uuid = None
 
         resp_dict = self._vnc_lib.logical_routers_list(parent_id=project_uuid)
 
@@ -1372,7 +1387,7 @@ class DBInterface(object):
             sg_vnc = self._vnc_lib.security_group_read(id=sg_q['id'])
 
         if 'name' in sg_q and sg_q['name']:
-	    sg_vnc.display_name = sg_q['name']
+            sg_vnc.display_name = sg_q['name']
         if 'description' in sg_q:
             id_perms = sg_vnc.get_id_perms()
             id_perms.set_description(sg_q['description'])
@@ -2367,15 +2382,7 @@ class DBInterface(object):
                     ret_dict[net.uuid] = net_info
         else:
             # read all networks in all projects
-            dom_projects = self._project_list_domain(None)
-            project_uuids = [proj['uuid'] for proj in dom_projects]
-
-            for proj_id in project_uuids:
-                if not filters or 'router:external' not in filters:
-                    all_net_objs.extend(self._network_list_project(proj_id))
-
-            if not filters or 'router:external' in filters:
-                all_net_objs.extend(self._network_list_router_external())
+            all_net_objs.extend(self._virtual_network_list(detail=True))
 
         # prune phase
         for net_obj in all_net_objs:
@@ -3108,14 +3115,8 @@ class DBInterface(object):
                     pass
         else:
             # read all routers in all projects
-            dom_projects = self._project_list_domain(None)
-            for project in dom_projects:
-                proj_id = project['uuid']
-                if filters and 'router:external' in filters:
-                    all_rtrs.append(self._fip_pool_ref_routers(proj_id))
-                else:
-                    project_rtrs = self._router_list_project(proj_id)
-                    all_rtrs.append(project_rtrs)
+             project_rtrs = self._router_list_project()
+             all_rtrs.append(project_rtrs)
 
         # prune phase
         for project_rtrs in all_rtrs:
@@ -3181,7 +3182,7 @@ class DBInterface(object):
         except NoIdError:
             pass
 
-    def add_router_interface(self, router_id, port_id=None, subnet_id=None):
+    def add_router_interface(self, context, router_id, port_id=None, subnet_id=None):
         router_obj = self._logical_router_read(router_id)
         if port_id:
             port = self.port_read(port_id)
@@ -3215,7 +3216,7 @@ class DBInterface(object):
 
             fixed_ip = {'ip_address': subnet['gateway_ip'],
                         'subnet_id': subnet['id']}
-            port = self.port_create({'tenant_id': subnet['tenant_id'],
+            port = self.port_create(context, {'tenant_id': subnet['tenant_id'],
                  'network_id': subnet['network_id'],
                  'fixed_ips': [fixed_ip],
                  'admin_state_up': True,
@@ -3413,10 +3414,11 @@ class DBInterface(object):
     # end _port_create_instance_ip
 
     # port api handlers
-    def port_create(self, port_q):
+    def port_create(self, context, port_q):
         net_id = port_q['network_id']
         net_obj = self._network_read(net_id)
-        proj_id = str(uuid.UUID(port_q['tenant_id']))
+        tenant_id = self._get_tenant_id_for_create(context, port_q);
+        proj_id = str(uuid.UUID(tenant_id))
 
         # initialize port object
         port_obj = self._port_neutron_to_vnc(port_q, net_obj, CREATE)
