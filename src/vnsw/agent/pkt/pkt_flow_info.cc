@@ -53,7 +53,7 @@ static uint32_t NhToVrf(const NextHop *nh) {
     const VrfEntry *vrf = NULL;
     switch (nh->GetType()) {
     case NextHop::COMPOSITE: {
-        vrf = (static_cast<const CompositeNH *>(nh))->GetVrf();
+        vrf = (static_cast<const CompositeNH *>(nh))->vrf();
         break;
     }
     case NextHop::NextHop::INTERFACE: {
@@ -112,7 +112,8 @@ static bool NhDecode(const NextHop *nh, const PktInfo *pkt, PktFlowInfo *info,
     const CompositeNH *comp_nh = NULL;
     if (nh->GetType() == NextHop::COMPOSITE) {
         comp_nh = static_cast<const CompositeNH *>(nh);
-        if (comp_nh->IsEcmpNH() == true) {
+        if (comp_nh->composite_nh_type() == Composite::ECMP ||
+            comp_nh->composite_nh_type() == Composite::LOCAL_ECMP) {
             info->ecmp = true;
             const CompositeNH *comp_nh = static_cast<const CompositeNH *>(nh);
             if (info->out_component_nh_idx ==
@@ -125,7 +126,7 @@ static bool NhDecode(const NextHop *nh, const PktInfo *pkt, PktFlowInfo *info,
                     info->trap_rev_flow = true;
                 }
                 info->out_component_nh_idx =
-                    comp_nh->GetComponentNHList()->hash(pkt->hash());
+                    comp_nh->hash(pkt->hash());
              }
              nh = comp_nh->GetNH(info->out_component_nh_idx);
              if (nh->IsActive() == false) {
@@ -173,8 +174,8 @@ static bool NhDecode(const NextHop *nh, const PktInfo *pkt, PktFlowInfo *info,
     }
 
     case NextHop::TUNNEL: {
-         if (comp_nh && comp_nh->IsLocal() == true) {
-             out->nh_ = comp_nh->id();
+         if (in->rt_ != NULL && in->rt_->GetLocalNextHop()) {
+             out->nh_ = in->rt_->GetLocalNextHop()->id();
          } else {
              out->nh_ = in->nh_;
          }
@@ -333,19 +334,17 @@ static void SetInEcmpIndex(const PktInfo *pkt, PktFlowInfo *flow_info,
                 (in->rt_->get_table())->agent();
             nh = in->rt_->FindPath(agent->ecmp_peer())->nexthop(agent);
         } else {
-            const CompositeNH *comp_nh = static_cast<const CompositeNH *>
-                (in->rt_->GetActiveNextHop());
             //Aggregarated routes may not have local path
             //Derive local path
-            nh = comp_nh->GetLocalCompositeNH();
+            nh = in->rt_->GetLocalNextHop();
         }
     }
 
     if (nh && nh->GetType() == NextHop::COMPOSITE) {
         const CompositeNH *comp_nh = static_cast<const CompositeNH *>(nh);
         //Find component entry index in composite NH
-        uint32_t idx;
-        if (comp_nh->GetComponentNHList()->Find(component_nh, idx)) {
+        uint32_t idx = 0;
+        if (comp_nh->GetIndex(component_nh, idx)) {
             flow_info->in_component_nh_idx = idx;
             flow_info->ecmp = true;
         }
@@ -577,7 +576,6 @@ void PktFlowInfo::FloatingIpDNat(const PktInfo *pkt, PktControlInfo *in,
     }
     out->rt_ = ftable->GetUcRoute(it->vrf_.get(), Ip4Address(pkt->ip_daddr));
     out->vn_ = it->vn_.get();
-    dest_vn = &(it->vn_.get()->GetName());
     dest_vrf = out->intf_->vrf()->vrf_id();
 
     // Translate the Dest-IP
@@ -655,9 +653,6 @@ void PktFlowInfo::FloatingIpSNat(const PktInfo *pkt, PktControlInfo *in,
 
     //Populate in->vn, used for VRF translate ACL lookup
     in->vn_ = fip_it->vn_.get();
-    // Source-VN for policy processing is based on floating-ip VN
-    // Dest-VN will be based on out->rt_ and computed below
-    source_vn = &(fip_it->vn_.get()->GetName());
 
     // Floating-ip found. We will change src-ip to floating-ip. Recompute route
     // for new source-ip. All policy decisions will be based on this new route
@@ -710,11 +705,11 @@ void PktFlowInfo::FloatingIpSNat(const PktInfo *pkt, PktControlInfo *in,
 void PktFlowInfo::VrfTranslate(const PktInfo *pkt, PktControlInfo *in,
                                PktControlInfo *out) {
     const Interface *intf = NULL;
-    if (!ingress) {
-        return;
+    if (ingress) {
+        intf = in->intf_;
+    } else {
+        intf = out->intf_;
     }
-
-    intf = in->intf_;
     if (!intf || intf->type() != Interface::VM_INTERFACE) {
         return;
     }
@@ -725,9 +720,11 @@ void PktFlowInfo::VrfTranslate(const PktInfo *pkt, PktControlInfo *in,
     //network acl
     const AclDBEntry *acl = vm_intf->vrf_assign_acl();
     if (acl == NULL) {
-        if (in->vn_) {
+        if (ingress && in->vn_) {
             //Check if the network ACL is present
             acl = in->vn_->GetAcl();
+        } else if (out->vn_) {
+            acl = out->vn_->GetAcl();
         }
     }
 
@@ -747,17 +744,8 @@ void PktFlowInfo::VrfTranslate(const PktInfo *pkt, PktControlInfo *in,
         hdr.src_port = 0;
         hdr.dst_port = 0;
     }
-    if (source_vn != NULL) {
-        hdr.src_policy_id = source_vn;
-    } else {
-        hdr.src_policy_id = RouteToVn(in->rt_);
-    }
-
-    if (dest_vn != NULL) {
-        hdr.dst_policy_id = dest_vn;
-    } else {
-        hdr.dst_policy_id = RouteToVn(out->rt_);
-    }
+    hdr.src_policy_id = RouteToVn(in->rt_);
+    hdr.dst_policy_id = RouteToVn(out->rt_);
 
     if (in->rt_) {
         const AgentPath *path = in->rt_->GetActivePath();
@@ -872,8 +860,14 @@ void PktFlowInfo::EgressProcess(const PktInfo *pkt, PktControlInfo *in,
     FlowTable *ftable = Agent::GetInstance()->pkt()->flow_table();
     out->rt_ = ftable->GetUcRoute(out->vrf_, Ip4Address(pkt->ip_daddr));
     in->rt_ = ftable->GetUcRoute(out->vrf_, Ip4Address(pkt->ip_saddr));
+
     if (out->intf_) {
         out->vn_ = InterfaceToVn(out->intf_);
+    }
+
+    //Apply vrf translate ACL to get ingress route
+    if (in->rt_ && out->rt_) {
+        VrfTranslate(pkt, in, out);
     }
 
     if (RouteAllowNatLookup(out->rt_)) {
@@ -898,6 +892,8 @@ bool PktFlowInfo::Process(const PktInfo *pkt, PktControlInfo *in,
     if (in->intf_ == NULL || in->intf_->ipv4_active() == false) {
         in->intf_ = NULL;
         LogError(pkt, "Invalid or Inactive ifindex");
+        short_flow = true;
+        short_flow_reason = FlowEntry::SHORT_UNAVIALABLE_INTERFACE;
         return false;
     }
 
@@ -906,6 +902,8 @@ bool PktFlowInfo::Process(const PktInfo *pkt, PktControlInfo *in,
             static_cast<const VmInterface *>(in->intf_);
         if (!vm_intf->ipv4_forwarding()) {
             LogError(pkt, "ipv4 service not enabled for ifindex");
+            short_flow = true;
+            short_flow_reason = FlowEntry::SHORT_IPV4_FWD_DIS;
             return false;
         }
     }
@@ -914,6 +912,8 @@ bool PktFlowInfo::Process(const PktInfo *pkt, PktControlInfo *in,
     if (in->vrf_ == NULL || !in->vrf_->IsActive()) {
         in->vrf_ = NULL;
         LogError(pkt, "Invalid or Inactive VRF");
+        short_flow = true;
+        short_flow_reason = FlowEntry::SHORT_UNAVIALABLE_VRF;
         return false;
     }
 
@@ -927,21 +927,17 @@ bool PktFlowInfo::Process(const PktInfo *pkt, PktControlInfo *in,
         EgressProcess(pkt, in, out);
     }
 
-    if ((source_vn == NULL) && (in->rt_ != NULL)) {
-        source_vn = RouteToVn(in->rt_);
-    }
-
-    if ((dest_vn == NULL) && (out->rt_ != NULL)) {
-        dest_vn = RouteToVn(out->rt_);
-    }
-
     if (in->rt_ == NULL) {
         LogError(pkt, "Flow : No route for Src-IP");
+        short_flow = true;
+        short_flow_reason = FlowEntry::SHORT_NO_SRC_ROUTE;
         return false;
     }
 
     if (out->rt_ == NULL) {
         LogError(pkt, "Flow : No route for Dst-IP");
+        short_flow = true;
+        short_flow_reason = FlowEntry::SHORT_NO_DST_ROUTE;
         return false;
     }
 
@@ -982,6 +978,7 @@ void PktFlowInfo::Add(const PktInfo *pkt, PktControlInfo *in,
          (flow_table->VmFlowCount(out->vm_) + 2) > flow_table->max_vm_flows())) {
         flow_table->agent()->stats()->incr_flow_drop_due_to_max_limit();
         short_flow = true;
+        short_flow_reason = FlowEntry::SHORT_FLOW_LIMIT;
     }
 
     if (!short_flow && linklocal_bind_local_port &&
@@ -990,6 +987,7 @@ void PktFlowInfo::Add(const PktInfo *pkt, PktControlInfo *in,
         if (!nat_sport) {
             flow_table->agent()->stats()->incr_flow_drop_due_to_max_limit();
             short_flow = true;
+            short_flow_reason = FlowEntry::SHORT_LINKLOCAL_SRC_NAT;
         }
     }
     
@@ -1119,7 +1117,7 @@ void PktFlowInfo::RewritePktInfo(uint32_t flow_index) {
         Agent::GetInstance()->ksync()->flowtable_ksync_obj();
 
     FlowKey key;
-    if (!obj->GetFlowKey(flow_index, key)) {
+    if (!obj->GetFlowKey(flow_index, &key)) {
         std::ostringstream ostr;
         ostr << "ECMP Resolve: unable to find flow index " << flow_index;
         PKTFLOW_TRACE(Err,ostr.str());
@@ -1140,6 +1138,7 @@ void PktFlowInfo::RewritePktInfo(uint32_t flow_index) {
     pkt->sport = key.src_port;
     pkt->dport = key.dst_port;
     pkt->agent_hdr.vrf = flow->data().vrf;
+    pkt->agent_hdr.nh = key.nh;
     //Flow transition from Non ECMP to ECMP, use index 0
     if (flow->data().component_nh_idx == CompositeNH::kInvalidComponentNHIdx) {
         out_component_nh_idx = 0;

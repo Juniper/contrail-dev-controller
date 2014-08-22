@@ -26,7 +26,7 @@
 #include "io/event_manager.h"
 
 #include "gendb_if.h"
-
+#include "sandesh/sandesh.h"
 #include "viz_message.h"
 
 class DbHandler {
@@ -50,6 +50,23 @@ public:
         std::string str;
         uint64_t num;
         double dbl;
+        bool operator==(const Var &other) const {
+            if (type!=other.type) return false;
+            switch (type) {
+                case STRING:
+                    if (str!=other.str) return false;
+                    break;
+                case UINT64:
+                    if (num!=other.num) return false;
+                    break;
+                case DOUBLE:
+                    if (dbl!=other.dbl) return false;
+                    break;
+                default:
+                    break; 
+            }
+            return true;
+        }
     };
 
     typedef std::map<std::string, std::string> RuleMap;
@@ -80,7 +97,11 @@ public:
     void ObjectTableInsert(const std::string &table, const std::string &rowkey,
         uint64_t &timestamp, const boost::uuids::uuid& unm);
 
-    std::vector<std::string> StatTableInsert(uint64_t ts, 
+    static std::vector<std::string> StatTableSelectStr(
+            const std::string& statName, const std::string& statAttr,
+            const AttribMap & attribs);
+
+    void StatTableInsert(uint64_t ts, 
             const std::string& statName,
             const std::string& statAttr,
             const TagMap & attribs_tag,
@@ -114,7 +135,6 @@ private:
 
     // Random generator for UUIDs
     boost::uuids::random_generator umn_gen_;
-    boost::uuids::string_generator s_gen_;
     std::string name_;
     std::string col_name_;
     SandeshLevel::type drop_level_;
@@ -130,10 +150,8 @@ private:
 template <typename T>
 class FlowDataIpv4ObjectWalker : public pugi::xml_tree_walker {
 public:
-    FlowDataIpv4ObjectWalker(T &values,
-        boost::uuids::string_generator &s_gen) :
-        values_(values),
-        s_gen_(s_gen) {
+    FlowDataIpv4ObjectWalker(T &values) :
+        values_(values) {
     }
     ~FlowDataIpv4ObjectWalker() {}
 
@@ -152,7 +170,6 @@ public:
 
 private:
     T &values_;
-    boost::uuids::string_generator &s_gen_;
 };
 
 #endif /* DB_HANDLER_H_ */

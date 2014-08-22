@@ -19,6 +19,7 @@
 #include "oper/multicast.h"
 #include "oper/peer.h"
 #include "oper/vxlan.h"
+#include "oper/agent_path.h"
 #include "pkt/agent_stats.h"
 #include <pugixml/pugixml.hpp>
 #include "xml/xml_pugi.h"
@@ -32,6 +33,9 @@
 
 using namespace boost::asio;
 using namespace autogen;
+using process::ConnectionType;
+using process::ConnectionStatus;
+using process::ConnectionState;
  
 AgentXmppChannel::AgentXmppChannel(Agent *agent, XmppChannel *channel, 
                                    const std::string &xmpp_server, 
@@ -118,7 +122,7 @@ void AgentXmppChannel::ReceiveEvpnUpdate(XmlPugi *pugi) {
                 if (strcmp("ff:ff:ff:ff:ff:ff", mac_str) == 0) {
                     TunnelOlist olist;
                     MulticastHandler::ModifyEvpnMembers(vrf_name, olist,
-                                      VNController::kInvalidPeerIdentifier);
+                             ControllerPeerPath::kInvalidPeerIdentifier);
                 } else {
                     rt_table->DeleteReq(bgp_peer_id(), vrf_name, mac,
                                         new ControllerVmRoute(bgp_peer_id()));
@@ -261,7 +265,7 @@ void AgentXmppChannel::ReceiveMulticastUpdate(XmlPugi *pugi) {
                 //Retract with invalid identifier
                 MulticastHandler::ModifyFabricMembers(vrf, g_addr.to_v4(),
                         s_addr.to_v4(), 0, olist, 
-                        VNController::kInvalidPeerIdentifier);
+                        ControllerPeerPath::kInvalidPeerIdentifier);
             }
         }
         return;
@@ -353,7 +357,7 @@ void AgentXmppChannel::AddEcmpRoute(string vrf_name, Ip4Address prefix_addr,
         (agent_->vrf_table()->GetInet4UnicastRouteTable
          (vrf_name));
 
-    std::vector<ComponentNHData> comp_nh_list;
+    ComponentNHKeyList comp_nh_list;
     for (uint32_t i = 0; i < item->entry.next_hops.next_hop.size(); i++) {
         std::string nexthop_addr = 
             item->entry.next_hops.next_hop[i].address;
@@ -372,29 +376,37 @@ void AgentXmppChannel::AddEcmpRoute(string vrf_name, Ip4Address prefix_addr,
                 agent_->mpls_table()->FindMplsLabel(label);
             if (mpls != NULL) {
                 DBEntryBase::KeyPtr key = mpls->nexthop()->GetDBRequestKey();
-                NextHopKey *nh_key = static_cast<NextHopKey *>(key.get());
-                nh_key->SetPolicy(false);
-                ComponentNHData nh_data(label, nh_key);
-                comp_nh_list.push_back(nh_data);
+                NextHopKey *nh_key = static_cast<NextHopKey *>(key.release());
+                if (nh_key->GetType() != NextHop::COMPOSITE) {
+                    //By default all component members of composite NH
+                    //will be policy disabled, except for component NH
+                    //of type composite
+                    nh_key->SetPolicy(false);
+                }
+                std::auto_ptr<const NextHopKey> nh_key_ptr(nh_key);
+                ComponentNHKeyPtr component_nh_key(new ComponentNHKey(label,
+                                                   nh_key_ptr));
+                comp_nh_list.push_back(component_nh_key);
             }
         } else {
             TunnelType::TypeBmap encap = GetTypeBitmap
                 (item->entry.next_hops.next_hop[i].tunnel_encapsulation_list);
-            ComponentNHData nh_data(label, agent_->fabric_vrf_name(),
-                                    agent_->router_id(), 
-                                    addr.to_v4(), false, encap);
-            comp_nh_list.push_back(nh_data);
+            TunnelNHKey *nh_key = new TunnelNHKey(agent_->fabric_vrf_name(),
+                                                  agent_->router_id(),
+                                                  addr.to_v4(), false,
+                                                  TunnelType::ComputeType(encap));
+            std::auto_ptr<const NextHopKey> nh_key_ptr(nh_key);
+            ComponentNHKeyPtr component_nh_key(new ComponentNHKey(label,
+                                                                  nh_key_ptr));
+            comp_nh_list.push_back(component_nh_key);
         }
     }
 
     // Build the NH request and then create route data to be passed
     DBRequest nh_req(DBRequest::DB_ENTRY_ADD_CHANGE);
-    nh_req.key.reset(new CompositeNHKey(vrf_name, prefix_addr, prefix_len,
-                                        false));
-
-    CompositeNH::CreateCompositeNH(vrf_name, prefix_addr, false, comp_nh_list);
-    nh_req.data.reset(new CompositeNHData(comp_nh_list,
-                                          CompositeNHData::REPLACE));
+    nh_req.key.reset(new CompositeNHKey(Composite::ECMP, true,
+                                        comp_nh_list, vrf_name));
+    nh_req.data.reset(new CompositeNHData());
     ControllerEcmpRoute *data =
         new ControllerEcmpRoute(bgp_peer_id(), prefix_addr, prefix_len,
                                 item->entry.virtual_network, -1,
@@ -524,18 +536,35 @@ void AgentXmppChannel::AddEvpnRoute(std::string vrf_name,
         switch(nh->GetType()) {
         case NextHop::INTERFACE: {
             const InterfaceNH *intf_nh = static_cast<const InterfaceNH *>(nh);
+            ControllerLocalVmRoute *local_vm_route = NULL;
+            VmInterfaceKey vm_intf_key(AgentKey::ADD_DEL_CHANGE,
+                                    intf_nh->GetIfUuid(), "");
+            SecurityGroupList sg_list;
+            PathPreference path_preference;
+            BgpPeer *bgp_peer = bgp_peer_id();
             if (encap == TunnelType::VxlanType()) {
-                rt_table->AddLocalVmRouteReq(bgp_peer_id(), intf_nh->GetIfUuid(),
-                                             "", vrf_name,
-                                             MplsTable::kInvalidLabel,
-                                             label, mac, prefix_addr,
-                                             prefix_len);
+                local_vm_route =
+                    new ControllerLocalVmRoute(vm_intf_key,
+                                               MplsTable::kInvalidLabel,
+                                               label, false, "",
+                                               InterfaceNHFlags::LAYER2,
+                                               sg_list, path_preference,
+                                               unicast_sequence_number(),
+                                               this);
             } else {
-                rt_table->AddLocalVmRouteReq(bgp_peer_id(), intf_nh->GetIfUuid(),
-                                             "", vrf_name, label,
-                                             VxLanTable::kInvalidvxlan_id,
-                                             mac, prefix_addr, prefix_len);
+                local_vm_route =
+                    new ControllerLocalVmRoute(vm_intf_key,
+                                               label,
+                                               VxLanTable::kInvalidvxlan_id,
+                                               false, "",
+                                               InterfaceNHFlags::LAYER2,
+                                               sg_list, path_preference,
+                                               unicast_sequence_number(),
+                                               this);
             }
+            rt_table->AddLocalVmRouteReq(bgp_peer, vrf_name, mac,
+                                         prefix_addr, prefix_len,
+                                         static_cast<LocalVmRoute *>(local_vm_route));
             break;
             }
         default:
@@ -603,18 +632,33 @@ void AgentXmppChannel::AddRemoteRoute(string vrf_name, Ip4Address prefix_addr,
                 break;
             }
 
+            VmInterfaceKey intf_key(AgentKey::ADD_DEL_CHANGE,
+                                    intf_nh->GetIfUuid(), "");
+            BgpPeer *bgp_peer = bgp_peer_id();
             if (interface->type() == Interface::VM_INTERFACE) {
-                rt_table->AddLocalVmRouteReq(bgp_peer_id(), vrf_name, prefix_addr,
-                                             prefix_len, intf_nh->GetIfUuid(),
-                                             item->entry.virtual_network, label,
-                                             item->entry.security_group_list.security_group,
-                                             false, path_preference);
+                ControllerLocalVmRoute *local_vm_route =
+                    new ControllerLocalVmRoute(intf_key, label,
+                                               VxLanTable::kInvalidvxlan_id, false,
+                                               item->entry.virtual_network,
+                                               InterfaceNHFlags::INET4,
+                                               item->entry.security_group_list.security_group,
+                                               path_preference,
+                                               unicast_sequence_number(),
+                                               this);
+                rt_table->AddLocalVmRouteReq(bgp_peer, vrf_name,
+                                             prefix_addr, prefix_len,
+                                             static_cast<LocalVmRoute *>(local_vm_route));
             } else if (interface->type() == Interface::INET) {
-                rt_table->AddInetInterfaceRoute(bgp_peer_id(), vrf_name,
-                                                 prefix_addr, prefix_len,
-                                                 interface->name(),
-                                                 label,
-                                                 item->entry.virtual_network);
+                InetInterfaceKey intf_key(interface->name());
+                ControllerInetInterfaceRoute *inet_interface_route =
+                    new ControllerInetInterfaceRoute(intf_key, label,
+                                                     TunnelType::GREType(),
+                                                     item->entry.virtual_network,
+                                                     unicast_sequence_number(),
+                                                     this);
+                rt_table->AddInetInterfaceRouteReq(bgp_peer, vrf_name,
+                                                prefix_addr, prefix_len,
+                                                inet_interface_route);
             } else {
                 // Unsupported scenario
                 CONTROLLER_TRACE(Trace, GetBgpPeerName(), vrf_name,
@@ -627,12 +671,18 @@ void AgentXmppChannel::AddRemoteRoute(string vrf_name, Ip4Address prefix_addr,
 
         case NextHop::VLAN: {
             const VlanNH *vlan_nh = static_cast<const VlanNH *>(nh);
-            rt_table->AddVlanNHRouteReq(bgp_peer_id(), vrf_name, prefix_addr,
-                                        prefix_len, vlan_nh->GetIfUuid(),
-                                        vlan_nh->GetVlanTag(), label,
-                                        item->entry.virtual_network,
-                                        item->entry.security_group_list.security_group,
-                                        path_preference);
+            VmInterfaceKey intf_key(AgentKey::ADD_DEL_CHANGE,
+                                    vlan_nh->GetIfUuid(), "");
+            BgpPeer *bgp_peer = bgp_peer_id();
+            ControllerVlanNhRoute *data =
+                new ControllerVlanNhRoute(intf_key, vlan_nh->GetVlanTag(),
+                                          label, item->entry.virtual_network,
+                                          item->entry.security_group_list.security_group,
+                                          path_preference,
+                                          unicast_sequence_number(),
+                                          this);
+            rt_table->AddVlanNHRouteReq(bgp_peer, vrf_name, prefix_addr,
+                                        prefix_len, data);
             break;
             }
         case NextHop::COMPOSITE: {
@@ -1477,10 +1527,12 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
             nh.tunnel_encapsulation_list.tunnel_encapsulation.push_back("udp");
         }
     } else {
-        if (route->is_multicast()) {
+        if (route->is_multicast() && add_route) {
             //TODO remove this and try modifying routes getactivelabel
             //nh.label = route->GetActivePath()->GetActiveLabel(); 
             nh.label = route->GetActivePath()->vxlan_id();
+        } else {
+            nh.label = 0;
         }
         nh.tunnel_encapsulation_list.tunnel_encapsulation.push_back("vxlan");
     }

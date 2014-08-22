@@ -30,6 +30,7 @@ TcpServer::TcpServer(EventManager *evm)
 TcpServer::~TcpServer() {
     assert(acceptor_ == NULL);
     assert(session_ref_.empty());
+    assert(session_map_.empty());
 }
 
 void TcpServer::SetName(Endpoint local_endpoint) {
@@ -270,6 +271,14 @@ void TcpServer::AcceptHandlerInternal(TcpServerPtr server,
         goto done;
     }
 
+    if (acceptor_ == NULL) {
+        TCP_SESSION_LOG_DEBUG(session, TCP_DIR_IN,
+                              "Session accepted after server shutdown: "
+                                  << remote.address().to_string()
+                                  << ":" << remote.port());
+        goto done;
+    }
+
     socket.reset(so_accept_.release());
     remote = socket->remote_endpoint(ec);
     if (ec) {
@@ -298,14 +307,6 @@ void TcpServer::AcceptHandlerInternal(TcpServerPtr server,
                                  << remote.address().to_string()
                                  << ":" << remote.port());
 
-    if (acceptor_ == NULL) {
-        TCP_SESSION_LOG_DEBUG(session, TCP_DIR_IN,
-                              "Session accepted after server shutdown: "
-                                  << remote.address().to_string()
-                                  << ":" << remote.port());
-        goto done;
-    }
-
     {
         tbb::mutex::scoped_lock lock(mutex_);
         session_ref_.insert(session);
@@ -316,7 +317,7 @@ void TcpServer::AcceptHandlerInternal(TcpServerPtr server,
         DeleteSession(session.get());
         goto done;
     }
-    
+
     if (session->read_on_connect_) {
         session->AsyncReadStart();
     }

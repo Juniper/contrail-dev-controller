@@ -512,8 +512,7 @@ protected:
         MulticastGroupObject *obj;
 	ASSERT_TRUE(nh != NULL);
 	ASSERT_TRUE(nh->GetType() == NextHop::COMPOSITE);
-	obj = MulticastHandler::GetInstance()->FindGroupObject(cnh->vrf_name(),
-			cnh->GetGrpAddr());
+	obj = MulticastHandler::GetInstance()->FindGroupObject("vrf1", addr);
 	WAIT_FOR(1000, 1000, (obj->GetSourceMPLSLabel() != 0));
     WAIT_FOR(1000, 10000, (cnh->ComponentNHCount() == 2));
     const CompositeNH *intf_cnh = static_cast<const CompositeNH *>(cnh->GetNH(1));
@@ -542,8 +541,7 @@ protected:
 	ASSERT_TRUE(nh != NULL);
 	ASSERT_TRUE(nh->GetType() == NextHop::COMPOSITE);
 	cnh = static_cast<CompositeNH *>(nh);
-	obj = MulticastHandler::GetInstance()->FindGroupObject(cnh->vrf_name(),
-			cnh->GetGrpAddr());
+	obj = MulticastHandler::GetInstance()->FindGroupObject("vrf1", addr);
 	WAIT_FOR(1000, 1000, (obj->GetSourceMPLSLabel() != 0));
     ASSERT_TRUE(cnh->ComponentNHCount() == 2);
     intf_cnh = static_cast<const CompositeNH *>(cnh->GetNH(1));

@@ -2,8 +2,11 @@
  * Copyright (c) 2013 Juniper Networks, Inc. All rights reserved.
  */
 
+#include <cmn/agent_factory.h>
 #include <cmn/agent_cmn.h>
+#include <cmn/agent_param.h>
 #include <db/db.h>
+#include <base/task_trigger.h>
 #include <sandesh/sandesh_types.h>
 #include <sandesh/sandesh_constants.h>
 #include <sandesh/sandesh.h>
@@ -25,9 +28,11 @@
 #include <oper/global_vrouter.h>
 #include <oper/agent_route_encap.h>
 #include <oper/path_preference.h>
+#include <filter/acl.h>
+#include <oper/ifmap_dependency_manager.h>
 #include <base/task_trigger.h>
+#include <oper/namespace_manager.h>
 
-OperDB *OperDB::singleton_ = NULL;
 SandeshTraceBufferPtr OperDBTraceBuf(SandeshTraceBufferCreate("Oper DB", 5000));
 
 void OperDB::CreateDBTables(DB *db) {
@@ -47,6 +52,8 @@ void OperDB::CreateDBTables(DB *db) {
     DB::RegisterFactory("db.mirror_table.0", &MirrorTable::CreateTable);
     DB::RegisterFactory("db.vrf_assign.0", &VrfAssignTable::CreateTable);
     DB::RegisterFactory("db.vxlan.0", &VxLanTable::CreateTable);
+    DB::RegisterFactory("db.service-instance.0",
+                        &ServiceInstanceTable::CreateTable);
 
     InterfaceTable *intf_table;
     intf_table = static_cast<InterfaceTable *>(db->CreateTable("db.interface.0"));
@@ -110,8 +117,7 @@ void OperDB::CreateDBTables(DB *db) {
     agent_->set_vrf_assign_table(vassign_table);
     vassign_table->set_agent(agent_);
 
-    DomainConfig *domain_config_table = new DomainConfig();
-    agent_->set_domain_config_table(domain_config_table);
+    domain_config_.reset(new DomainConfig());
 
     VxLanTable *vxlan_table;
     vxlan_table = static_cast<VxLanTable *>(db->CreateTable("db.vxlan.0"));
@@ -124,9 +130,28 @@ void OperDB::CreateDBTables(DB *db) {
     route_preference_module_ =
         std::auto_ptr<PathPreferenceModule>(new PathPreferenceModule(agent_));
     route_preference_module_->Init();
+
+    ServiceInstanceTable *si_table =
+        static_cast<ServiceInstanceTable *>(
+            db->CreateTable("db.service-instance.0"));
+    agent_->set_service_instance_table(si_table);
+    si_table->Initialize(agent_->cfg()->cfg_graph(), dependency_manager_.get());
 }
 
 void OperDB::Init() {
+    dependency_manager_->Initialize();
+
+    // Unit tests may not initialize the agent configuration parameters.
+    std::string netns_cmd;
+    int netns_workers = -1;
+    int netns_timeout = -1;
+    if (agent_->params()) {
+        netns_cmd = agent_->params()->si_netns_command();
+        netns_workers = agent_->params()->si_netns_workers();
+        netns_timeout = agent_->params()->si_netns_timeout();
+    }
+    namespace_manager_->Initialize(agent_->db(), agent_->agent_signal(),
+                                   netns_cmd, netns_workers, netns_timeout);
 }
 
 void OperDB::RegisterDBClients() {
@@ -134,59 +159,40 @@ void OperDB::RegisterDBClients() {
     global_vrouter_.get()->CreateDBClients();
 }
 
-OperDB::OperDB(Agent *agent) : agent_(agent) {
-    assert(singleton_ == NULL);
-    singleton_ = this;
+OperDB::OperDB(Agent *agent)
+        : agent_(agent),
+          dependency_manager_(
+              AgentObjectFactory::Create<IFMapDependencyManager>(
+                  agent->db(), agent->cfg()->cfg_graph())),
+          namespace_manager_(
+              AgentObjectFactory::Create<NamespaceManager>(
+                  agent->event_manager())) {
 }
 
 OperDB::~OperDB() {
 }
 
 void OperDB::Shutdown() {
+    namespace_manager_->Terminate();
+    dependency_manager_->Terminate();
     global_vrouter_.reset();
 
-    agent_->db()->RemoveTable(agent_->vn_table());
-    delete agent_->vn_table();
-    agent_->set_vn_table(NULL);
-
-    agent_->db()->RemoveTable(agent_->vm_table());
-    delete agent_->vm_table();
-    agent_->set_vm_table(NULL);
-
-    agent_->db()->RemoveTable(agent_->sg_table());
-    delete agent_->sg_table();
-    agent_->set_sg_table(NULL);
-
-    agent_->db()->RemoveTable(agent_->interface_table());
-    delete agent_->interface_table();
-    agent_->set_interface_table(NULL);
-
-    agent_->db()->RemoveTable(agent_->vrf_table());
-    delete agent_->vrf_table();
-    agent_->set_vrf_table(NULL);
-
-    agent_->db()->RemoveTable(agent_->mpls_table());
-    delete agent_->mpls_table();
-    agent_->set_mpls_table(NULL);
-
-    agent_->db()->RemoveTable(agent_->nexthop_table());
-    delete agent_->nexthop_table();
-    agent_->set_nexthop_table(NULL);
-
-    agent_->db()->RemoveTable(agent_->mirror_table());
-    delete agent_->mirror_table();
-    agent_->set_mirror_table(NULL);
-
-    agent_->db()->RemoveTable(agent_->vrf_assign_table());
-    delete agent_->vrf_assign_table();
-    agent_->set_vrf_assign_table(NULL);
-
-    agent_->db()->RemoveTable(agent_->vxlan_table());
-    delete agent_->vxlan_table();
-    agent_->set_vxlan_table(NULL);
-
-    delete agent_->domain_config_table();
-    agent_->set_domain_config_table(NULL);
+#if 0
+    agent_->interface_table()->Clear();
+    agent_->nexthop_table()->Clear();
+    agent_->vrf_table()->Clear();
+    agent_->vn_table()->Clear();
+    agent_->sg_table()->Clear();
+    agent_->vm_table()->Clear();
+    agent_->mpls_table()->Clear();
+    agent_->acl_table()->Clear();
+    agent_->mirror_table()->Clear();
+    agent_->vrf_assign_table()->Clear();
+    agent_->vxlan_table()->Clear();
+    agent_->service_instance_table()->Clear();
+#endif
+    domain_config_.reset(NULL);
+    route_preference_module_->Shutdown();
 }
 
 void OperDB::DeleteRoutes() {

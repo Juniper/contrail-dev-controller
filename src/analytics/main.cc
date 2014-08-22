@@ -39,6 +39,8 @@
 using namespace std;
 using namespace boost::asio::ip;
 namespace opt = boost::program_options;
+using process::ConnectionStateManager;
+using process::GetProcessStateCb;
 
 static TaskTrigger *collector_info_trigger;
 static Timer *collector_info_log_timer;
@@ -131,38 +133,6 @@ bool CollectorSummaryLogger(Collector *collector, const string & hostname,
     return true;
 }
 
-void CollectorGetConnectivityStatus(const std::vector<ConnectionInfo> &cinfos,
-    ConnectivityStatus::type &cstatus, std::string &message) {
-    // Determine if the number of connections is expected:
-    // 1. Collector client
-    // 2. Redis From
-    // 3. Redis To
-    // 4. Discovery Collector Publish
-    // 5. Database global
-    size_t num_conns(cinfos.size());
-    if (num_conns != 5) {
-        cstatus = ConnectivityStatus::NON_FUNCTIONAL;
-        message = "Number of connections:" + integerToString(num_conns) + 
-            ", Expected: 5";
-        return;
-    }   
-    std::string cdown(g_connection_info_constants.ConnectionStatusNames.
-        find(ConnectionStatus::DOWN)->second);
-    // Iterate to determine process connectivity status
-    for (std::vector<ConnectionInfo>::const_iterator it = cinfos.begin();
-         it != cinfos.end(); it++) {
-        const ConnectionInfo &cinfo(*it);
-        const std::string &conn_status(cinfo.get_status());
-        if (conn_status == cdown) {
-            cstatus = ConnectivityStatus::NON_FUNCTIONAL;
-            message = cinfo.get_type() + ":" + cinfo.get_name();
-            return;
-        }
-    }
-    cstatus = ConnectivityStatus::FUNCTIONAL;
-    return;  
-}
-
 bool CollectorInfoLogger(VizSandeshContext &ctx) {
     VizCollector *analytics = ctx.Analytics();
 
@@ -228,7 +198,7 @@ static void ShutdownServers(VizCollector *viz_collector,
     TimerManager::DeleteTimer(collector_info_log_timer);
     delete collector_info_trigger;
 
-    ConnectionStateManager<AnalyticsProcessStatusUVE, AnalyticsProcessStatus>::
+    ConnectionStateManager<NodeStatusUVE, NodeStatus>::
         GetInstance()->Shutdown();
     VizCollector::WaitForIdle();
     Sandesh::Uninit();
@@ -266,12 +236,11 @@ int main(int argc, char *argv[])
     }
 
     Collector::SetProgramName(argv[0]);
-    if (options.log_file() == "<stdout>") {
-        LoggingInit();
-    } else {
-        LoggingInit(options.log_file(), options.log_file_size(),
-                    options.log_files_count());
-    }
+    Module::type module = Module::COLLECTOR;
+    std::string module_id(g_vns_constants.ModuleNames.find(module)->second);
+    LoggingInit(options.log_file(), options.log_file_size(),
+                options.log_files_count(), options.use_syslog(),
+                options.syslog_facility(), module_id);
 
     vector<string> cassandra_servers(options.cassandra_server_list());
     vector<string> cassandra_ips;
@@ -325,10 +294,8 @@ int main(int argc, char *argv[])
     analytics.Init();
 
     VizSandeshContext vsc(&analytics);
-    Module::type module = Module::COLLECTOR;
     NodeType::type node_type =
         g_vns_constants.Module2NodeType.find(module)->second;
-    std::string module_id(g_vns_constants.ModuleNames.find(module)->second);
     std::string instance_id(g_vns_constants.INSTANCE_ID_DEFAULT);
     Sandesh::InitCollector(
             module_id,
@@ -372,10 +339,16 @@ int main(int argc, char *argv[])
     }
              
     CpuLoadData::Init();
-    ConnectionStateManager<AnalyticsProcessStatusUVE, AnalyticsProcessStatus>::
+    // Determine if the number of connections is expected:
+    // 1. Collector client
+    // 2. Redis From
+    // 3. Redis To
+    // 4. Discovery Collector Publish
+    // 5. Database global
+    ConnectionStateManager<NodeStatusUVE, NodeStatus>::
         GetInstance()->Init(*evm.io_service(),
             analytics.name(), module_id, instance_id,
-            boost::bind(&CollectorGetConnectivityStatus, _1, _2, _3));
+            boost::bind(&GetProcessStateCb, _1, _2, _3, 5));
     collector_info_trigger =
         new TaskTrigger(boost::bind(&CollectorInfoLogger, vsc),
                     TaskScheduler::GetInstance()->GetTaskId("vizd::Stats"), 0);

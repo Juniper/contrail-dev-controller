@@ -42,7 +42,7 @@ AnalyticsEnv.Prepend(LIBS=['cpuinfo',
         'cdb',
         'ruleparser',
         'xml',
-        'connection_info',
+        'process_info',
         'base',
         'io',
         'sandeshvns',
@@ -122,13 +122,14 @@ parser_util_obj = AnalyticsEnv_boost_no_unreach.Object('parser_util.o', 'parser_
 vizd_sources = ['viz_collector.cc', 'ruleeng.cc', 'collector.cc',
                 'vizd_table_desc.cc', 'viz_message.cc','generator.cc',
                 'redis_connection.cc', 'redis_processor_vizd.cc',
-                'options.cc']
+                'options.cc', 'stat_walker.cc']
 
 RedisLuaBuild(AnalyticsEnv, 'seqnum')
 RedisLuaBuild(AnalyticsEnv, 'delrequest')
 RedisLuaBuild(AnalyticsEnv, 'uveupdate')
 RedisLuaBuild(AnalyticsEnv, 'uveupdate_st')
 RedisLuaBuild(AnalyticsEnv, 'uvedelete')
+RedisLuaBuild(AnalyticsEnv, 'flushuves')
 
 
 AnalyticsEnv.GenerateBuildInfoCode(

@@ -1,34 +1,22 @@
 /*
  * Copyright (c) 2013 Juniper Networks, Inc. All rights reserved.
  */
-
-#include <iostream>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-#include <sys/stat.h>
+#include <cmn/agent_cmn.h>
 
 #include <boost/property_tree/xml_parser.hpp>
-#include <boost/uuid/string_generator.hpp>
-
-#include <db/db.h>
 #include <db/db_graph.h>
-#include <base/logging.h>
 
-#include <vnc_cfg_types.h> 
+#include <cmn/agent.h>
+#include <cmn/agent_db.h>
+
 #include <bgp_schema_types.h>
-#include <pugixml/pugixml.hpp>
-#include <sandesh/sandesh_types.h>
-#include <sandesh/sandesh.h>
-#include <sandesh/sandesh_trace.h>
 
-#include <cmn/agent_cmn.h>
 #include <cfg/cfg_init.h>
 #include <cfg/cfg_interface.h>
 #include <cfg/cfg_interface_listener.h>
 #include <cfg/cfg_filter.h>
 #include <cfg/cfg_mirror.h>
+#include <cfg/cfg_listener.h>
 #include <cfg/discovery_agent.h>
 
 #include <oper/vn.h>
@@ -41,9 +29,11 @@
 #include <oper/route_common.h>
 #include <oper/operdb_init.h>
 #include <oper/global_vrouter.h>
+#include <oper/service_instance.h>
 
 #include <vgw/cfg_vgw.h>
 #include <vgw/vgw.h>
+#include <filter/acl.h>
 
 using namespace std;
 using namespace autogen;
@@ -55,10 +45,10 @@ void IFMapAgentSandeshInit(DB *db);
 
 SandeshTraceBufferPtr CfgTraceBuf(SandeshTraceBufferCreate("Config", 100));
 
-AgentConfig::AgentConfig(Agent *agent) : agent_(agent) {
+AgentConfig::AgentConfig(Agent *agent)
+        : agent_(agent),
+          cfg_listener_(new CfgListener(agent->db())) {
     cfg_filter_ = std::auto_ptr<CfgFilter>(new CfgFilter(this));
-
-    cfg_listener_ = std::auto_ptr<CfgListener>(new CfgListener(this));
 
     cfg_graph_ = std::auto_ptr<DBGraph>(new DBGraph());
     cfg_interface_client_ = std::auto_ptr<InterfaceCfgClient>
@@ -121,6 +111,9 @@ void AgentConfig::RegisterDBClients(DB *db) {
                             VirtualMachineInterface::ID_PERMS);
     cfg_listener_->Register("access-control-list", agent_->acl_table(),
                             AccessControlList::ID_PERMS);
+    cfg_listener_->Register("service-instance",
+                            agent_->service_instance_table(),
+                            ::autogen::ServiceInstance::ID_PERMS);
     cfg_listener_->Register("routing-instance", agent_->vrf_table(), -1);
     cfg_listener_->Register("virtual-network-network-ipam", 
                             boost::bind(&VnTable::IpamVnSync, _1), -1);

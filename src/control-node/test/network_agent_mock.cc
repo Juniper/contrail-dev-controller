@@ -41,12 +41,13 @@ const char *XmppDocumentMock::kPubSubNS =
 class NetworkAgentMock::AgentPeer : public BgpXmppChannel {
 public:
     AgentPeer(NetworkAgentMock *parent, XmppChannel *channel)
-        : BgpXmppChannel(channel, NULL, NULL), parent_(parent) {
+        : BgpXmppChannel(channel), parent_(parent) {
         channel->RegisterReceive(xmps::CONFIG,
             boost::bind(&NetworkAgentMock::AgentPeer::ReceiveConfigUpdate,
                         this, _1));
     }
     virtual ~AgentPeer() {
+        channel_->UnRegisterReceive(xmps::CONFIG);
         set_deleted(true);
         Close();
     }
@@ -574,24 +575,23 @@ NetworkAgentMock::~NetworkAgentMock() {
     tbb::mutex::scoped_lock lock(mutex_);
     down_ = true;
     ClearInstances();
-
-    AgentPeer *peer = peer_.get();
-    peer_.release();
-
-    if (peer) {
-        delete peer;
-    }
+    peer_.reset();
     assert(!client_);
+}
+
+bool NetworkAgentMock::ConnectionDestroyed() const {
+    return (client_->ConnectionCount() == 0);
 }
 
 void NetworkAgentMock::Delete() {
     AgentPeer *peer = peer_.get();
-    peer_.release();
-    if (peer) {
-        delete peer;
-    }
+    peer_.reset();
     client_->Shutdown();
+    client_->WaitForEmpty();
     task_util::WaitForIdle();
+    for (int idx = 0; idx < 5000 && !ConnectionDestroyed(); ++idx)
+        usleep(1000);
+    assert(ConnectionDestroyed());
     TcpServerManager::DeleteServer(client_);
     client_ = NULL;
 }
@@ -633,17 +633,19 @@ void NetworkAgentMock::SessionDown() {
     tbb::mutex::scoped_lock lock(mutex_);
     down_ = true;
     ClearInstances();
-    peer_.reset(NULL);
-    XmppConfigData *data = new XmppConfigData();
-    client_->ConfigUpdate(data);
+    XmppConnection *connection =
+        client_->FindConnection("network-control@contrailsystems.com");
+    if (connection)
+        connection->SetAdminState(true);
 }
 
 void NetworkAgentMock::SessionUp() {
     tbb::mutex::scoped_lock lock(mutex_);
-    XmppConfigData *data = new XmppConfigData();
-    data->AddXmppChannelConfig(CreateXmppConfig());
-    client_->ConfigUpdate(data);
     down_ = false;
+    XmppConnection *connection =
+        client_->FindConnection("network-control@contrailsystems.com");
+    if (connection)
+        connection->SetAdminState(false);
 }
 
 //

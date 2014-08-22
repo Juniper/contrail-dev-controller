@@ -31,6 +31,9 @@ using std::string;
 using boost::shared_ptr;
 using boost::assign::list_of;
 using boost::system::error_code;
+using process::ConnectionState;
+using process::ConnectionType;
+using process::ConnectionStatus;
 
 class OpServerProxy::OpServerImpl {
     public:
@@ -133,10 +136,8 @@ class OpServerProxy::OpServerImpl {
             string node_type = Sandesh::node_type();
             
             if (!started_) {
-                RedisProcessorExec::SyncDeleteUVEs(redis_uve_.GetIp(), 
-                                                   redis_uve_.GetPort(),
-                                                   source, node_type,
-                                                   module, instance_id);
+                RedisProcessorExec::FlushUVEs(redis_uve_.GetIp(),
+                                              redis_uve_.GetPort());
                 started_=true;
             }
             if (collector_) 

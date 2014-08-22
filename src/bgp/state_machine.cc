@@ -380,6 +380,12 @@ struct Idle : sc::state<Idle, StateMachine> {
         sc::custom_reaction<EvTcpPassiveOpen>
     > reactions;
 
+    // Increment the flap count after setting the state.  This is friendly to
+    // tests that first wait for the flap count to go up and then wait for the
+    // state to reach ESTABLISHED again.  Incrementing the flap count before
+    // setting the state could cause tests to break if they look at the old
+    // state (which is still ESTABLISHED) and assume that it's the new state.
+    // This could also be solved by using a mutex but it's not really needed.
     Idle(my_context ctx) : my_base(ctx) {
         StateMachine *state_machine = &context<StateMachine>();
         BgpPeer *peer = state_machine->peer();
@@ -390,7 +396,10 @@ struct Idle : sc::state<Idle, StateMachine> {
         state_machine->DeleteSession(session);
         state_machine->CancelOpenTimer();
         state_machine->CancelIdleHoldTimer();
+        bool flap = (state_machine->get_state() == StateMachine::ESTABLISHED);
         state_machine->set_state(StateMachine::IDLE);
+        if (flap)
+            peer->increment_flap_count();
     }
 
     ~Idle() {
@@ -1114,11 +1123,6 @@ template <typename Ev, int code>
 void StateMachine::OnIdle(const Ev &event) {
     // Release all resources.
     SendNotificationAndClose(peer_->session(), code);
-
-    bool flap = (state_ == ESTABLISHED);
-    if (flap)
-        peer()->increment_flap_count();
-    set_state(IDLE);
 }
 
 template <typename Ev>
@@ -1126,11 +1130,6 @@ void StateMachine::OnIdleCease(const Ev &event) {
     // Release all resources.
     SendNotificationAndClose(
         peer_->session(), BgpProto::Notification::Cease, event.subcode);
-
-    bool flap = (state_ == ESTABLISHED);
-    if (flap)
-        peer()->increment_flap_count();
-    set_state(IDLE);
 }
 
 //
@@ -1141,21 +1140,11 @@ template <typename Ev, int code>
 void StateMachine::OnIdleError(const Ev &event) {
     // Release all resources.
     SendNotificationAndClose(event.session, code, event.subcode, event.data);
-
-    bool flap = (state_ == ESTABLISHED);
-    if (flap)
-        peer()->increment_flap_count();
-    set_state(IDLE);
 }
 
 void StateMachine::OnIdleNotification(const fsm::EvBgpNotification &event) {
     // Release all resources.
     SendNotificationAndClose(peer()->session(), 0);
-
-    bool flap = (state_ == ESTABLISHED);
-    if (flap)
-        peer()->increment_flap_count();
-    set_state(IDLE);
     set_last_notification_in(event.msg->error, event.msg->subcode,
         event.Name());
 }
@@ -1413,13 +1402,15 @@ void StateMachine::OnSessionEvent(
 
 //
 // Receive TCP Passive Open.
-// Set the observer right away, so that we don't miss any events on the socket
-// that happen before the state machine has processed EvTcpPassiveOpen event.
+// Set the observer and start async read on the session. Note that we disable
+// read on connect when we accept passive sessions.
 //
 bool StateMachine::PassiveOpen(BgpSession *session) {
+    Enqueue(fsm::EvTcpPassiveOpen(session));
     session->set_observer(boost::bind(&StateMachine::OnSessionEvent,
         this, _1, _2));
-    return Enqueue(fsm::EvTcpPassiveOpen(session));
+    session->AsyncReadStart();
+    return true;
 }
 
 //
@@ -1434,6 +1425,7 @@ void StateMachine::OnMessage(BgpSession *session, BgpProto::BgpMessage *msg) {
         peer->inc_rx_open();
         if (int subcode = open_msg->Validate(peer)) {
             Enqueue(fsm::EvBgpOpenError(session, subcode));
+            peer->inc_rx_open_error();
         } else {
             Enqueue(fsm::EvBgpOpen(session, open_msg));
             msg = NULL;
@@ -1448,7 +1440,8 @@ void StateMachine::OnMessage(BgpSession *session, BgpProto::BgpMessage *msg) {
     }
     case BgpProto::NOTIFICATION: {
         BgpPeer *peer = session->Peer();
-        if (peer) peer->inc_rx_notification();
+        if (peer)
+            peer->inc_rx_notification();
         Enqueue(fsm::EvBgpNotification(session,
                 static_cast<BgpProto::Notification *>(msg)));
         msg = NULL;
@@ -1459,12 +1452,14 @@ void StateMachine::OnMessage(BgpSession *session, BgpProto::BgpMessage *msg) {
         BgpPeer *peer = NULL;
         if (session) 
             peer = session->Peer();
-        if (peer) peer->inc_rx_update();
+        if (peer)
+            peer->inc_rx_update();
 
         std::string data;
         int subcode;
         if (peer && (subcode = update->Validate(peer, data))) {
             Enqueue(fsm::EvBgpUpdateError(session, subcode, data));
+            peer->inc_rx_update_error();
         } else {
             Enqueue(fsm::EvBgpUpdate(session, update));
             msg = NULL;

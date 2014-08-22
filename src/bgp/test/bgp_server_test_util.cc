@@ -32,6 +32,8 @@ using namespace boost::asio;
 using namespace boost;
 using namespace std;
 
+int StateMachineTest::hold_time_msecs_ = 0;
+
 //
 // This is a static data structure that maps client tcp end points to configured
 // bgp peers. Using this, we can form multiple bgp peering sessions between
@@ -376,7 +378,7 @@ BgpNeighborConfig::BgpNeighborConfig(const BgpInstanceConfig *instance,
                                      const string &remote_name,
                                      const string &local_name,
                                      const autogen::BgpRouter *router)
-        : instance_(instance), name_(remote_name) {
+        : instance_(instance), name_(remote_name), local_as_(0) {
     const autogen::BgpRouterParams &params = router->parameters();
     peer_config_ = params;
 }

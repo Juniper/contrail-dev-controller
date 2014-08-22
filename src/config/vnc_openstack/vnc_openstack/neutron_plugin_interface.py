@@ -10,6 +10,8 @@ import logging
 from pprint import pformat
 import requests
 import sys
+import string
+import ConfigParser
 
 from vnc_api import vnc_api
 from neutron_plugin_db import DBInterface
@@ -42,7 +44,18 @@ class NeutronPluginInterface(object):
         self._auth_user = conf_sections.get('KEYSTONE', 'admin_user')
         self._auth_passwd = conf_sections.get('KEYSTONE', 'admin_password')
         self._auth_tenant = conf_sections.get('KEYSTONE', 'admin_tenant_name')
-        self._multi_tenancy = None
+
+        try:
+            exts_enabled = conf_sections.getboolean('NEUTRON',
+                'contrail_extensions_enabled')
+        except (ConfigParser.NoSectionError, ConfigParser.NoOptionError):
+            exts_enabled = True
+        self._contrail_extensions_enabled = exts_enabled
+
+        try:
+            self._multi_tenancy = conf_sections.get('DEFAULTS', 'multi_tenancy')
+        except ConfigParser.NoOptionError:
+            self._multi_tenancy = False
         self._vnc_lib = None
         self._cfgdb = None
         self._cfgdb_map = {}
@@ -67,11 +80,13 @@ class NeutronPluginInterface(object):
         """
         if self._cfgdb is None:
             # Initialize connection to DB and add default entries
+            exts_enabled = self._contrail_extensions_enabled
             self._cfgdb = DBInterface(self._auth_user,
                                       self._auth_passwd,
                                       self._auth_tenant,
                                       self._vnc_api_ip,
-                                      self._vnc_api_port)
+                                      self._vnc_api_port,
+                                      contrail_extensions_enabled=exts_enabled)
             self._cfgdb.manager = self
     #end _connect_to_db
 
@@ -96,7 +111,7 @@ class NeutronPluginInterface(object):
     def _get_requests_data(self):
         ctype = bottle.request.headers['content-type']
         try:
-            if ctype == 'application/json':
+            if 'application/json' in ctype:
                 req = bottle.request.json
                 return req['context'], req['data']
         except Exception as e:
@@ -210,6 +225,29 @@ class NeutronPluginInterface(object):
         elif context['operation'] == 'READCOUNT':
             return self.plugin_get_networks_count(context, network)
 
+    def _make_subnet_dict(self, subnet):
+        res = {'id': subnet['id'],
+               'name': subnet['name'],
+               'tenant_id': subnet['tenant_id'],
+               'network_id': subnet['network_id'],
+               'ip_version': subnet['ip_version'],
+               'cidr': subnet['cidr'],
+               'allocation_pools': [{'start': pool['first_ip'],
+                                     'end': pool['last_ip']}
+                                    for pool in subnet['allocation_pools']],
+               'gateway_ip': subnet['gateway_ip'],
+               'enable_dhcp': subnet['enable_dhcp'],
+               'ipv6_ra_mode': subnet['ipv6_ra_mode'],
+               'ipv6_address_mode': subnet['ipv6_address_mode'],
+               'dns_nameservers': [dns['address']
+                                   for dns in subnet['dns_nameservers']],
+               'host_routes': [{'destination': route['destination'],
+                                'nexthop': route['nexthop']}
+                               for route in subnet['routes']],
+               'shared': subnet['shared']
+               }
+        return res
+
     # Subnet API Handling
     def plugin_get_subnet(self, context, subnet):
         """
@@ -221,7 +259,7 @@ class NeutronPluginInterface(object):
         try:
             cfgdb = self._get_user_cfgdb(context)
             subnet_info = cfgdb.subnet_read(subnet['id'])
-            return subnet_info
+            return self._make_subnet_dict(subnet_info)
         except Exception as e:
             cgitb.Hook(format="text").handle(sys.exc_info())
             raise e
@@ -233,8 +271,8 @@ class NeutronPluginInterface(object):
 
         try:
             cfgdb = self._get_user_cfgdb(context)
-            net_info = cfgdb.subnet_create(subnet['resource'])
-            return net_info
+            subnet_info = cfgdb.subnet_create(subnet['resource'])
+            return self._make_subnet_dict(subnet_info)
         except Exception as e:
             cgitb.Hook(format="text").handle(sys.exc_info())
             raise e
@@ -246,9 +284,9 @@ class NeutronPluginInterface(object):
 
         try:
             cfgdb = self._get_user_cfgdb(context)
-            net_info = cfgdb.subnet_update(subnet['id'],
-                                           subnet['resource'])
-            return net_info
+            subnet_info = cfgdb.subnet_update(subnet['id'],
+                                              subnet['resource'])
+            return self._make_subnet_dict(subnet_info)
         except Exception as e:
             cgitb.Hook(format="text").handle(sys.exc_info())
             raise e
@@ -277,7 +315,7 @@ class NeutronPluginInterface(object):
         try:
             cfgdb = self._get_user_cfgdb(context)
             subnets_info = cfgdb.subnets_list(context, filters)
-            return json.dumps(subnets_info)
+            return json.dumps([self._make_subnet_dict(i) for i in subnets_info])
         except Exception as e:
             cgitb.Hook(format="text").handle(sys.exc_info())
             raise e

@@ -10,8 +10,13 @@
 #include <cmn/agent_cmn.h>
 #include <cmn/agent.h>
 #include <cmn/agent_param.h>
+#include <cmn/agent_db.h>
+
+#include <cfg/cfg_init.h>
+#include <cfg/cfg_listener.h>
 #include <cfg/cfg_interface_listener.h>
 #include <cfg/cfg_interface.h>
+
 #include <oper/agent_types.h>
 #include <oper/interface_common.h>
 #include <oper/vm.h>
@@ -156,8 +161,9 @@ void InterfaceCfgClient::Init() {
 }
 
 void InterfaceCfgClient::Shutdown() {
-    DBTableBase *cfg_db = IFMapTable::FindTable(agent_cfg_->agent()->db(), 
+    IFMapTable *cfg_db = IFMapTable::FindTable(agent_cfg_->agent()->db(), 
                                                 "virtual-machine-interface");
+    DBTable::DBStateClear(cfg_db, cfg_listener_id_);
     cfg_db->Unregister(cfg_listener_id_);
 
     DBTableBase *cfg_route_db = IFMapTable::FindTable(agent_cfg_->agent()->db(), 

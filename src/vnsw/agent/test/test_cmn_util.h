@@ -113,6 +113,8 @@ void VmDelReq(int id);
 void AclAddReq(int id);
 void AclDelReq(int id);
 void AclAddReq(int id, int ace_id, bool drop);
+void DeleteRoute(const char *vrf, const char *ip, uint8_t plen);
+void DeleteRoute(const char *vrf, const char *ip);
 bool RouteFind(const string &vrf_name, const Ip4Address &addr, int plen);
 bool RouteFind(const string &vrf_name, const string &addr, int plen);
 bool L2RouteFind(const string &vrf_name, const struct ether_addr &mac);
@@ -129,7 +131,7 @@ Layer2RouteEntry *L2RouteGet(const string &vrf_name, const struct ether_addr &ma
 bool TunnelNHFind(const Ip4Address &server_ip);
 bool TunnelNHFind(const Ip4Address &server_ip, bool policy, TunnelType::Type type);
 bool EcmpTunnelRouteAdd(const Peer *peer, const string &vrf_name, const Ip4Address &vm_ip,
-                       uint8_t plen, std::vector<ComponentNHData> &comp_nh_list,
+                       uint8_t plen, ComponentNHKeyList &comp_nh_list,
                        bool local_ecmp, const string &vn_name, const SecurityGroupList &sg,
                        const PathPreference &path_preference);
 bool Layer2TunnelRouteAdd(const Peer *peer, const string &vm_vrf, 
@@ -227,6 +229,8 @@ bool FlowGetNat(const string &vrf_name, const char *sip, const char *dip,
                 const char *nat_vrf, const char *nat_sip,
                 const char *nat_dip, uint16_t nat_sport, int16_t nat_dport,
                 int nh_id, int nat_nh_id);
+FlowEntry* FlowGet(int nh_id, std::string sip, std::string dip, uint8_t proto,
+                   uint16_t sport, uint16_t dport);
 bool FlowGet(const string &vrf_name, const char *sip, const char *dip,
              uint8_t proto, uint16_t sport, uint16_t dport, bool rflow,
              std::string svn, std::string dvn, uint32_t hash_id, 
@@ -314,7 +318,6 @@ public:
     xmps::PeerState GetPeerState() const { return xmps::READY; }
     std::string FromString() const  { return string("fake-from"); }
     const XmppConnection *connection() const { return NULL; }
-    MOCK_METHOD0(XmppChannelCleanup,void());
 
     virtual std::string LastStateName() const {
         return "";

@@ -5,9 +5,7 @@
 #ifndef vnsw_agent_sandesh_h_
 #define vnsw_agent_sandesh_h_
 
-#include <db/db_table_walker.h>
-#include <sandesh/sandesh_types.h>
-#include <sandesh/sandesh.h>
+#include <cmn/agent_cmn.h>
 
 class VrfEntry;
 class DBEntryBase;
@@ -199,6 +197,16 @@ private:
 class AgentVxLanSandesh : public AgentSandesh {
 public:
     AgentVxLanSandesh(std::string context) : AgentSandesh(context, "") {}
+
+private:
+    DBTable *AgentGetTable();
+    void Alloc();
+};
+
+class AgentServiceInstanceSandesh : public AgentSandesh {
+public:
+    AgentServiceInstanceSandesh(std::string context, std::string uuid)
+        : AgentSandesh(context, uuid) {}
 
 private:
     DBTable *AgentGetTable();

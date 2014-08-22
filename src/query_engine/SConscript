@@ -28,7 +28,7 @@ env.Prepend(LIBS=[  'gendb',
                     'curl',
                     'thrift',
                     'hiredis',
-                    'connection_info',
+                    'process_info',
                     'io',
                     'base',
                     'sandeshvns',
@@ -125,6 +125,7 @@ qed_except_sources = [
     'select_fs_query.cc',
     'set_operation.cc',
     'stats_select.cc',
+    'stats_query.cc',
     'where_query.cc',
 ]
 

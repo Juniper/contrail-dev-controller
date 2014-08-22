@@ -118,6 +118,29 @@ struct McastData {
     6: optional i16 vlan_tag
 }
 
+struct FabricCompositeData {
+    1: string type;
+    2: optional string sip;
+    3: optional string dip;
+    4: optional list <McastData> mc_list;  //Multicast sub nh list
+}
+
+struct L2CompositeData {
+    1: string type;
+    2: optional string sip;
+    3: optional string dip;
+    4: optional FabricCompositeData fabric_comp; //Multicast sub nh list
+    5: optional list <McastData> mc_list; //Multicast sub nh list
+}
+
+struct L3CompositeData {
+    1: string type;
+    2: optional string sip;
+    3: optional string dip;
+    4: optional FabricCompositeData fabric_comp;  //Multicast sub nh list
+    5: optional list <McastData> mc_list; //Multicast sub nh list
+}
+
 struct MulticastCompositeData {
     1: string type;
     2: optional string sip;
@@ -152,12 +175,20 @@ struct NhSandeshData {
    15: optional i16 vlan_tag;         // VLAN Tag for the interface
    16: optional string tunnel_type;   // Tunnel type : MPLSoGRE, MPLSoUDP, ...
    17: optional string local_ecmp;    //Is Nexthop for local ecmp 
-   18: optional MulticastCompositeData fabric_comp;  //Multicast sub nh list
-   19: optional MulticastFamilyCompositeData l2_comp;  //Multicast sub nh list
-   20: optional MulticastFamilyCompositeData l3_comp;  //Multicast sub nh list
+   18: optional FabricCompositeData fabric_comp;  //Multicast sub nh list
+   19: optional L2CompositeData l2_comp;  //Multicast sub nh list
+   20: optional L3CompositeData l3_comp;  //Multicast sub nh list
    21: i32 nh_index;
    22: optional MulticastCompositeData interface_comp;  //Multicast sub nh list
    23: optional MulticastCompositeData evpn_comp;  //Multicast sub nh list
+}
+
+struct NamespaceStateSandeshData {
+    1: i32 pid;
+    2: i32 status;
+    3: string cmd; 
+    4: string status_type;
+    5: optional string errors;
 }
 
 struct PathPreferenceSandeshData {
@@ -450,6 +481,16 @@ struct VxLanSandeshData {
     3: optional string vrf_name;      // vrf name from nh
 }
 
+struct ServiceInstanceSandeshData {
+    1: string uuid;
+    2: string service_type;
+    3: string virtualization_type;
+    4: string instance_id;
+    5: string vmi_inside;
+    6: string vmi_outside;
+    7: NamespaceStateSandeshData ns_state;      // NamespaceState
+}
+
 struct AceIdFlowCnt {
     1: i32 ace_id;
     2: i32 flow_cnt;
@@ -577,6 +618,14 @@ request sandesh VxLanReq {
 
 response sandesh VxLanResp {
     1: list<VxLanSandeshData> vxlan_list;
+}
+
+request sandesh ServiceInstanceReq {
+    1: string uuid;
+}
+
+response sandesh ServiceInstanceResp {
+    1: list<ServiceInstanceSandeshData> service_instance_list;
 }
 
 struct MirrorCfgSandesh {
@@ -800,6 +849,7 @@ struct ComponentNHLogInfo {
     2: i32    label; 
     3: optional string intf_name;
     4: optional string server_ip;
+    5: i32 component_nh_id;
 }
 
 struct NextHopObjectLogInfo {
@@ -820,6 +870,7 @@ struct NextHopObjectLogInfo {
     15: optional string mac;   //ArpNH MAC/VLAN NH DMAC/INTF NH DMAC
     16: optional list<ComponentNHLogInfo> nh_list;
     17: optional string tunnel_type;   // Tunnel type : MPLSoGRE, MPLSoUDP, ...
+    18: i32 id;
 }
 
 struct VxLanObjectLogInfo {

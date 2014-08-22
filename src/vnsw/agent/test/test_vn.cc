@@ -15,8 +15,8 @@
 #include <base/task.h>
 #include <io/event_manager.h>
 #include <base/util.h>
-#include <ifmap_agent_parser.h>
-#include <ifmap_agent_table.h>
+#include <ifmap/ifmap_agent_parser.h>
+#include <ifmap/ifmap_agent_table.h>
 #include <oper/vn.h>
 #include <oper/vm.h>
 #include <oper/vxlan.h>
@@ -381,18 +381,18 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_1) {
     EXPECT_TRUE(vn->GetVxLanId() == 1);
 
     string vrf_name = "vrf1";
-    struct ether_addr *vxlan_vm_mac = (struct ether_addr *)malloc(sizeof(struct ether_addr));
-    memcpy(vxlan_vm_mac, ether_aton("00:00:01:01:01:10"), sizeof(struct ether_addr));
-    struct ether_addr *vxlan_flood_mac = (struct ether_addr *)malloc(sizeof(struct ether_addr));
-    memcpy(vxlan_flood_mac, ether_aton("ff:ff:ff:ff:ff:ff"), sizeof(struct ether_addr));
+    struct ether_addr vxlan_vm_mac;
+    memcpy(&vxlan_vm_mac, ether_aton("00:00:01:01:01:10"), sizeof(struct ether_addr));
+    struct ether_addr vxlan_flood_mac;
+    memcpy(&vxlan_flood_mac, ether_aton("ff:ff:ff:ff:ff:ff"), sizeof(struct ether_addr));
     Ip4Address vm_ip = Ip4Address::from_string("1.1.1.10");
     Ip4Address subnet_ip = Ip4Address::from_string("1.1.1.255");
     Ip4Address flood_ip = Ip4Address::from_string("255.255.255.255");
     CompositeNH *cnh = NULL;
 
     //By default l2_l3 mode
-    Layer2RouteEntry *l2_uc_rt = L2RouteGet(vrf_name, *vxlan_vm_mac);
-    Layer2RouteEntry *l2_flood_rt = L2RouteGet(vrf_name, *vxlan_flood_mac);
+    Layer2RouteEntry *l2_uc_rt = L2RouteGet(vrf_name, vxlan_vm_mac);
+    Layer2RouteEntry *l2_flood_rt = L2RouteGet(vrf_name, vxlan_flood_mac);
     Inet4UnicastRouteEntry *uc_rt = RouteGet(vrf_name, vm_ip, 32);
     Inet4UnicastRouteEntry *subnet_rt = RouteGet(vrf_name, subnet_ip, 32);
     Inet4MulticastRouteEntry *flood_rt = MCRouteGet(vrf_name, flood_ip);
@@ -407,19 +407,18 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_1) {
     EXPECT_TRUE(flood_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     EXPECT_TRUE(subnet_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
-    //Fabric COMP + EVPN comp + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
+    //Interface COMP
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
     cnh = ((CompositeNH *) flood_rt->GetActiveNextHop());
-    //Fabric COMP + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
     cnh = ((CompositeNH *) subnet_rt->GetActiveNextHop());
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
 
     //Move to l2 mode
     ModifyForwardingModeVn("vn1", 1, "l2");
     client->WaitForIdle();
-    l2_uc_rt = L2RouteGet(vrf_name, *vxlan_vm_mac);
-    l2_flood_rt = L2RouteGet(vrf_name, *vxlan_flood_mac);
+    l2_uc_rt = L2RouteGet(vrf_name, vxlan_vm_mac);
+    l2_flood_rt = L2RouteGet(vrf_name, vxlan_flood_mac);
     uc_rt = RouteGet(vrf_name, vm_ip, 32);
     subnet_rt = RouteGet(vrf_name, subnet_ip, 32);
     flood_rt = MCRouteGet(vrf_name, flood_ip);
@@ -432,13 +431,13 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_1) {
     EXPECT_TRUE(l2_flood_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
     //Fabric COMP + Interface COMP + EVPN comp NH
-    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
 
     //Move to l2_l3 mode
     ModifyForwardingModeVn("vn1", 1, "l2_l3");
     client->WaitForIdle();
-    l2_uc_rt = L2RouteGet(vrf_name, *vxlan_vm_mac);
-    l2_flood_rt = L2RouteGet(vrf_name, *vxlan_flood_mac);
+    l2_uc_rt = L2RouteGet(vrf_name, vxlan_vm_mac);
+    l2_flood_rt = L2RouteGet(vrf_name, vxlan_flood_mac);
     uc_rt = RouteGet(vrf_name, vm_ip, 32);
     subnet_rt = RouteGet(vrf_name, subnet_ip, 32);
     flood_rt = MCRouteGet(vrf_name, flood_ip);
@@ -454,12 +453,12 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_1) {
     EXPECT_TRUE(subnet_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
     //Fabric COMP + EVPN comp + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
     cnh = ((CompositeNH *) flood_rt->GetActiveNextHop());
     //Fabric COMP + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
     cnh = ((CompositeNH *) subnet_rt->GetActiveNextHop());
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
 
     client->Reset();
     DelIPAM("vn1"); 
@@ -494,10 +493,10 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_2) {
     EXPECT_TRUE(vn->GetVxLanId() == 1);
 
     string vrf_name = "vrf1";
-    struct ether_addr *vxlan_vm_mac = (struct ether_addr *)malloc(sizeof(struct ether_addr));
-    memcpy(vxlan_vm_mac, ether_aton("00:00:01:01:01:10"), sizeof(struct ether_addr));
-    struct ether_addr *vxlan_flood_mac = (struct ether_addr *)malloc(sizeof(struct ether_addr));
-    memcpy(vxlan_flood_mac, ether_aton("ff:ff:ff:ff:ff:ff"), sizeof(struct ether_addr));
+    struct ether_addr vxlan_vm_mac;
+    memcpy(&vxlan_vm_mac, ether_aton("00:00:01:01:01:10"), sizeof(struct ether_addr));
+    struct ether_addr vxlan_flood_mac;
+    memcpy(&vxlan_flood_mac, ether_aton("ff:ff:ff:ff:ff:ff"), sizeof(struct ether_addr));
     Ip4Address vm_ip = Ip4Address::from_string("1.1.1.10");
     Ip4Address subnet_ip = Ip4Address::from_string("1.1.1.255");
     Ip4Address flood_ip = Ip4Address::from_string("255.255.255.255");
@@ -511,8 +510,8 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_2) {
     
     //default to l2 mode
     client->WaitForIdle();
-    l2_uc_rt = L2RouteGet(vrf_name, *vxlan_vm_mac);
-    l2_flood_rt = L2RouteGet(vrf_name, *vxlan_flood_mac);
+    l2_uc_rt = L2RouteGet(vrf_name, vxlan_vm_mac);
+    l2_flood_rt = L2RouteGet(vrf_name, vxlan_flood_mac);
     uc_rt = RouteGet(vrf_name, vm_ip, 32);
     subnet_rt = RouteGet(vrf_name, subnet_ip, 32);
     flood_rt = MCRouteGet(vrf_name, flood_ip);
@@ -525,13 +524,13 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_2) {
     EXPECT_TRUE(l2_flood_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
     //Fabric COMP + EVPN comp + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
 
     //Move to l2_l3 mode
     ModifyForwardingModeVn("vn1", 1, "l2_l3");
     client->WaitForIdle();
-    l2_uc_rt = L2RouteGet(vrf_name, *vxlan_vm_mac);
-    l2_flood_rt = L2RouteGet(vrf_name, *vxlan_flood_mac);
+    l2_uc_rt = L2RouteGet(vrf_name, vxlan_vm_mac);
+    l2_flood_rt = L2RouteGet(vrf_name, vxlan_flood_mac);
     uc_rt = RouteGet(vrf_name, vm_ip, 32);
     subnet_rt = RouteGet(vrf_name, subnet_ip, 32);
     flood_rt = MCRouteGet(vrf_name, flood_ip);
@@ -547,18 +546,17 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_2) {
     EXPECT_TRUE(subnet_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
     //Fabric COMP + EVPN comp + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
-    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
     cnh = ((CompositeNH *) flood_rt->GetActiveNextHop());
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
     cnh = ((CompositeNH *) subnet_rt->GetActiveNextHop());
-    EXPECT_TRUE(cnh->ComponentNHCount() == 2);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
 
     //Move back to l2
     ModifyForwardingModeVn("vn1", 1, "l2");
     client->WaitForIdle();
-    l2_uc_rt = L2RouteGet(vrf_name, *vxlan_vm_mac);
-    l2_flood_rt = L2RouteGet(vrf_name, *vxlan_flood_mac);
+    l2_uc_rt = L2RouteGet(vrf_name, vxlan_vm_mac);
+    l2_flood_rt = L2RouteGet(vrf_name, vxlan_flood_mac);
     uc_rt = RouteGet(vrf_name, vm_ip, 32);
     subnet_rt = RouteGet(vrf_name, subnet_ip, 32);
     flood_rt = MCRouteGet(vrf_name, flood_ip);
@@ -571,7 +569,7 @@ TEST_F(CfgTest, vn_forwarding_mode_changed_2) {
     EXPECT_TRUE(l2_flood_rt->GetActiveNextHop()->GetType() == NextHop::COMPOSITE);
     cnh = ((CompositeNH *) l2_flood_rt->GetActiveNextHop());
     //Fabric COMP + EVPN comp + Interface COMP
-    EXPECT_TRUE(cnh->ComponentNHCount() == 3);
+    EXPECT_TRUE(cnh->ComponentNHCount() == 1);
     client->Reset();
 
     DelIPAM("vn1"); 

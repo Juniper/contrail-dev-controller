@@ -31,7 +31,6 @@ def AddTopDir(list):
 env.Prepend(CPPPATH = AddTopDir([
     '',
     'base/sandesh',
-    'discovery/client',
     'dns',
     'http/client',
     'ifmap',
@@ -95,7 +94,6 @@ env.Prepend(LIBS = [
     'xmpp_multicast',
     'xmpp_enet',
     'xmpp_unicast',
-    'isc',
     'xml2',
     'ds',
     'xml',
@@ -116,7 +114,7 @@ env.Prepend(LIBS = [
     'cpuinfo',
     'io',
     'sandesh',
-    'connection_info',
+    'process_info',
     'http',
     'http_parser',
     'base',
@@ -134,7 +132,6 @@ env.Prepend(LIBS = [
     'cfg',
     'filter',
     'ksync',
-    'ksyncnl',
     'nova_ins',
     'nova_ins_thrift',
     'vgw',
@@ -171,8 +168,10 @@ AgentEnv.AppendUnique(CONTRAIL_LIBS = [
     'pkt',
     'agentuve',
     'vnswksync',
+    'ksyncnl',
     'kstate',
     'vrutil',
+    'isc',
 ])
 
 # Common libraries for agent test code
@@ -241,13 +240,13 @@ def MakeTestEnvFn(self, env):
         env.Replace(CCFLAGS = cflags)
 
 def MakeTestCmdWithSrcFn(self, env, test_name, src, test_list):
-    tgt = env.Program(target = test_name, source = src)
+    tgt = env.UnitTest(target = test_name, source = src)
     env.Alias('agent:'+ test_name, tgt)
     test_list.append(tgt)
     return tgt
 
 def MakeTestCmdFn(self, env, test_name, test_list):
-    tgt = env.Program(target = test_name, source = [test_name + '.cc'])
+    tgt = env.UnitTest(target = test_name, source = [test_name + '.cc'])
     env.Alias('agent:'+ test_name, tgt)
     test_list.append(tgt)
     return tgt
@@ -288,8 +287,8 @@ for dir in subdirs:
 env.SConscript('contrail/SConscript', exports=['AgentEnv', 'BuildEnv'],
                duplicate=0)
 
-#env.SConscript('vxlan_agent/SConscript', exports=['AgentEnv', 'BuildEnv'],
-#               duplicate=0)
+env.SConscript('vxlan_agent/SConscript', exports=['AgentEnv', 'BuildEnv'],
+               duplicate=0)
 
 ##########################################################################
 # Utility functions

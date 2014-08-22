@@ -5,13 +5,9 @@
 #ifndef vnsw_agent_vrf_hpp
 #define vnsw_agent_vrf_hpp
 
-#include <boost/scoped_ptr.hpp>
-#include <db/db_table_walker.h>
-#include <sandesh/sandesh_types.h>
-#include <sandesh/sandesh.h>
 #include <cmn/agent_cmn.h>
 #include <cmn/index_vector.h>
-#include <oper/peer.h>
+#include <cmn/agent.h>
 #include <oper/agent_types.h>
 
 using namespace std;
@@ -25,8 +21,15 @@ struct VrfKey : public AgentKey {
     virtual ~VrfKey() { };
 
     void Init(const string &vrf_name) {name_ = vrf_name;};
-    bool Compare(const VrfKey &rhs) const {
-        return name_ == rhs.name_;
+    bool IsLess(const VrfKey &rhs) const {
+        return name_ < rhs.name_;
+    }
+
+    bool IsEqual(const VrfKey &rhs) const {
+        if ((IsLess(rhs) == false) && (rhs.IsLess(*this) == false)) {
+            return true;
+        }
+        return false;
     }
 
     string name_;

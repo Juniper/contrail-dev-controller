@@ -54,6 +54,7 @@ private:
     uint32_t old_first_mirror_index_;
     uint32_t old_second_mirror_index_;
     uint32_t trap_flow_;
+    uint16_t old_drop_reason_;
     bool ecmp_;
     KSyncEntryPtr nh_;
     FlowTableKSyncObject *ksync_obj_;
@@ -77,7 +78,7 @@ public:
     FlowTableKSyncEntry *Find(FlowEntry *key);
     const vr_flow_entry *GetKernelFlowEntry(uint32_t idx, 
                                             bool ignore_active_status);
-    bool GetFlowKey(uint32_t index, FlowKey &key);
+    bool GetFlowKey(uint32_t index, FlowKey *key);
 
     uint32_t flow_table_entries_count() { return flow_table_entries_count_; }
     bool AuditProcess();
@@ -90,6 +91,8 @@ public:
     void InitTest() {
         MapFlowMemTest();
     }
+    void Init();
+
     void Shutdown() {
         UnmapFlowMemTest();
     }

@@ -13,6 +13,7 @@
 #include <vnc_cfg_types.h>
 
 #include <cfg/cfg_init.h>
+#include <cfg/cfg_listener.h>
 #include <route/route.h>
 #include <oper/route_common.h>
 #include <oper/vn.h>
@@ -525,7 +526,9 @@ public:
         return true;
     }
 
-    void WalkDone() { }
+    static void WalkDone(RouteDeleteWalker *walker) {
+        delete walker;
+    }
 };
 
 void VrfTable::DeleteRoutes() {
@@ -558,7 +561,9 @@ public:
         assert(0);
     }
 
-    void WalkDone() { }
+    static void WalkDone(VrfDeleteWalker *walker) { 
+        delete walker;
+    }
 
 private:
 };

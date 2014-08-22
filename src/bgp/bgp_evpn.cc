@@ -526,11 +526,8 @@ void EvpnManager::ManagedDelete() {
 //
 // Attempt to enqueue a delete for the EvpnManager.
 //
-void EvpnManager::MayResumeDelete() {
-    if (deleter()->IsDeleted())
-        return;
-
-    server()->lifetime_manager()->Enqueue(deleter());
+void EvpnManager::RetryDelete() {
+    deleter()->RetryDelete();
 }
 
 //

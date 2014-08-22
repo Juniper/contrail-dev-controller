@@ -207,7 +207,7 @@ public:
     void ManagedDelete();
     void Shutdown();
     bool MayDelete() const;
-    void MayResumeDelete();
+    void RetryDelete();
 
     LifetimeActor *deleter();
 

@@ -3,21 +3,29 @@
  */
 
 // global_vrouter.cc - operational data for global vrouter configuration
-
 #include <boost/foreach.hpp>
+#include <base/util.h>
 #include <cmn/agent_cmn.h>
-#include <cmn/agent_param.h>
+#include <route/route.h>
+
 #include <vnc_cfg_types.h>
+#include <agent_types.h>
 #include <ifmap/ifmap_link.h>
-#include <oper/mirror_table.h>
+
+#include <oper/operdb_init.h>
+#include <oper/peer.h>
+#include <oper/vrf.h>
+#include <oper/interface_common.h>
 #include <oper/nexthop.h>
 #include <oper/vn.h>
-#include <oper/vrf.h>
+#include <oper/mirror_table.h>
+#include <oper/vxlan.h>
+#include <oper/mpls.h>
 #include <oper/route_common.h>
-#include <oper/operdb_init.h>
-#include <oper/global_vrouter.h>
+
+#include <oper/agent_route_walker.h>
 #include <oper/agent_route_encap.h>
-#include <base/util.h>
+#include <oper/global_vrouter.h>
 
 const std::string GlobalVrouter::kMetadataService = "metadata";
 
@@ -389,6 +397,7 @@ void GlobalVrouter::GlobalVrouterConfig(IFMapNode *node) {
     if (encap_changed) {
         AGENT_LOG(GlobalVrouterLog, "Rebake all routes for changed encap");
         agent_route_encap_update_walker_.get()->Update();
+        oper_->multicast()->ChangeTunnelType();
     }
 }
 
@@ -397,7 +406,7 @@ bool GlobalVrouter::FindLinkLocalService(const std::string &service_name,
                                          Ip4Address *service_ip,
                                          uint16_t *service_port,
                                          Ip4Address *fabric_ip,
-                                         uint16_t *fabric_port) {
+                                         uint16_t *fabric_port) const {
     std::string name = boost::to_lower_copy(service_name);
 
     for (GlobalVrouter::LinkLocalServicesMap::const_iterator it =
@@ -426,8 +435,8 @@ bool GlobalVrouter::FindLinkLocalService(const Ip4Address &service_ip,
                                          uint16_t service_port,
                                          std::string *service_name,
                                          Ip4Address *fabric_ip,
-                                         uint16_t *fabric_port) {
-    LinkLocalServicesMap::iterator it =
+                                         uint16_t *fabric_port) const {
+    LinkLocalServicesMap::const_iterator it =
         linklocal_services_map_.find(LinkLocalServiceKey(service_ip,
                                                          service_port));
     if (it == linklocal_services_map_.end()) {
@@ -470,6 +479,41 @@ bool GlobalVrouter::FindLinkLocalService(const Ip4Address &service_ip,
                it->second.ipfabric_dns_service_name, fabric_ip);
     }
     return false;
+}
+
+// Get link local services, for a given service name
+bool GlobalVrouter::FindLinkLocalService(const std::string &service_name,
+                                         std::set<Ip4Address> *service_ip
+                                        ) const {
+    if (service_name.empty())
+        return false;
+
+    std::string name = boost::to_lower_copy(service_name);
+    for (GlobalVrouter::LinkLocalServicesMap::const_iterator it =
+         linklocal_services_map_.begin();
+         it != linklocal_services_map_.end(); ++it) {
+        if (it->second.linklocal_service_name == name) {
+            service_ip->insert(it->first.linklocal_service_ip);
+        }
+    }
+
+    return (service_ip->size() > 0);
+}
+
+// Get link local services info for a given linklocal service <ip>
+bool GlobalVrouter::FindLinkLocalService(const Ip4Address &service_ip,
+                                         std::set<std::string> *service_names
+                                        ) const {
+    LinkLocalServicesMap::const_iterator it =
+        linklocal_services_map_.lower_bound(LinkLocalServiceKey(service_ip, 0));
+
+    while (it != linklocal_services_map_.end() &&
+           it->first.linklocal_service_ip == service_ip) {
+        service_names->insert(it->second.linklocal_service_name);
+        it++;
+    }
+
+    return (service_names->size() > 0);
 }
 
 // Handle changes to link local service configuration

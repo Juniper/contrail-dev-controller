@@ -25,15 +25,21 @@ public:
                                     struct ether_addr &mac,
                                     const Ip4Address &vm_addr,uint8_t plen,
                                     AgentRouteData *data);
-    static void AddLocalVmRouteReq(const Peer *peer,
-                                   const uuid &intf_uuid,
-                                   const string &vn_name, 
-                                   const string &vrf_name,
-                                   uint32_t mpls_label,
-                                   uint32_t vxlan_id,
-                                   struct ether_addr &mac,
-                                   const Ip4Address &vm_ip,
-                                   uint32_t plen); 
+    void AddLocalVmRouteReq(const Peer *peer,
+                            const string &vrf_name,
+                            struct ether_addr &mac,
+                            const Ip4Address &vm_ip,
+                            uint32_t plen,
+                            LocalVmRoute *data);
+    void AddLocalVmRouteReq(const Peer *peer,
+                            const uuid &intf_uuid,
+                            const string &vn_name,
+                            const string &vrf_name,
+                            uint32_t mpls_label,
+                            uint32_t vxlan_id,
+                            struct ether_addr &mac,
+                            const Ip4Address &vm_ip,
+                            uint32_t plen);
     static void AddLocalVmRoute(const Peer *peer,
                                 const uuid &intf_uuid,
                                 const string &vn_name, 
@@ -45,10 +51,10 @@ public:
                                 uint32_t plen); 
     static void AddLayer2BroadcastRoute(const string &vrf_name,
                                         const string &vn_name,
-                                        const Ip4Address &dip,
-                                        const Ip4Address &sip,
                                         uint32_t label,
-                                        int vxlan_id);
+                                        int vxlan_id,
+                                        ComponentNHKeyList
+                                        &component_nh_key_list);
     static void DeleteReq(const Peer *peer, const string &vrf_name,
                           const struct ether_addr &mac,
                           AgentRouteData *data);

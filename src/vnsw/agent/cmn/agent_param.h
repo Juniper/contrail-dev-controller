@@ -7,13 +7,18 @@
 
 #include <boost/property_tree/ptree.hpp>
 #include <boost/program_options.hpp>
+#include <cmn/agent_cmn.h>
 
+class Agent;
 class VirtualGatewayConfigTable;
 
 // Class handling agent configuration parameters from config file and 
 // arguments
 class AgentParam  {
 public:
+    static const uint32_t AgentStatsInterval = (30 * 1000); // time in millisecs
+    static const uint32_t FlowStatsInterval = (1000); // time in milliseconds
+
     // Hypervisor mode we are working on
     enum Mode {
         MODE_INVALID,
@@ -75,13 +80,20 @@ public:
     uint32_t flow_cache_timeout() const {return flow_cache_timeout_;}
     bool headless_mode() const {return headless_mode_;}
     bool simulate_evpn_tor() const {return simulate_evpn_tor_;}
+    std::string si_netns_command() const {return si_netns_command_;}
+    const int si_netns_workers() const {return si_netns_workers_;}
+    const int si_netns_timeout() const {return si_netns_timeout_;}
 
     const std::string &config_file() const { return config_file_; }
     const std::string &program_name() const { return program_name_;}
     const std::string log_file() const { return log_file_; }
+    const int log_files_count() const { return log_files_count_; }
+    const long log_file_size() const { return log_file_size_; }
     bool log_local() const { return log_local_; }
     const std::string &log_level() const { return log_level_; }
     const std::string &log_category() const { return log_category_; }
+    const bool use_syslog() const { return use_syslog_; }
+    const std::string syslog_facility() const { return syslog_facility_; }
     const std::vector<std::string> collector_server_list() const {
         return collector_server_list_;
     }
@@ -158,6 +170,7 @@ private:
     void ParseFlows();
     void ParseHeadlessMode();
     void ParseSimulateEvpnTor();
+    void ParseServiceInstance();
 
     void ParseCollectorArguments
         (const boost::program_options::variables_map &v);
@@ -178,6 +191,8 @@ private:
     void ParseHeadlessModeArguments
         (const boost::program_options::variables_map &v);
     void ParseSimulateEvpnTorArguments
+        (const boost::program_options::variables_map &v);
+    void ParseServiceInstanceArguments
         (const boost::program_options::variables_map &v);
 
     PortInfo vhost_;
@@ -204,9 +219,14 @@ private:
     std::string config_file_;
     std::string program_name_;
     std::string log_file_;
+    int log_files_count_;
+    long log_file_size_;
+
     bool log_local_;
     std::string log_level_;
     std::string log_category_;
+    bool use_syslog_;
+    std::string syslog_facility_;
     std::vector<std::string> collector_server_list_;
     uint16_t http_server_port_;
     std::string host_name_;
@@ -219,6 +239,9 @@ private:
     std::auto_ptr<VirtualGatewayConfigTable> vgw_config_table_;
     bool headless_mode_;
     bool simulate_evpn_tor_;
+    std::string si_netns_command_;
+    int si_netns_workers_;
+    int si_netns_timeout_;
 
     DISALLOW_COPY_AND_ASSIGN(AgentParam);
 };

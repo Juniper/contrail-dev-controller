@@ -5,6 +5,7 @@ import gevent
 import os
 import sys
 import pdb
+import json
 from pprint import pprint
 import functools
 import socket
@@ -99,7 +100,11 @@ class FakeCF(object):
         result = {}
         for key in keys:
             try:
-                result[key] = copy.deepcopy(self._rows[key])
+                result[key] = {}
+                for col_name in self._rows[key]:
+                    if column_start and column_start not in col_name:
+                        continue
+                    result[key][col_name] = copy.deepcopy(self._rows[key][col_name])
             except KeyError:
                 pass
 
@@ -474,6 +479,10 @@ class FakeIfmapClient(object):
             print method
     # end call
 
+    @staticmethod
+    def call_async_result(method, body):
+        return FakeIfmapClient.call(method, body)
+
 # end class FakeIfmapClient
 
 
@@ -505,6 +514,14 @@ class FakeKombu(object):
             self._exchange = q_exchange
             FakeKombu._queues[q_name] = self
         # end __init__
+
+        def __call__(self, *args):
+            class BoundQueue(object):
+                def delete(self):
+                    pass
+                # end delete
+            return BoundQueue()
+        # end __call__
 
         def put(self, msg_dict, serializer):
             msg_obj = self.Message(msg_dict)
@@ -545,6 +562,10 @@ class FakeKombu(object):
         def __init__(self, *args, **kwargs):
             pass
         # end __init__
+
+        def channel(self):
+            pass
+        # end channel
 # end class FakeKombu
 
 class FakeRedis(object):

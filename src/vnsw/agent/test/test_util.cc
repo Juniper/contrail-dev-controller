@@ -1045,6 +1045,22 @@ void AclAddReq(int id, int ace_id, bool drop) {
     usleep(1000);
 }
 
+void DeleteRoute(const char *vrf, const char *ip) {
+    Ip4Address addr = Ip4Address::from_string(ip);
+    Agent::GetInstance()->fabric_inet4_unicast_table()->DeleteReq(NULL,
+                                            vrf, addr, 32, NULL);
+    client->WaitForIdle();
+    WAIT_FOR(1000, 1, (RouteFind(vrf, addr, 32) == false));
+}
+
+void DeleteRoute(const char *vrf, const char *ip, uint8_t plen) {
+    Ip4Address addr = Ip4Address::from_string(ip);
+    Agent::GetInstance()->fabric_inet4_unicast_table()->DeleteReq(NULL,
+                                            vrf, addr, plen, NULL);
+    client->WaitForIdle();
+    WAIT_FOR(1000, 1, (RouteFind(vrf, addr, 32) == false));
+}
+
 bool RouteFind(const string &vrf_name, const Ip4Address &addr, int plen) {
     VrfEntry *vrf = Agent::GetInstance()->vrf_table()->FindVrfFromName(vrf_name);
     if (vrf == NULL)
@@ -1176,9 +1192,8 @@ bool TunnelNHFind(const Ip4Address &server_ip, bool policy, TunnelType::Type typ
 }
 
 NextHop *ReceiveNHGet(NextHopTable *table, const char *ifname, bool policy) {
-    InetInterfaceKey *intf_key = new InetInterfaceKey(ifname);
-    return static_cast<NextHop *>
-        (table->FindActiveEntry(new ReceiveNHKey(intf_key, policy)));
+    ReceiveNHKey key(new InetInterfaceKey(ifname), policy);
+    return static_cast<NextHop *> (table->FindActiveEntry(&key));
 }
 
 bool TunnelNHFind(const Ip4Address &server_ip) {
@@ -1218,16 +1233,18 @@ bool Layer2TunnelRouteAdd(const Peer *peer, const string &vm_vrf,
 }
 
 bool EcmpTunnelRouteAdd(const Peer *peer, const string &vrf_name, const Ip4Address &vm_ip,
-                       uint8_t plen, std::vector<ComponentNHData> &comp_nh_list,
+                       uint8_t plen, ComponentNHKeyList &comp_nh_list,
                        bool local_ecmp, const string &vn_name, const SecurityGroupList &sg,
                        const PathPreference &path_preference) {
+    COMPOSITETYPE type = Composite::ECMP;
+    if (local_ecmp) {
+        type = Composite::LOCAL_ECMP;
+    }
     DBRequest nh_req(DBRequest::DB_ENTRY_ADD_CHANGE);
-    nh_req.key.reset(new CompositeNHKey(vrf_name, vm_ip, plen,
-                                        false));
+    nh_req.key.reset(new CompositeNHKey(type, true,
+                                        comp_nh_list, vrf_name));
+    nh_req.data.reset(new CompositeNHData());
 
-    CompositeNH::CreateCompositeNH(vrf_name, vm_ip, false, comp_nh_list);
-    nh_req.data.reset(new CompositeNHData(comp_nh_list,
-                                          CompositeNHData::REPLACE));
     ControllerEcmpRoute *data =
         new ControllerEcmpRoute(peer, vm_ip, plen, vn_name, -1, false, vrf_name,
                                 sg, path_preference, nh_req);
@@ -1939,8 +1956,9 @@ void DeleteVmportEnv(struct PortInfo *input, int count, int del_vn, int acl_id,
                 }
             }
 
+            // Ignore duplicate deletes
             if (j < i) {
-                break;
+                continue;
             }
             if (vn)
                 sprintf(vn_name, "%s", vn);
@@ -2277,6 +2295,11 @@ FlowEntry* FlowGet(int vrf_id, std::string sip, std::string dip, uint8_t proto,
     return entry;
 }
 
+FlowEntry* FlowGet(int nh_id, std::string sip, std::string dip, uint8_t proto,
+                   uint16_t sport, uint16_t dport) {
+    return FlowGet(0, sip, dip, proto, sport, dport, nh_id);
+}
+
 bool FlowGet(int vrf_id, const char *sip, const char *dip, uint8_t proto, 
              uint16_t sport, uint16_t dport, bool short_flow, int hash_id,
              int reverse_hash_id, int nh_id, int reverse_nh_id) {
@@ -2590,7 +2613,9 @@ PktGen *TxTcpPacketUtil(int ifindex, const char *sip, const char *dip,
 
     uint8_t *ptr(new uint8_t[pkt->GetBuffLen()]);
     memcpy(ptr, pkt->GetBuff(), pkt->GetBuffLen());
-    Agent::GetInstance()->pkt()->pkt_handler()->HandleRcvPkt(ptr, pkt->GetBuffLen());
+    Agent::GetInstance()->pkt()->pkt_handler()->HandleRcvPkt(ptr,
+                                                             pkt->GetBuffLen(),
+                                                             pkt->GetBuffLen());
     delete pkt;
     return NULL;
 }
@@ -2607,7 +2632,9 @@ PktGen *TxIpPacketUtil(int ifindex, const char *sip, const char *dip,
 
     uint8_t *ptr(new uint8_t[pkt->GetBuffLen()]);
     memcpy(ptr, pkt->GetBuff(), pkt->GetBuffLen());
-    Agent::GetInstance()->pkt()->pkt_handler()->HandleRcvPkt(ptr, pkt->GetBuffLen());
+    Agent::GetInstance()->pkt()->pkt_handler()->HandleRcvPkt(ptr,
+                                                             pkt->GetBuffLen(),
+                                                             pkt->GetBuffLen());
     delete pkt;
     return NULL;
 }
@@ -2626,7 +2653,7 @@ int MplsToVrfId(int label) {
             }
         } else if (nh->GetType() == NextHop::COMPOSITE) {
             const CompositeNH *nh1 = static_cast<const CompositeNH *>(nh);
-            vrf = nh1->GetVrf()->vrf_id();
+            vrf = nh1->vrf()->vrf_id();
         } else if (nh->GetType() == NextHop::VLAN) {
             const VlanNH *nh1 = static_cast<const VlanNH *>(nh);
             const VmInterface *intf =
@@ -2659,7 +2686,9 @@ PktGen *TxMplsPacketUtil(int ifindex, const char *out_sip,
 
     uint8_t *ptr(new uint8_t[pkt->GetBuffLen()]);
     memcpy(ptr, pkt->GetBuff(), pkt->GetBuffLen());
-    Agent::GetInstance()->pkt()->pkt_handler()->HandleRcvPkt(ptr, pkt->GetBuffLen());
+    Agent::GetInstance()->pkt()->pkt_handler()->HandleRcvPkt(ptr,
+                                                             pkt->GetBuffLen(),
+                                                             pkt->GetBuffLen());
     delete pkt;
 
     return NULL;
@@ -2682,7 +2711,9 @@ PktGen *TxMplsTcpPacketUtil(int ifindex, const char *out_sip,
 
     uint8_t *ptr(new uint8_t[pkt->GetBuffLen()]);
     memcpy(ptr, pkt->GetBuff(), pkt->GetBuffLen());
-    Agent::GetInstance()->pkt()->pkt_handler()->HandleRcvPkt(ptr, pkt->GetBuffLen());
+    Agent::GetInstance()->pkt()->pkt_handler()->HandleRcvPkt(ptr,
+                                                             pkt->GetBuffLen(),
+                                                             pkt->GetBuffLen());
     delete pkt;
     return NULL;
 }
@@ -2842,5 +2873,8 @@ void DeleteBgpPeer(Peer *peer) {
     client->WaitForIdle();
     Agent::GetInstance()->controller()->Cleanup();
     client->WaitForIdle();
+    XmppChannelMock *xmpp_channel = static_cast<XmppChannelMock *>
+        (channel->GetXmppChannel());
     delete channel;
+    delete xmpp_channel;
 }

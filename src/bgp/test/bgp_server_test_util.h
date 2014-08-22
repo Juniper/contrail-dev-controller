@@ -16,6 +16,7 @@
 #include "bgp/bgp_peer_types.h"
 #include "bgp/bgp_server.h"
 #include "bgp/bgp_peer_close.h"
+#include "bgp/state_machine.h"
 #include "bgp/routing-instance/peer_manager.h"
 #include "bgp/routing-instance/routing_instance.h"
 #include "xmpp/xmpp_server.h"
@@ -84,35 +85,76 @@ public:
 
     // Protect connection db with mutex as it is queried from main thread which
     // does not adhere to control-node scheduler policy.
-    XmppConnection *FindConnection(const std::string &peer_addr) {
+    XmppServerConnection *FindConnection(const std::string &peer_addr) {
         tbb::mutex::scoped_lock lock(mutex_);
         return XmppServer::FindConnection(peer_addr);
     }
 
-    void InsertConnection(XmppConnection *connection) {
+    void InsertConnection(XmppServerConnection *connection) {
         tbb::mutex::scoped_lock lock(mutex_);
         XmppServer::InsertConnection(connection);
     }
 
-    bool RemoveConnection(XmppConnection *connection) {
+    void RemoveConnection(XmppServerConnection *connection) {
         tbb::mutex::scoped_lock lock(mutex_);
-        return XmppServer::RemoveConnection(connection);
+        XmppServer::RemoveConnection(connection);
     }
 
-    void DeleteConnection(XmppConnection *connection) {
+    void InsertDeletedConnection(XmppServerConnection *connection) {
         tbb::mutex::scoped_lock lock(mutex_);
-        XmppServer::DeleteConnection(connection);
+        XmppServer::InsertDeletedConnection(connection);
     }
 
-    void DestroyConnection(XmppConnection *connection) {
+    void RemoveDeletedConnection(XmppServerConnection *connection) {
         tbb::mutex::scoped_lock lock(mutex_);
-        XmppServer::DestroyConnection(connection);
+        XmppServer::RemoveDeletedConnection(connection);
     }
 
     boost::function<bool()> GetIsPeerCloseGraceful_fnc_;
 
 private:
     tbb::mutex mutex_;
+};
+
+class StateMachineTest : public StateMachine {
+public:
+    explicit StateMachineTest(BgpPeer *peer)
+        : StateMachine(peer) {
+    }
+    virtual ~StateMachineTest() { }
+
+    void StartConnectTimer(int seconds) {
+        connect_timer_->Start(10,
+            boost::bind(&StateMachine::ConnectTimerExpired, this),
+            boost::bind(&StateMachine::TimerErrorHanlder, this, _1, _2));
+    }
+
+    void StartOpenTimer(int seconds) {
+        open_timer_->Start(10,
+            boost::bind(&StateMachine::OpenTimerExpired, this),
+            boost::bind(&StateMachine::TimerErrorHanlder, this, _1, _2));
+    }
+
+    void StartIdleHoldTimer() {
+        if (idle_hold_time_ <= 0)
+            return;
+        idle_hold_timer_->Start(10,
+            boost::bind(&StateMachine::IdleHoldTimerExpired, this),
+            boost::bind(&StateMachine::TimerErrorHanlder, this, _1, _2));
+    }
+
+    virtual int hold_time_msecs() const {
+        if (hold_time_msecs_)
+            return hold_time_msecs_;
+        return StateMachine::hold_time_msecs();
+    }
+
+    static void set_hold_time_msecs(int hold_time_msecs) {
+        hold_time_msecs_ = hold_time_msecs;
+    }
+
+private:
+    static int hold_time_msecs_;
 };
 
 class BgpServerTest : public BgpServer {
@@ -213,6 +255,26 @@ public:
 private:
     typedef std::map<boost::uuids::uuid, BgpPeer *> PeerByUuidMap;
     PeerByUuidMap peers_by_uuid_;
+};
+
+class XmppStateMachineTest : public XmppStateMachine {
+public:
+    explicit XmppStateMachineTest(XmppConnection *connection, bool active)
+        : XmppStateMachine(connection, active) {
+    }
+    ~XmppStateMachineTest() { }
+
+    void StartConnectTimer(int seconds) {
+        connect_timer_->Start(10,
+            boost::bind(&XmppStateMachine::ConnectTimerExpired, this),
+            boost::bind(&XmppStateMachine::TimerErrorHandler, this, _1, _2));
+    }
+
+    void StartOpenTimer(int seconds) {
+        open_timer_->Start(10,
+            boost::bind(&XmppStateMachine::OpenTimerExpired, this),
+            boost::bind(&XmppStateMachine::TimerErrorHandler, this, _1, _2));
+    }
 };
 
 #define BGP_WAIT_FOR_PEER_STATE(peer, state)                                   \
