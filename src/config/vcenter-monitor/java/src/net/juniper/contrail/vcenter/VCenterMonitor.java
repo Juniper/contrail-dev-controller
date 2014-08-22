@@ -72,17 +72,19 @@ class VmwareVirtualMachineInfo {
 
 class VmwareVirtualNetworkInfo {
     private String name;
-    private short vlanId;
+    private short isolatedVlanId;
+    private short primaryVlanId;
     private SortedMap<String, VmwareVirtualMachineInfo> vmInfo;
     private String subnetAddress;
     private String subnetMask;
     private String gatewayAddress;
     
-    public VmwareVirtualNetworkInfo(String name, short vlanId,
-            SortedMap<String, VmwareVirtualMachineInfo> vmInfo,
+    public VmwareVirtualNetworkInfo(String name, short isolatedVlanId,
+            short primaryVlanId, SortedMap<String, VmwareVirtualMachineInfo> vmInfo,
             String subnetAddress, String subnetMask, String gatewayAddress) {
         this.name = name;
-        this.vlanId = vlanId;
+        this.isolatedVlanId = isolatedVlanId;
+        this.primaryVlanId = primaryVlanId;
         this.vmInfo = vmInfo;
         this.subnetAddress = subnetAddress;
         this.subnetMask = subnetMask;
@@ -97,12 +99,20 @@ class VmwareVirtualNetworkInfo {
         this.name = name;
     }
 
-    public short getVlanId() {
-        return vlanId;
+    public short getIsolatedVlanId() {
+        return isolatedVlanId;
     }
 
-    public void setVlanId(short vlanId) {
-        this.vlanId = vlanId;
+    public void setIsolatedVlanId(short vlanId) {
+        this.isolatedVlanId = vlanId;
+    }
+
+    public short getPrimaryVlanId() {
+        return primaryVlanId;
+    }
+
+    public void setPrimaryVlanId(short vlanId) {
+        this.primaryVlanId = vlanId;
     }
 
     public SortedMap<String, VmwareVirtualMachineInfo> getVmInfo() {
@@ -258,7 +268,9 @@ class VCenterMonitorTask implements Runnable {
                     vmwareVmInfo.getMacAddress(),
                     vmwareVmInfo.getName(),
                     vmwareVmInfo.getVrouterIpAddress(),
-                    vmwareVmInfo.getHostName(), vmwareNetworkInfo.getVlanId());
+                    vmwareVmInfo.getHostName(), 
+                    vmwareNetworkInfo.getIsolatedVlanId(),
+                    vmwareNetworkInfo.getPrimaryVlanId());
             vmwareItem = vmwareIter.hasNext() ? vmwareIter.next() : null;
         }
         while (vncItem != null) {
@@ -317,9 +329,10 @@ class VCenterMonitorTask implements Runnable {
             String subnetMask = vnInfo.getSubnetMask();
             String gatewayAddr = vnInfo.getGatewayAddress();
             String vmwareVnName = vnInfo.getName();
-            short vlanId = vnInfo.getVlanId();
+            short isolatedVlanId = vnInfo.getIsolatedVlanId();
+            short primaryVlanId = vnInfo.getPrimaryVlanId();
             vncDB.CreateVirtualNetwork(vmwareVnUuid, vmwareVnName, subnetAddr,
-                    subnetMask, gatewayAddr, vlanId, vmInfos);
+                    subnetMask, gatewayAddr, isolatedVlanId, primaryVlanId, vmInfos);
             vmwareItem = vmwareIter.hasNext() ? vmwareIter.next() : null;
         }
         while (vncItem != null) {

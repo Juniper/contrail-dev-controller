@@ -154,9 +154,8 @@ public class VncDB {
     
     public void CreateVirtualMachine(String vnUuid, String vmUuid,
             String macAddress, String vmName, String vrouterIpAddress,
-            String hostName, short vlanId) throws IOException {
-        short primaryVlanId = 1000;
-        s_logger.info("CreateVirtualMachine : " + vmUuid + ", vrouterIpAddress: " + vrouterIpAddress + ", vlan: " + vlanId);
+            String hostName, short isolatedVlanId, short primaryVlanId) throws IOException {
+        s_logger.info("CreateVirtualMachine : " + vmUuid + ", vrouterIpAddress: " + vrouterIpAddress + ", vlan: " + isolatedVlanId + "/" + primaryVlanId);
         VirtualNetwork network = (VirtualNetwork) apiConnector.findById(
                 VirtualNetwork.class, vnUuid);
         apiConnector.read(network);
@@ -217,7 +216,7 @@ public class VncDB {
                                          UUID.fromString(vmUuid), vmInterfaceName,
                                          InetAddress.getByName(vmIpAddress),
                                          Utils.parseMacAddress(macAddress),
-                                         UUID.fromString(vnUuid), vlanId, primaryVlanId);
+                                         UUID.fromString(vnUuid), isolatedVlanId, primaryVlanId);
             s_logger.debug("VRouterAPi Add Port success - port name: " + vmInterfaceName);
         }catch(Throwable e) {
             s_logger.error("Exception : " + e);
@@ -226,7 +225,8 @@ public class VncDB {
     }
     
     public void CreateVirtualNetwork(String vnUuid, String vnName,
-            String subnetAddr, String subnetMask, String gatewayAddr, short vlanId,
+            String subnetAddr, String subnetMask, String gatewayAddr, 
+            short isolatedVlanId, short primaryVlanId,
             SortedMap<String, VmwareVirtualMachineInfo> vmMapInfos) throws
             IOException {
         s_logger.info("Create VN: " + vnUuid + ", vnName: " + vnName);
@@ -248,6 +248,9 @@ public class VncDB {
 
         vn.setNetworkIpam(ipam, subnet);
         apiConnector.create(vn); 
+        if (vmMapInfos == null)
+            return;
+
         for (Map.Entry<String, VmwareVirtualMachineInfo> vmMapInfo :
             vmMapInfos.entrySet()) {
             String vmUuid = vmMapInfo.getKey();
@@ -257,7 +260,7 @@ public class VncDB {
             String vrouterIpAddr = vmInfo.getVrouterIpAddress();
             String hostName = vmInfo.getHostName();
             CreateVirtualMachine(vnUuid, vmUuid, macAddress, vmName,
-                    vrouterIpAddr, hostName, vlanId);
+                    vrouterIpAddr, hostName, isolatedVlanId, primaryVlanId);
         }  
     }
     
