@@ -118,6 +118,9 @@ void AgentXmppChannel::ReceiveEvpnUpdate(XmlPugi *pugi) {
 
                 char *mac_str = 
                     strtok_r(const_cast<char *>(id.c_str()), "-", &saveptr);
+                if (strlen(saveptr) != 0) {
+                    mac_str = saveptr;
+                }
                 struct ether_addr mac = *ether_aton(mac_str);;
                 if (strcmp("ff:ff:ff:ff:ff:ff", mac_str) == 0) {
                     TunnelOlist olist;
@@ -1479,6 +1482,7 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
    
     if (!peer) return false;
 
+    /*
     if (route->is_multicast() && add_route && (peer->agent()->
                               mulitcast_builder() != peer)) {
         CONTROLLER_TRACE(Trace, peer->GetBgpPeerName(),
@@ -1486,6 +1490,7 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
                          "Peer not elected Multicast Tree Builder (EVPN)");
         return false;
     }
+    */
 
     //Build the DOM tree
     auto_ptr<XmlBase> impl(XmppStanza::AllocXmppXmlImpl());
@@ -1509,12 +1514,14 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
     assert(item.entry.nlri.address != "0.0.0.0");
 
     string rtr(peer->agent()->router_id().to_string());
+    assert(label <= 0xFFFFF);
 
     autogen::EnetNextHopType nh;
     nh.af = Address::INET;
     nh.address = rtr;
     nh.label = label;
 
+    item.entry.nlri.ethernet_tag = 0;
     TunnelType::Type tunnel_type = TunnelType::ComputeType(tunnel_bmap);
     if (l2_route->GetActivePath()) {
         tunnel_type = l2_route->GetActivePath()->tunnel_type();
@@ -1527,10 +1534,11 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
             nh.tunnel_encapsulation_list.tunnel_encapsulation.push_back("udp");
         }
     } else {
-        if (route->is_multicast() && add_route) {
+        if (route->GetActivePath()) {
             //TODO remove this and try modifying routes getactivelabel
             //nh.label = route->GetActivePath()->GetActiveLabel(); 
             nh.label = route->GetActivePath()->vxlan_id();
+            item.entry.nlri.ethernet_tag = nh.label;
         } else {
             nh.label = 0;
         }
@@ -1538,7 +1546,6 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
     }
 
     item.entry.next_hops.next_hop.push_back(nh);
-
     //item.entry.version = 1; //TODO
     //item.entry.virtual_network = vn;
    
