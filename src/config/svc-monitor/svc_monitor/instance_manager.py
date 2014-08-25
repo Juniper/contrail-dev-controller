@@ -158,7 +158,10 @@ class InstanceManager(object):
 
         # set active-standy flag for instance ip
         si_props = si_obj.get_service_instance_properties()
-        max_instances = si_props.get_scale_out().get_max_instances()
+        if si_props.get_scale_out():
+            max_instances = si_props.get_scale_out().get_max_instances()
+        else:
+            max_instances = 1
         if max_instances > 1:
             iip_obj.set_instance_ip_mode(u'active-active');
         else:
@@ -336,9 +339,15 @@ class VirtualMachineManager(InstanceManager):
         # populate nic information
         nics = self._get_nic_info(si_obj, si_props, st_props)
 
+        # get availability zone
+        avail_zone = None
+        if st_props.get_availability_zone_enable():
+            avail_zone = si_props.get_availability_zone()
+        elif self._args.availability_zone:
+            avail_zone = self._args.availability_zone
+
         # create and launch vm
         vm_back_refs = si_obj.get_virtual_machine_back_refs()
-        avail_zone = si_props.get_availability_zone()
         proj_name = si_obj.get_parent_fq_name()[-1]
         max_instances = si_props.get_scale_out().get_max_instances()
         for inst_count in range(0, max_instances):
@@ -414,18 +423,23 @@ class NetworkNamespaceManager(InstanceManager):
             self.logger.log("Cannot find service template associated to "
                              "service instance %s" % si_obj.get_fq_name_str())
             return
+        '''TODO: add check for lb and snat. Need a new class to drive this
         if (st_props.get_service_type() != svc_info.get_snat_service_type()):
             self.logger.log("Only service type 'source-nat' is supported "
                              "with 'network-namespace' service "
                              "virtualization type")
             return
+        '''
 
         # populate nic information
         nics = self._get_nic_info(si_obj, si_props, st_props)
 
         # Create virtual machines, associate them to the service instance and
         # schedule them to different virtual routers
-        max_instances = si_props.get_scale_out().get_max_instances()
+        if si_props.get_scale_out():
+            max_instances = si_props.get_scale_out().get_max_instances()
+        else:
+            max_instances = 1
         for inst_count in range(0, max_instances):
             # Create a virtual machine
             instance_name = si_obj.name + '_' + str(inst_count + 1)
@@ -472,9 +486,15 @@ class NetworkNamespaceManager(InstanceManager):
             self.db.virtual_machine_insert(vm_obj.uuid, row_entry)
 
             # uve trace
-            self.logger.uve_svc_instance(si_obj.get_fq_name_str(),
-                status='CREATE', vm_uuid=vm_obj.uuid,
-                st_name=st_obj.get_fq_name_str())
+            if chosen_vr_fq_name:
+                self.logger.uve_svc_instance(si_obj.get_fq_name_str(),
+                    status='CREATE', vm_uuid=vm_obj.uuid,
+                    st_name=st_obj.get_fq_name_str(),
+                    vr_name=':'.join(chosen_vr_fq_name))
+            else:
+                self.logger.uve_svc_instance(si_obj.get_fq_name_str(),
+                    status='CREATE', vm_uuid=vm_obj.uuid,
+                    st_name=st_obj.get_fq_name_str())
 
     def delete_service(self, vm_uuid, proj_name=None):
         try:
