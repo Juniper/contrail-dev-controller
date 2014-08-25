@@ -50,8 +50,8 @@ void RouterIdDepInit(Agent *agent) {
 
 class AgentBgpXmppPeerTest : public AgentXmppChannel {
 public:
-    AgentBgpXmppPeerTest(XmppChannel *channel, std::string xs, uint8_t xs_idx) :
-        AgentXmppChannel(Agent::GetInstance(), channel, xs, "0", xs_idx), 
+    AgentBgpXmppPeerTest(std::string xs, uint8_t xs_idx) :
+        AgentXmppChannel(Agent::GetInstance(), xs, "0", xs_idx),
         rx_count_(0), stop_scheduler_(false), rx_channel_event_queue_(
             TaskScheduler::GetInstance()->GetTaskId("xmpp::StateMachine"), 0,
             boost::bind(&AgentBgpXmppPeerTest::ProcessChannelEvent, this, _1)) {
@@ -154,13 +154,10 @@ protected:
 
         TaskScheduler::GetInstance()->Stop();
         Agent::GetInstance()->controller()->unicast_cleanup_timer().cleanup_timer_->Fire();
-        TaskScheduler::GetInstance()->Start();
-        client->WaitForIdle();
-        TaskScheduler::GetInstance()->Stop();
-        Agent::GetInstance()->controller()->unicast_cleanup_timer().cleanup_timer_->Fire();
         Agent::GetInstance()->controller()->multicast_cleanup_timer().cleanup_timer_->Fire();
         Agent::GetInstance()->controller()->config_cleanup_timer().cleanup_timer_->Fire();
         TaskScheduler::GetInstance()->Start();
+        client->WaitForIdle();
         Agent::GetInstance()->controller()->Cleanup();
         client->WaitForIdle();
 

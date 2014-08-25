@@ -346,7 +346,7 @@ void AgentParam::ParseDefaultSection() {
 
     if (!GetValueFromTree<uint16_t>(http_server_port_, 
                                     "DEFAULT.http_server_port")) {
-        http_server_port_ = ContrailPorts::HttpPortAgent;
+        http_server_port_ = ContrailPorts::HttpPortAgent();
     }
 
     GetValueFromTree<string>(tunnel_type_, "DEFAULT.tunnel_type");
@@ -398,6 +398,16 @@ void AgentParam::ParseDefaultSection() {
     GetValueFromTree<bool>(use_syslog_, "DEFAULT.use_syslog");
     if (!GetValueFromTree<string>(syslog_facility_, "DEFAULT.syslog_facility")) {
         syslog_facility_ = "LOG_LOCAL0";
+    }
+
+    unsigned int log_flow = 0;
+    if (opt_uint = tree_.get_optional<unsigned int>("DEFAULT.log_flow")) {
+        log_flow = opt_uint.get();
+    }
+    if (log_flow) {
+        log_flow_ = true;
+    } else {
+        log_flow_ = false;
     }
 }
 
@@ -528,6 +538,9 @@ void AgentParam::ParseDefaultSectionArguments
     }
     if (var_map.count("DEFAULT.debug")) {
         debug_ = true;
+    }
+    if (var_map.count("DEFAULT.log_flow")) {
+         log_flow_ = true;
     }
 }
 
@@ -815,17 +828,18 @@ void AgentParam::set_test_mode(bool mode) {
 AgentParam::AgentParam(Agent *agent) :
         vhost_(), eth_port_(), xmpp_instance_count_(), xmpp_server_1_(),
         xmpp_server_2_(), dns_server_1_(), dns_server_2_(),
-        dns_port_1_(ContrailPorts::DnsServerPort),
-        dns_port_2_(ContrailPorts::DnsServerPort),
+        dns_port_1_(ContrailPorts::DnsServerPort()),
+        dns_port_2_(ContrailPorts::DnsServerPort()),
         dss_server_(), mgmt_ip_(), mode_(MODE_KVM), xen_ll_(),
         tunnel_type_(), metadata_shared_secret_(), max_vm_flows_(),
         linklocal_system_flows_(), linklocal_vm_flows_(),
         flow_cache_timeout_(), config_file_(), program_name_(),
-        log_file_(), log_local_(false), log_level_(),
+        log_file_(), log_local_(false), log_flow_(false), log_level_(),
         log_category_(), use_syslog_(false),
         collector_server_list_(), http_server_port_(), host_name_(),
-        agent_stats_interval_(AgentStatsInterval),
-        flow_stats_interval_(FlowStatsInterval),
+        agent_stats_interval_(kAgentStatsInterval),
+        flow_stats_interval_(kFlowStatsInterval),
+        vrouter_stats_interval_(kVrouterStatsInterval),
         vmware_physical_port_(""), test_mode_(false), debug_(false), tree_(),
         headless_mode_(false), simulate_evpn_tor_(false),
         si_netns_command_(), si_netns_workers_(0),

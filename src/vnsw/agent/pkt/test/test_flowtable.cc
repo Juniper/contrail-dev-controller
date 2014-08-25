@@ -92,7 +92,8 @@ public:
         Agent::GetInstance()->fabric_inet4_unicast_table()->
             AddLocalVmRouteReq(NULL, vrf, addr, 32, intf->GetUuid(),
                                intf->vn()->GetName(), label,
-                               SecurityGroupList(), false, PathPreference());
+                               SecurityGroupList(), false, PathPreference(),
+                               Ip4Address(0));
         client->WaitForIdle();
         EXPECT_TRUE(RouteFind(vrf, addr, 32));
     }
@@ -405,7 +406,7 @@ int main(int argc, char *argv[]) {
     GETUSERARGS();
 
     client = TestInit(init_file, ksync_init, true, true, true, (1000000 * 60 * 10),
-            AgentParam::FlowStatsInterval, true, false);
+            AgentParam::kFlowStatsInterval, true, false);
     if (vm.count("config")) {
         FlowTableTest::eth_itf = Agent::GetInstance()->fabric_interface_name();
     } else {

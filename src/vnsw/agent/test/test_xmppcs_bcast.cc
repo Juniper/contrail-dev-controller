@@ -58,9 +58,9 @@ struct PortInfo input[] = {
 
 class AgentBgpXmppPeerTest : public AgentXmppChannel {
 public:
-    AgentBgpXmppPeerTest(XmppChannel *channel, std::string xs, 
+    AgentBgpXmppPeerTest(std::string xs,
                          std::string lr, uint8_t xs_idx) :
-        AgentXmppChannel(Agent::GetInstance(), channel, xs, lr, xs_idx), 
+        AgentXmppChannel(Agent::GetInstance(), xs, lr, xs_idx),
         rx_count_(0), rx_channel_event_queue_ (
             TaskScheduler::GetInstance()->GetTaskId("xmpp::StateMachine"), 0,
             boost::bind(&AgentBgpXmppPeerTest::ProcessChannelEvent, this, _1)) {
@@ -161,13 +161,7 @@ protected:
         xc_s->Shutdown();
         client->WaitForIdle();
 
-        TaskScheduler::GetInstance()->Stop();
-        Agent::GetInstance()->controller()->unicast_cleanup_timer().cleanup_timer_->Fire();
-        TaskScheduler::GetInstance()->Start();
-        client->WaitForIdle();
-        Agent::GetInstance()->controller()->Cleanup();
-        client->WaitForIdle();
- 
+        ShutdownAgentController(Agent::GetInstance()); 
         mock_peer.reset();
         mock_peer_s.reset();
 
@@ -384,9 +378,10 @@ protected:
 	xc_p->ConfigUpdate(xmppc_p_cfg);
         cchannel_p = xc_p->FindChannel(XmppInit::kControlNodeJID); 
         //Create agent bgp peer
-	bgp_peer.reset(new AgentBgpXmppPeerTest(cchannel_p,
+	bgp_peer.reset(new AgentBgpXmppPeerTest(
                        Agent::GetInstance()->controller_ifmap_xmpp_server(0), 
                        Agent::GetInstance()->multicast_label_range(0), 0));
+    bgp_peer.get()->RegisterXmppChannel(cchannel_p);
 	Agent::GetInstance()->set_controller_xmpp_channel(bgp_peer.get(), 0);
 	xc_p->RegisterConnectionEvent(xmps::BGP,
 	    boost::bind(&AgentBgpXmppPeerTest::HandleXmppChannelEvent, bgp_peer.get(), _2));
@@ -411,9 +406,10 @@ protected:
 	xc_s->ConfigUpdate(xmppc_s_cfg);
         cchannel_s = xc_s->FindChannel(XmppInit::kControlNodeJID);
         //Create agent bgp peer
-	bgp_peer_s.reset(new AgentBgpXmppPeerTest(cchannel_s,
+	bgp_peer_s.reset(new AgentBgpXmppPeerTest(
                          Agent::GetInstance()->controller_ifmap_xmpp_server(1), 
                          Agent::GetInstance()->multicast_label_range(1), 1));
+    bgp_peer.get()->RegisterXmppChannel(cchannel_s);
 	Agent::GetInstance()->set_controller_xmpp_channel(bgp_peer_s.get(), 1);
 	xc_s->RegisterConnectionEvent(xmps::BGP,
 	    boost::bind(&AgentBgpXmppPeerTest::HandleXmppChannelEvent, bgp_peer_s.get(), _2));
@@ -504,10 +500,12 @@ protected:
 	SendBcastRouteMessage(mock_peer_s.get(), "vrf1",
 			      "1.1.1.255", alloc_label,  
                               "127.0.0.4", alloc_label+10);
+    client->WaitForIdle();
+
 	// Bcast Route with updated olist 
 	WAIT_FOR(1000, 10000, (bgp_peer_s.get()->Count() == 3));
-
-	NextHop *nh = const_cast<NextHop *>(rt->GetActiveNextHop());
+    WAIT_FOR(1000, 10000, (client->CompositeNHCount() == 4));
+    NextHop *nh = const_cast<NextHop *>(rt->GetActiveNextHop());
 	CompositeNH *cnh = static_cast<CompositeNH *>(nh);
         MulticastGroupObject *obj;
 	ASSERT_TRUE(nh != NULL);
@@ -534,16 +532,18 @@ protected:
 	SendBcastRouteMessage(mock_peer_s.get(), "vrf1",
 			      "255.255.255.255", alloc_label+1,  
                               "127.0.0.4", alloc_label + 11);
+    client->WaitForIdle();
+
 	// Bcast Route with updated olist
 	WAIT_FOR(1000, 10000, (bgp_peer_s.get()->Count() == 4));
-
+    WAIT_FOR(1000, 10000, (client->CompositeNHCount() == 6));
 	nh = const_cast<NextHop *>(rt_m->GetActiveNextHop());
 	ASSERT_TRUE(nh != NULL);
 	ASSERT_TRUE(nh->GetType() == NextHop::COMPOSITE);
 	cnh = static_cast<CompositeNH *>(nh);
 	obj = MulticastHandler::GetInstance()->FindGroupObject("vrf1", addr);
 	WAIT_FOR(1000, 1000, (obj->GetSourceMPLSLabel() != 0));
-    ASSERT_TRUE(cnh->ComponentNHCount() == 2);
+    ASSERT_TRUE(cnh->ComponentNHCount() == 3);
     intf_cnh = static_cast<const CompositeNH *>(cnh->GetNH(1));
     EXPECT_TRUE(intf_cnh->ComponentNHCount() == 2);
 

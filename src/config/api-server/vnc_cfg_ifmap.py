@@ -265,11 +265,15 @@ class VncIfmapClient(VncIfmapClientGen):
 
         # del meta,id2 from cache and del id if this was last meta
         def _id_to_metas_delete(id1, id2, meta_name):
-            # if meta is prop, noop
             if meta_name not in self._id_to_metas[id1]:
                 return
             if not self._id_to_metas[id1][meta_name]:
+                del self._id_to_metas[id1][meta_name]
+                if not self._id_to_metas[id1]:
+                    del self._id_to_metas[id1]
                 return
+
+            # if meta is prop, noop
             if 'id' not in self._id_to_metas[id1][meta_name][0]:
                 return
             self._id_to_metas[id1][meta_name] = \
@@ -279,14 +283,13 @@ class VncIfmapClient(VncIfmapClientGen):
         if metadata:
             meta_name = metadata.replace('contrail:', '')
             # replace with remaining refs
-            _id_to_metas_delete(id1, id2, meta_name)
-            if not self._id_to_metas[id1][meta_name]:
-                del self._id_to_metas[id1][meta_name]
-            if not self._id_to_metas[id1]:
-                del self._id_to_metas[id1]
+            for (id_x, id_y) in [(id1, id2), (id2, id1)]:
+                _id_to_metas_delete(id_x, id_y, meta_name)
         else: # no meta specified remove all links from id1 to id2
-            for meta_name in self._id_to_metas.get(id1, []):
-                _id_to_metas_delete(id1, id2, meta_name)
+            for (id_x, id_y) in [(id1, id2), (id2, id1)]:
+                meta_names = self._id_to_metas.get(id_x, {}).keys()
+                for meta_name in meta_names:
+                    _id_to_metas_delete(id_x, id_y, meta_name)
     # end _delete_id_pair_meta
 
     def _update_id_self_meta(self, update, meta):
@@ -366,6 +369,14 @@ class VncIfmapClient(VncIfmapClientGen):
                    self._id_to_metas[self_imid][meta_name] = [{'meta':m,
                                                                'id': id2}]
 
+                if id2 not in self._id_to_metas:
+                    self._id_to_metas[id2] = {}
+                if meta_name in self._id_to_metas[id2]:
+                   self._id_to_metas[id2][meta_name].append({'meta':m,
+                                                             'id': self_imid})
+                else:
+                   self._id_to_metas[id2][meta_name] = [{'meta':m,
+                                                         'id': self_imid}]
         if self.accumulator is not None:
             self.accumulator.append(requests)
             self.accumulated_request_len += len(requests)
@@ -1232,6 +1243,11 @@ class VncZkClient(object):
         return self._subnet_allocators.get(subnet)
     # end _get_subnet_allocator
 
+    def subnet_is_addr_allocated(self, subnet, addr):
+        allocator = self._get_subnet_allocator(subnet)
+        return allocator.read(addr)
+    # end subnet_is_addr_allocated
+
     def subnet_alloc_req(self, subnet, addr=None):
         allocator = self._get_subnet_allocator(subnet)
         try:
@@ -1598,6 +1614,10 @@ class VncDbClient(object):
     def useragent_kv_delete(self, key):
         return self._cassandra_db.useragent_kv_delete(key)
     # end useragent_kv_delete
+
+    def subnet_is_addr_allocated(self, subnet, addr):
+        return self._zk_db.subnet_is_addr_allocated(subnet, addr)
+    # end subnet_is_addr_allocated
 
     def subnet_alloc_req(self, subnet, addr=None):
         return self._zk_db.subnet_alloc_req(subnet, addr)

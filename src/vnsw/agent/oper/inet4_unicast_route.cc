@@ -280,7 +280,7 @@ AgentPath *Inet4UnicastRouteEntry::AllocateEcmpPath(Agent *agent,
     FillTrace(rt_info, AgentRoute::CHANGE_PATH, path);
     OPER_TRACE(Route, rt_info);
     AGENT_ROUTE_LOG("Path change", ToString(), vrf()->GetName(),
-                    agent->ecmp_peer());
+                    GETPEERNAME(agent->ecmp_peer()));
 
     return path;
 }
@@ -293,8 +293,7 @@ bool Inet4UnicastRouteEntry::EcmpDeletePath(AgentPath *path) {
         return false;
     }
 
-    if (path->peer()->GetType() != Peer::LOCAL_VM_PORT_PEER ||
-        path->path_preference().ecmp() == false) {
+    if (path->peer()->GetType() != Peer::LOCAL_VM_PORT_PEER) {
         return false;
     }
 
@@ -310,7 +309,8 @@ bool Inet4UnicastRouteEntry::EcmpDeletePath(AgentPath *path) {
             static_cast<const AgentPath *>(it.operator->());
 
         if (it_path->peer() &&
-            it_path->peer()->GetType() == Peer::LOCAL_VM_PORT_PEER)
+            it_path->peer()->GetType() == Peer::LOCAL_VM_PORT_PEER &&
+            it_path != path)
             count++;
     }
 
@@ -318,7 +318,9 @@ bool Inet4UnicastRouteEntry::EcmpDeletePath(AgentPath *path) {
     // Sanity check. When more than one LOCAL_VM_PORT_PEER, ECMP must be present
     if (count >= 1) {
         ecmp = FindPath(agent->ecmp_peer());
-        assert(ecmp != NULL);
+        if (ecmp == NULL) {
+            return false;
+        }
     }
 
     if (count == 1 && ecmp) {
@@ -433,7 +435,7 @@ void Inet4UnicastRouteEntry::AppendEcmpPath(Agent *agent,
     FillTrace(rt_info, AgentRoute::CHANGE_PATH, path);
     OPER_TRACE(Route, rt_info);
     AGENT_ROUTE_LOG("Path change", ToString(), vrf()->GetName(),
-                    agent->ecmp_peer());
+                    GETPEERNAME(agent->ecmp_peer()));
 }
 
 void Inet4UnicastRouteEntry::DeleteComponentNH(Agent *agent,
@@ -473,7 +475,7 @@ void Inet4UnicastRouteEntry::DeleteComponentNH(Agent *agent,
     FillTrace(rt_info, AgentRoute::CHANGE_PATH, path);
     OPER_TRACE(Route, rt_info);
     AGENT_ROUTE_LOG("Path change", ToString(), vrf()->GetName(),
-                    agent->ecmp_peer());
+                    GETPEERNAME(agent->ecmp_peer()));
 }
 
 const NextHop* Inet4UnicastRouteEntry::GetLocalNextHop() const {
@@ -770,12 +772,13 @@ Inet4UnicastAgentRouteTable::AddLocalVmRouteReq(const Peer *peer,
                                                 const SecurityGroupList &sg_list,
                                                 bool force_policy,
                                                 const PathPreference
-                                                &path_preference) {
+                                                &path_preference,
+                                                const Ip4Address &subnet_gw_ip) {
     VmInterfaceKey intf_key(AgentKey::ADD_DEL_CHANGE, intf_uuid, "");
     LocalVmRoute *data = new LocalVmRoute(intf_key, label,
                                     VxLanTable::kInvalidvxlan_id, force_policy,
                                     vn_name, InterfaceNHFlags::INET4, sg_list,
-                                    path_preference);
+                                    path_preference, subnet_gw_ip);
 
     AddLocalVmRouteReq(peer, vm_vrf, addr, plen, data);
 }
@@ -793,7 +796,8 @@ Inet4UnicastAgentRouteTable::AddLocalVmRoute(const Peer *peer,
                                              const SecurityGroupList &sg_list,
                                              bool force_policy,
                                              const PathPreference
-                                             &path_preference) {
+                                             &path_preference,
+                                             const Ip4Address &subnet_gw_ip) {
     DBRequest req(DBRequest::DB_ENTRY_ADD_CHANGE);
     req.key.reset(new Inet4UnicastRouteKey(peer, vm_vrf, addr, plen));
 
@@ -801,7 +805,7 @@ Inet4UnicastAgentRouteTable::AddLocalVmRoute(const Peer *peer,
     req.data.reset(new LocalVmRoute(intf_key, label, VxLanTable::kInvalidvxlan_id,
                                     force_policy, vn_name,
                                     InterfaceNHFlags::INET4, sg_list,
-                                    path_preference));
+                                    path_preference, subnet_gw_ip));
     UnicastTableProcess(Agent::GetInstance(), vm_vrf, req);
 }
 

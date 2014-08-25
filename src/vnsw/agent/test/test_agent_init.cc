@@ -76,7 +76,9 @@ void TestAgentInit::InitVmwareInterface() {
 void TestAgentInit::InitLogging() {
     Sandesh::SetLoggingParams(params_->log_local(),
                               params_->log_category(),
-                              params_->log_level());
+                              params_->log_level(),
+                              false,
+                              params_->log_flow());
 }
 
 // Connect to collector specified in config, if discovery server is not set
@@ -415,6 +417,11 @@ void TestAgentInit::Shutdown() {
 
     agent_->cfg()->Shutdown();
     agent_->diag_table()->Shutdown();
+
+    if (agent_->ksync()) {
+        agent_->ksync()->Shutdown();
+    }
+
 }
 
 // Shutdown IO channel to controller+DNS and Packet interface

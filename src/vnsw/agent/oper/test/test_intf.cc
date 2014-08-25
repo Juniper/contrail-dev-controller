@@ -333,7 +333,7 @@ TEST_F(IntfTest, index_reuse) {
     intf_idx = VmPortGetId(8);
     client->Reset();
 
-    sock->SetBlockMsgProcessing(true);
+    InterfaceRef intf(VmPortGet(8));
     DeleteVmportEnv(input1, 1, true);
     WAIT_FOR(1000, 1000, (VmPortFind(8) == false));
     client->Reset();
@@ -344,7 +344,7 @@ TEST_F(IntfTest, index_reuse) {
     client->Reset();
     DeleteVmportEnv(input2, 1, true);
     WAIT_FOR(1000, 1000, (VmPortFind(9) == false));
-    sock->SetBlockMsgProcessing(false);
+    intf.reset();
     client->WaitForIdle();
     usleep(2000);
     client->WaitForIdle();
@@ -375,7 +375,7 @@ TEST_F(IntfTest, entry_reuse) {
     intf_idx = VmPortGetId(8);
     client->Reset();
 
-    sock->SetBlockMsgProcessing(true);
+    InterfaceRef intf(VmPortGet(8));
     DeleteVmportEnv(input1, 1, false);
     WAIT_FOR(1000, 1000, (VmPortFind(8) == false));
     client->Reset();
@@ -384,7 +384,7 @@ TEST_F(IntfTest, entry_reuse) {
     WAIT_FOR(1000, 1000, (VmPortFind(8) == true));
     EXPECT_EQ(VmPortGetId(8), intf_idx);
     client->Reset();
-    sock->SetBlockMsgProcessing(false);
+    intf.reset();
     usleep(2000);
     client->WaitForIdle();
     DeleteVmportEnv(input1, 1, true);
@@ -2268,6 +2268,52 @@ TEST_F(IntfTest, AdminState_2) {
     client->WaitForIdle();
     IntfCfgDel(input, 0);
     client->WaitForIdle();
+}
+
+TEST_F(IntfTest, Intf_l2mode_deactivate_activat_via_os_state) {
+    struct PortInfo input[] = {
+        {"vnet1", 1, "1.1.1.10", "00:00:00:01:01:01", 1, 1},
+    };
+
+    //Setup L2 environment
+    client->Reset();
+    AddEncapList("VXLAN", "MPLSoGRE", "MPLSoUDP");
+    CreateVmportEnv(input, 1);
+    WAIT_FOR(1000, 1000, (VmPortActive(input, 0) == true));
+    client->WaitForIdle();
+
+    //Verify L2 interface
+    EXPECT_TRUE(VmPortFind(1));
+    VmInterface *vm_interface = static_cast<VmInterface *>(VmPortGet(1));
+    EXPECT_TRUE(vm_interface->vxlan_id() != 0);
+    uint32_t vxlan_id = vm_interface->vxlan_id();
+
+    //Deactivate OS state (IF down)
+    DBRequest req(DBRequest::DB_ENTRY_ADD_CHANGE);
+    req.key.reset(new VmInterfaceKey(AgentKey::RESYNC, vm_interface->GetUuid(),
+                                     vm_interface->name()));
+    req.data.reset(new VmInterfaceOsOperStateData());
+    vm_interface->set_test_oper_state(false);
+    Agent::GetInstance()->interface_table()->Enqueue(&req);
+    client->WaitForIdle();
+
+    EXPECT_TRUE(vm_interface->vxlan_id() == 0);
+
+    //Activate OS state (IF up)
+    DBRequest req2(DBRequest::DB_ENTRY_ADD_CHANGE);
+    req2.key.reset(new VmInterfaceKey(AgentKey::RESYNC, vm_interface->GetUuid(),
+                                     vm_interface->name()));
+    req2.data.reset(new VmInterfaceOsOperStateData());
+    vm_interface->set_test_oper_state(true);
+    Agent::GetInstance()->interface_table()->Enqueue(&req2);
+    client->WaitForIdle();
+
+    EXPECT_TRUE(vm_interface->vxlan_id() == vxlan_id);
+
+    //Cleanup
+    DeleteVmportEnv(input, 1, true);
+    client->WaitForIdle();
+    EXPECT_FALSE(VmPortFind(1));
 }
 
 int main(int argc, char **argv) {
