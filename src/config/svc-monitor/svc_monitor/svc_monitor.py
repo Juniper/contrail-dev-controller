@@ -103,6 +103,11 @@ class SvcMonitor(object):
                                       svc_mode='in-network-nat',
                                       hypervisor_type='network-namespace',
                                       scaling=True)
+        # create default loadbalancer template
+        self._create_default_template('haproxy-loadbalancer-template', 'loadbalancer',
+                                      image_name='in-network',
+                                      hypervisor_type='network-namespace',
+                                      scaling=True)
 
         # load vrouter scheduler
         self.vrouter_scheduler = importutils.import_object(
@@ -193,7 +198,10 @@ class SvcMonitor(object):
         if not vm_back_refs:
             return False
         si_props = si_obj.get_service_instance_properties()
-        max_instances = si_props.get_scale_out().get_max_instances()
+        if si_props.get_scale_out():
+            max_instances = si_props.get_scale_out().get_max_instances()
+        else:
+            max_instances = 1
         if max_instances == len(vm_back_refs):
             return True
         return False
@@ -233,6 +241,7 @@ class SvcMonitor(object):
             if not si_vn_str:
                 continue
 
+            si_entry[itf_type + '-vn'] = si_vn_str
             try:
                 vn_obj = self._vnc_lib.virtual_network_read(
                     fq_name_str=si_vn_str)
@@ -721,6 +730,7 @@ def parse_args(args_str):
             'svc_monitor.scheduler.vrouter_scheduler.RandomScheduler',
         'analytics_server_ip': '127.0.0.1',
         'analytics_server_port': '8081',
+        'availability_zone': None,
     }
 
     if args.conf_file:
@@ -812,6 +822,8 @@ def parse_args(args_str):
         args.collectors = args.collectors.split()
     if args.region_name and args.region_name.lower() == 'none':
         args.region_name = None
+    if args.availability_zone and args.availability_zone.lower() == 'none':
+        args.availability_zone = None
     return args
 # end parse_args
 
