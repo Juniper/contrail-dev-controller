@@ -30,25 +30,6 @@ MulticastHandler *MulticastHandler::obj_;
 SandeshTraceBufferPtr MulticastTraceBuf(SandeshTraceBufferCreate("Multicast",
                                                                      1000));
 /*
- * Local funtion to derive subnet broadcast 
- */
-static Ip4Address GetSubnetBroadcastAddress(const Ip4Address &ip_prefix, 
-                                            uint32_t plen) {
-    Ip4Address broadcast(ip_prefix.to_ulong() | 
-                         ~(0xFFFFFFFF << (32 - plen)));
-    return broadcast;
-}
-
-/*
- * Local function to find if its a subnet member
- */
-static bool IsSubnetMember(const Ip4Address &ip, const Ip4Address &ip_prefix, 
-                           uint32_t plen) {
-    return ((ip_prefix.to_ulong() | ~(0xFFFFFFFF << (32 - plen))) == 
-            (ip.to_ulong() | ~(0xFFFFFFFF << (32 - plen)))); 
-}
-
-/*
  * Registeration for notification
  * VM - Looking for local VM added 
  * VN - Looking for subnet information from VN 
@@ -77,238 +58,24 @@ void MulticastHandler::AddL2BroadcastRoute(MulticastGroupObject *obj,
     boost::system::error_code ec;
     MCTRACE(Log, "add L2 bcast route ", vrf_name, addr.to_string(), 0);
     //Add Layer2 FF:FF:FF:FF:FF:FF
-    ComponentNHKeyList component_nh_key_list = GetL2ComponentNHKeyList(obj);
-    Layer2AgentRouteTable::AddLayer2BroadcastRoute(vrf_name, vn_name,
+    ComponentNHKeyList component_nh_key_list =
+        GetInterfaceComponentNHKeyList(obj, InterfaceNHFlags::LAYER2);
+    Layer2AgentRouteTable::AddLayer2BroadcastRoute(agent_->local_vm_peer(),
+                                                   vrf_name, vn_name,
                                                    label, vxlan_id,
+                                                   Composite::L2INTERFACE,
                                                    component_nh_key_list);
 }
 
 /*
  * Route address 255.255.255.255 deletion from last VM in VN del
  */
-void MulticastHandler::DeleteBroadcast(const std::string &vrf_name,
-                                       const Ip4Address &addr)
+void MulticastHandler::DeleteBroadcast(const Peer *peer,
+                                       const std::string &vrf_name)
 {
     boost::system::error_code ec;
-    MCTRACE(Log, "delete bcast route ", vrf_name, addr.to_string(), 0);
-    Inet4MulticastAgentRouteTable::DeleteMulticastRoute(vrf_name,
-                       IpAddress::from_string("0.0.0.0", ec).to_v4(),
-                       addr);
-    Layer2AgentRouteTable::DeleteBroadcastReq(vrf_name);
-}
-
-/*
- * Called from IPAM addition in VN.
- * Creates empty comp NH and add the route pointing to it.
- * Later VM additions result in modification of comp NH
- */
-void MulticastHandler::AddSubnetRoute(const std::string &vrf_name,
-                                      const Ip4Address &addr, 
-                                      const std::string &vn_name)
-{
-    boost::system::error_code ec;
-    MulticastGroupObject *subnet_broadcast = this->FindGroupObject(vrf_name,
-                                                                   addr);
-    ComponentNHKeyList component_nh_key_list;
-    MCTRACE(Log, "subnet comp NH creation ", vrf_name, addr.to_string(), 0);
-    if (subnet_broadcast != NULL) {
-        subnet_broadcast->Deleted(false);
-        MCTRACE(Log, "mc obj rt added for subnet route ", 
-                vrf_name, addr.to_string(), 0);
-        AddChangeInterfaceCompositeNH(subnet_broadcast,
-                                      (InterfaceNHFlags::MULTICAST |
-                                       InterfaceNHFlags::INET4),
-                                      Composite::L3INTERFACE);
-        component_nh_key_list = GetL3ComponentNHKeyList(subnet_broadcast);
-    }
-
-    DBRequest req;
-    CompositeNHKey *key;
-    CompositeNHData *cnh_data;
-    key = new CompositeNHKey(Composite::L3COMP, false, component_nh_key_list,
-                             vrf_name);
-    req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-    req.key.reset(key);
-    cnh_data = new CompositeNHData();
-    req.data.reset(cnh_data);
-    agent_->nexthop_table()->Enqueue(&req);
-    MCTRACE(Log, "subnet route ", vrf_name, addr.to_string(), 0);
-    Inet4UnicastAgentRouteTable::AddSubnetBroadcastRoute(
-                                 agent_->local_vm_peer(),
-                                 vrf_name,
-                                 IpAddress::from_string("0.0.0.0", ec).to_v4(),
-                                 addr, vn_name, component_nh_key_list);
-
-}
-
-/*
- * Delete the subnet route for which IPAM is gone.
- * Comp NH goes off as referring route goes off and refcount is zero
- */
-void MulticastHandler::DeleteSubnetRoute(const std::string &vrf_name,
-                                         const Ip4Address &addr)
-{
-    MCTRACE(Log, "delete subnet route ", vrf_name, addr.to_string(), 0);
-    Inet4UnicastAgentRouteTable::DeleteReq(Agent::GetInstance()->local_vm_peer(), 
-                                           vrf_name, addr, 32, NULL);
-    MulticastGroupObject *subnet_broadcast = 
-        this->FindGroupObject(vrf_name, addr);
-    if (subnet_broadcast != NULL) {
-        subnet_broadcast->Deleted(true);
-        subnet_broadcast->FlushAllPeerInfo(INVALID_PEER_IDENTIFIER);
-        MCTRACE(Log, "rt gone mc obj marked for deletion for subnet route ", 
-                vrf_name, addr.to_string(), 0);
-    }
-}
-
-/*
- * Delete corresponding subnet route using IPAM of VN and delete ipam/vn
- * Also release vm if any from unresolved vm list dependant on this VN
- */
-void MulticastHandler::DeleteVnIPAM(const VnEntry *vn) 
-{
-    std::map<uuid, std::vector<VnIpam> > &vn_ipam_map = 
-        this->GetIpamMap();
-    std::vector<VnIpam> ipam_list = vn_ipam_map[vn->GetUuid()];
-    Ip4Address broadcast_addr;
-
-    MCTRACE(Info, "delete vnipam for ", vn->GetName());
-    if (ipam_list.size() == 0) {
-        MCTRACE(Info, "delete vnipam found no ipam for ", vn->GetName());
-        return;
-    }
-
-    boost::system::error_code ec;
-    std::vector<VnIpam>::iterator it = ipam_list.begin();    
-    while (it != ipam_list.end()) {    
-        broadcast_addr = (*it).GetBroadcastAddress();
-        //Delete route
-        MCTRACE(Log, "vn delete, remove subnet route ", 
-                GetAssociatedVrfForVn(vn->GetUuid()), 
-                broadcast_addr.to_string(), 0);
-        DeleteSubnetRoute(GetAssociatedVrfForVn(vn->GetUuid()),
-                          broadcast_addr);
-
-        //Erase will give the next object 
-        it = ipam_list.erase(it);
-    }
-
-    vn_ipam_map.erase(vn->GetUuid());
-    this->RemoveVrfVnAssociation(vn->GetUuid());
-}
-
-/* 
- * IPAM change handling
- * Delete subnet route of non existing IPAM
- * Add subnet route for new IPAM
- * No changes for retained IPAM
- * As this function is used for creation/modification also visit
- * unresolved VM list
- */
-void MulticastHandler::HandleIPAMChange(const VnEntry *vn, 
-                                        const std::vector<VnIpam> &ipam)
-{
-    bool evaluate_vmlist = false;
-    //std::map<uuid, std::vector<VnIpam> > &vn_ipam_map = 
-    //    this->GetIpamMap();
-    std::vector<VnIpam> &old_ipam = this->GetIpamMapList(vn->GetUuid());
-    //vm list is evaluated when vn is late or has been deleted and
-    //added again. In both the cases local ipam goes is flushed and that
-    //means vm need to be revisited. In rest of the cases where ipam is 
-    //populated VM already had been seen.
-    if (old_ipam.size() == 0) {
-        evaluate_vmlist = true;
-    }
-
-    //TODO Optimize by not keeping vnipam but subnet bcast address
-    std::sort(old_ipam.begin(), old_ipam.end());
-    std::vector<VnIpam>::iterator old_it = old_ipam.begin();
-    std::vector<VnIpam>::const_iterator new_it = ipam.begin();
-
-    //Diff and delete or add
-    while ((old_it != old_ipam.end()) && (new_it != ipam.end())) {
-        if (*old_it < *new_it) {
-            DeleteSubnetRoute(vn->GetVrf()->GetName(), 
-                              (*old_it).GetBroadcastAddress());
-            old_it = old_ipam.erase(old_it);
-        } else if (*new_it < *old_it) {
-            old_it = old_ipam.insert(old_it, (*new_it));
-        } else {
-            old_it++;
-            new_it++;
-        }
-    }
-
-    //Residual element handling
-    while (old_it != old_ipam.end()) {
-        DeleteSubnetRoute(vn->GetVrf()->GetName(), 
-                          (*old_it).GetBroadcastAddress());
-        old_it = old_ipam.erase(old_it);
-    }
-    for (; new_it != ipam.end(); new_it++) {
-        AddSubnetRoute(vn->GetVrf()->GetName(), 
-                       (*new_it).GetBroadcastAddress(),
-                       vn->GetName());
-        old_ipam.push_back(*new_it);
-    }
-
-    //Push back the common elements and new elements
-    assert(old_ipam.size() == ipam.size());
-
-    //Visit any unresolved vm list
-    if (evaluate_vmlist == true) {
-        this->VisitUnresolvedVMList(vn);
-    }
-    //Store the vrf name for this VN
-    this->set_vrf_nameForVn(vn->GetUuid(), vn->GetVrf()->GetName());
-}
-
-/*
- * VM dependant on VN will be moved to participating stage
- * This can happen when VM comes before VN is active with VRF and IPAM.
- */
-void MulticastHandler::VisitUnresolvedVMList(const VnEntry *vn)
-{
-    const Interface *intf = NULL;
-    const VmInterface *vm_itf = NULL;
-    std::vector<VnIpam> &ipam = this->GetIpamMapList(vn->GetUuid());
-
-    assert(ipam.size() != 0);
-
-    //Now go thru unresolved vm list
-    std::list<const VmInterface *> vmitf_list =
-        this->GetUnresolvedSubnetVMList(vn->GetUuid());
-
-    if (vmitf_list.size() == 0) {
-        return;
-    }
-    for (std::list<const VmInterface *>::iterator it_itf = vmitf_list.begin(); 
-         it_itf != vmitf_list.end();) {
-
-        vm_itf = (*it_itf);
-        intf = static_cast<const Interface *>(vm_itf);
-
-        if ((vm_itf == NULL) || ((intf->ipv4_active() != true) &&
-                                 (intf->l2_active() != true))) {
-            //Delete vm itf
-            it_itf++;
-            continue;
-        }
-        this->AddVmInterfaceInFloodGroup(vm_itf->vrf()->GetName(),
-                    vm_itf->GetUuid(), vn);
-        if (vn->Ipv4Forwarding()) {
-            for (std::vector<VnIpam>::const_iterator it = ipam.begin(); 
-                 it != ipam.end(); it++) {
-                if (IsSubnetMember(vm_itf->ip_addr(), (*it).ip_prefix, 
-                                   (*it).plen)) {
-                    this->AddVmInterfaceInSubnet(vm_itf->vrf()->GetName(),
-                                  GetSubnetBroadcastAddress(vm_itf->ip_addr(),
-                                  (*it).plen), vm_itf->GetUuid(), vn);
-                }
-            }
-        }
-        it_itf++;
-    }
+    MCTRACE(Log, "delete bcast route ", vrf_name, "255.255.255.255", 0);
+    Layer2AgentRouteTable::DeleteBroadcastReq(peer, vrf_name);
 }
 
 void MulticastHandler::HandleVxLanChange(const VnEntry *vn) {
@@ -332,7 +99,6 @@ void MulticastHandler::HandleVxLanChange(const VnEntry *vn) {
         Ip4Address broadcast =  IpAddress::from_string("255.255.255.255",
                                                        ec).to_v4();
         obj->set_vxlan_id(new_vxlan_id);
-        //EncapChanged(vn->GetVrf()->GetName());
         AddL2BroadcastRoute(obj, vn->GetVrf()->GetName(), vn->GetName(),
                             broadcast, obj->evpn_mpls_label(), new_vxlan_id);
     }
@@ -341,7 +107,6 @@ void MulticastHandler::HandleVxLanChange(const VnEntry *vn) {
 void MulticastHandler::HandleFamilyConfig(const VnEntry *vn) 
 {
     bool new_layer2_forwarding = vn->layer2_forwarding();
-    bool new_ipv4_forwarding = vn->Ipv4Forwarding();
 
     if (!vn->GetVrf())
         return;
@@ -356,23 +121,10 @@ void MulticastHandler::HandleFamilyConfig(const VnEntry *vn)
         if (!(new_layer2_forwarding) && (*it)->layer2_forwarding()) {
             (*it)->SetLayer2Forwarding(new_layer2_forwarding);
             if (IS_BCAST_MCAST((*it)->GetGroupAddress())) { 
-                Layer2AgentRouteTable::DeleteBroadcastReq((*it)->vrf_name());
+                Layer2AgentRouteTable::DeleteBroadcastReq(agent_->
+                                                          multicast_peer(),
+                                                          (*it)->vrf_name());
             } 
-        }
-        if (!(new_ipv4_forwarding) && (*it)->Ipv4Forwarding()) {
-            (*it)->SetIpv4Forwarding(new_ipv4_forwarding);
-            if (IS_BCAST_MCAST((*it)->GetGroupAddress())) { 
-                Inet4MulticastAgentRouteTable::DeleteMulticastRoute(
-                                           (*it)->vrf_name(), 
-                                           (*it)->GetSourceAddress(), 
-                                           (*it)->GetGroupAddress());
-            } else {
-                DeleteSubnetRoute((*it)->vrf_name(), (*it)->GetGroupAddress());
-            }
-        }
-        if ((*it)->IsMultiProtoSupported() && 
-            ((*it)->GetSourceMPLSLabel() != 0)) {
-            this->TriggerCompositeNHChange(*it);
         }
     }
 }
@@ -381,27 +133,44 @@ void MulticastHandler::HandleFamilyConfig(const VnEntry *vn)
 void MulticastHandler::ModifyVN(DBTablePartBase *partition, DBEntryBase *e)
 {
     const VnEntry *vn = static_cast<const VnEntry *>(e);
-    const std::vector<VnIpam> &ipam = vn->GetVnIpam();
-    bool ret = false;
 
-    MCTRACE(Info, "Modifyvn for ", vn->GetName());
-    if ((vn->IsDeleted() == true) || (ipam.size() == 0) ||
-        (vn->GetVrf() == NULL)) { 
-        MulticastHandler::GetInstance()->DeleteVnIPAM(vn);
-        ret = true;
-    }
-
+    MulticastHandler::GetInstance()->HandleIpam(vn);
     MulticastHandler::GetInstance()->HandleFamilyConfig(vn);
     MulticastHandler::GetInstance()->HandleVxLanChange(vn);
+}
 
-    if (ret)
+void MulticastHandler::HandleIpam(const VnEntry *vn) {
+    const uuid &vn_uuid = vn->GetUuid();
+    const std::vector<VnIpam> &ipam = vn->GetVnIpam();
+    bool delete_ipam = false;
+    std::map<uuid, string>::iterator it;
+    string vrf_name;
+
+    if (!(vn->Ipv4Forwarding()) || vn->IsDeleted() || (ipam.size() == 0) ||
+        (vn->GetVrf() == NULL)) {
+        delete_ipam = true;
+    }
+
+    it = vn_vrf_mapping_.find(vn_uuid);
+    if (it != vn_vrf_mapping_.end()) {
+        vrf_name = it->second;
+        vrf_ipam_mapping_.erase(vrf_name);
+        if (delete_ipam) {
+            vn_vrf_mapping_.erase(vn_uuid);
+            return;
+        }
+    } else {
+        if (delete_ipam == false) {
+            vrf_name = vn->GetVrf()->GetName();
+            vn_vrf_mapping_.insert(std::pair<uuid, string>(vn_uuid, vrf_name));
+        }
+    }
+
+    if (delete_ipam)
         return;
 
-    //Now store the ipam for this vn and handle related ops
-    MCTRACE(Info, "Modifyvn for handle ipam change ", vn->GetName());
-    if (vn->Ipv4Forwarding()) {
-        MulticastHandler::GetInstance()->HandleIPAMChange(vn, ipam);
-    }
+    vrf_ipam_mapping_.insert(std::pair<string, std::vector<VnIpam> >(vrf_name,
+                                                                     ipam));
 }
 
 /* Registered call for VM */
@@ -415,45 +184,18 @@ void MulticastHandler::ModifyVmInterface(DBTablePartBase *partition,
         return;
     }
 
-    if (intf->IsDeleted() || ((intf->ipv4_active() == false) &&
-                             (intf->l2_active() == false))) {
+    if (intf->IsDeleted() || (intf->l2_active() == false)) {
         MulticastHandler::GetInstance()->DeleteVmInterface(intf);
         return;
     }
 
     vm_itf = static_cast<const VmInterface *>(intf);
-    Ip4Address vm_itf_ip = vm_itf->ip_addr();
     assert(vm_itf->vn() != NULL);
 
     MulticastHandler::GetInstance()->AddVmInterfaceInFloodGroup(
                                      vm_itf->vrf()->GetName(),
                                      vm_itf->GetUuid(), 
                                      vm_itf->vn());
-    if (vm_itf->vn()->Ipv4Forwarding()) {
-        //PIck up ipam from local ipam list
-        std::vector<VnIpam> ipam = MulticastHandler::GetInstance()->
-            GetIpamMapList(vm_itf->vn()->GetUuid());
-        for(std::vector<VnIpam>::const_iterator it = ipam.begin(); 
-            it != ipam.end(); it++) {
-            if (IsSubnetMember(vm_itf_ip, (*it).ip_prefix, (*it).plen)) {
-                MCTRACE(Log, "vm interface add being issued for ", 
-                        vm_itf->vrf()->GetName(),
-                        vm_itf->ip_addr().to_string(), 0);
-                MulticastHandler::GetInstance()->AddVmInterfaceInSubnet(
-                                  vm_itf->vrf()->GetName(),
-                                  GetSubnetBroadcastAddress(vm_itf->ip_addr(),
-                                  (*it).plen), vm_itf->GetUuid(),
-                                  vm_itf->vn());
-                break;
-            }
-        }
-    }
-    MCTRACE(Log, "vm ipam not found, add to unresolve ", 
-            vm_itf->vrf()->GetName(),
-            vm_itf->ip_addr().to_string(), 0);
-    MulticastHandler::GetInstance()->AddToUnresolvedSubnetVMList(
-                                           vm_itf->vn()->GetUuid(), 
-                                           vm_itf);
     return;
 }
 
@@ -466,18 +208,10 @@ void MulticastHandler::DeleteRouteandMPLS(MulticastGroupObject *obj)
 {
     //delete mcast routes, subnet bcast gets deleted via vn delete
     if (IS_BCAST_MCAST(obj->GetGroupAddress())) { 
-        DeleteBroadcast(obj->vrf_name(), obj->GetGroupAddress());
-        uint32_t evpn_label = obj->evpn_mpls_label();
-        if (evpn_label != MplsLabel::INVALID) {
-            MplsLabel::DeleteReq(obj->evpn_mpls_label());
-            MCTRACE(Log, "delete evpn mpls label ", obj->vrf_name(),
-                    obj->GetGroupAddress().to_string(), evpn_label);
-        }
+        obj->FlushAllPeerInfo(agent_, INVALID_PEER_IDENTIFIER);
     }
-    obj->FlushAllPeerInfo(INVALID_PEER_IDENTIFIER);
-    MCTRACE(Log, "delete route mpls ", obj->vrf_name(),
-            obj->GetGroupAddress().to_string(),
-            obj->GetSourceMPLSLabel());
+    MCTRACE(Log, "delete route ", obj->vrf_name(),
+            obj->GetGroupAddress().to_string(), 0);
 }
 
 /*
@@ -502,30 +236,22 @@ void MulticastHandler::DeleteVmInterface(const Interface *intf)
         if (((*it)->DeleteLocalMember(vm_itf->GetUuid()) == true) && 
             ((*it)->IsDeleted() == false) &&
             ((*it)->GetLocalListSize() != 0)) {
-            this->TriggerCompositeNHChange(*it);
-            MCTRACE(Log, "trigger cnh  ", (*it)->vrf_name(),
-                    (*it)->GetGroupAddress().to_string(),
-                    (*it)->GetSourceMPLSLabel());
+            TriggerLocalRouteChange(*it, agent_->local_vm_peer());
+            MCTRACE(Log, "modify route, vm is deleted ", (*it)->vrf_name(),
+                    (*it)->GetGroupAddress().to_string(), 0);
         }
 
         if((*it)->GetLocalListSize() == 0) {
-            MCTRACE(Info, "Del vm notify ", vm_itf->ip_addr().to_string());
-            //Empty tunnel list
-            (*it)->FlushAllPeerInfo(INVALID_PEER_IDENTIFIER);
-            if ((*it)->IsDeleted() == false) {
-                this->TriggerCompositeNHChange(*it);
-            }
+            MCTRACE(Info, "Del route for multicast address",
+                    vm_itf->ip_addr().to_string());
             //Time to delete route(for mcast address) and mpls
-            this->DeleteRouteandMPLS(*it);
+            DeleteRouteandMPLS(*it);
             /* delete mcast object */
-            this->DeleteMulticastObject((*it)->vrf_name_, (*it)->grp_address_);
+            DeleteMulticastObject((*it)->vrf_name_, (*it)->grp_address_);
         } 
     }
-    //Remove all mc obj references from reverse map of vm to mc obj and the
-    //delete the uuid of vm
-    this->vm_to_mcobj_list_[vm_itf->GetUuid()].clear();
-    this->DeleteVmToMulticastObjMap(vm_itf->GetUuid());
-    this->DeleteVMFromUnResolvedList(vm_itf);
+    vm_to_mcobj_list_[vm_itf->GetUuid()].clear();
+    DeleteVmToMulticastObjMap(vm_itf->GetUuid());
     MCTRACE(Info, "Del vm notify done ", vm_itf->ip_addr().to_string());
 }
 
@@ -582,59 +308,6 @@ MulticastGroupObject *MulticastHandler::FindActiveGroupObject(
     return obj;
 }
 
-void MulticastHandler::AddChangeMultiProtocolCompositeNH(
-                                     MulticastGroupObject *obj, uint32_t label)
-{
-    DBRequest req;
-    NextHopKey *key;
-    ComponentNHKeyList component_nh_key_list;
-
-    if (obj->IsMultiProtoSupported() == false &&
-        obj->Ipv4Forwarding()) {
-        ComponentNHKeyList l3_component_nh_key_list =
-            GetL3ComponentNHKeyList(obj);
-        key = new CompositeNHKey(Composite::L3COMP, false,
-                l3_component_nh_key_list, obj->vrf_name());
-        req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-        req.key.reset(key);
-        req.data.reset(new CompositeNHData());
-        Agent::GetInstance()->nexthop_table()->Enqueue(&req);
-
-        MplsLabel::CreateMcastLabelReq(label, Composite::L3COMP,
-                l3_component_nh_key_list, obj->vrf_name());
-        return;
-    }
-
-    if (obj->Ipv4Forwarding()) {
-        ComponentNHKeyList l3_component_nh_key_list =
-            GetL3ComponentNHKeyList(obj);
-        ComponentNHKeyPtr l3_component_key(new ComponentNHKey(
-                    0, Composite::L3COMP, false, l3_component_nh_key_list,
-                    obj->vrf_name()));
-        component_nh_key_list.push_back(l3_component_key);
-    }
-    if (obj->layer2_forwarding()) {
-        ComponentNHKeyList l2_component_nh_key_list =
-            GetL2ComponentNHKeyList(obj);
-        ComponentNHKeyPtr l2_component_key(new ComponentNHKey(
-                    0, Composite::L2COMP, false, l2_component_nh_key_list,
-                    obj->vrf_name()));
-        component_nh_key_list.push_back(l2_component_key);
-    }
-
-    MCTRACE(Log, "enqueue multiproto comp ", obj->vrf_name(),
-            obj->GetGroupAddress().to_string(), component_nh_key_list.size());
-    key = new CompositeNHKey(Composite::MULTIPROTO, false,
-                             component_nh_key_list, obj->vrf_name());
-    req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-    req.key.reset(key);
-    req.data.reset(new CompositeNHData());
-    Agent::GetInstance()->nexthop_table()->Enqueue(&req);
-
-    MplsLabel::CreateMcastLabelReq(label, Composite::MULTIPROTO,
-                                   component_nh_key_list, obj->vrf_name());
-}
-
 ComponentNHKeyList
 MulticastHandler::GetInterfaceComponentNHKeyList(MulticastGroupObject *obj,
                                                  uint8_t interface_flags) {
@@ -648,282 +321,175 @@ MulticastHandler::GetInterfaceComponentNHKeyList(MulticastGroupObject *obj,
     return component_nh_key_list;
 }
 
-ComponentNHKeyList
-MulticastHandler::GetEvpnComponentNHKeyList(MulticastGroupObject *obj) {
-    ComponentNHKeyList component_nh_key_list;
-    for (TunnelOlist::const_iterator it = obj->GetEvpnOlist().begin();
-            it != obj->GetEvpnOlist().end(); it++) {
-        ComponentNHKeyPtr component_key_ptr(new ComponentNHKey(it->label_,
-                    agent_->fabric_vrf_name(),
-                    agent_->router_id(), it->daddr_,
-                    false, it->tunnel_bmap_));
-        component_nh_key_list.push_back(component_key_ptr);
-    }
-    return component_nh_key_list;
-}
-
-ComponentNHKeyList
-MulticastHandler::GetFabricComponentNHKeyList(MulticastGroupObject *obj) {
-    ComponentNHKeyList component_nh_key_list;
-    for (TunnelOlist::const_iterator it = obj->GetTunnelOlist().begin();
-            it != obj->GetTunnelOlist().end(); it++) {
-        ComponentNHKeyPtr component_key_ptr(new ComponentNHKey(it->label_,
-                    agent_->fabric_vrf_name(),
-                    agent_->router_id(), it->daddr_,
-                    false, it->tunnel_bmap_));
-        component_nh_key_list.push_back(component_key_ptr);
-    }
-    return component_nh_key_list;
-}
-
-ComponentNHKeyList
-MulticastHandler::GetL3ComponentNHKeyList(MulticastGroupObject *obj) {
-    if (obj == NULL) {
-        ComponentNHKeyList null;
-        return null;
-    }
-
-    ComponentNHKeyList fabric_component_nh_key_list;
-    ComponentNHKeyList interface_component_nh_key_list;
-
-    fabric_component_nh_key_list = GetFabricComponentNHKeyList(obj);
-    interface_component_nh_key_list =
-        GetInterfaceComponentNHKeyList(obj, (InterfaceNHFlags::INET4 |
-                                             InterfaceNHFlags::MULTICAST));
-
-    ComponentNHKeyList l3_component_nh_key_list;
-    ComponentNHKeyPtr component_key_ptr;
-    if (fabric_component_nh_key_list.size() != 0) {
-        component_key_ptr.reset(new ComponentNHKey(0, Composite::FABRIC,
-                    false, fabric_component_nh_key_list, obj->vrf_name()));
-        l3_component_nh_key_list.push_back(component_key_ptr);
-    }
-
-    if (interface_component_nh_key_list.size() != 0) {
-        component_key_ptr.reset(new ComponentNHKey(0, Composite::L3INTERFACE,
-                    false, interface_component_nh_key_list, obj->vrf_name()));
-        l3_component_nh_key_list.push_back(component_key_ptr);
-    }
-
-    return l3_component_nh_key_list;
-}
-
-ComponentNHKeyList
-MulticastHandler::GetL2ComponentNHKeyList(MulticastGroupObject *obj) {
-    ComponentNHKeyList fabric_component_nh_key_list;
-    ComponentNHKeyList evpn_component_nh_key_list;
-    ComponentNHKeyList interface_component_nh_key_list;
-
-    fabric_component_nh_key_list = GetFabricComponentNHKeyList(obj);
-    evpn_component_nh_key_list = GetEvpnComponentNHKeyList(obj);
-    interface_component_nh_key_list =
-        GetInterfaceComponentNHKeyList(obj, InterfaceNHFlags::LAYER2);
-
-
-    ComponentNHKeyPtr component_nh_key;
-    ComponentNHKeyList l2_component_nh_key_list;
-
-    if (fabric_component_nh_key_list.size() != 0) {
-        component_nh_key.reset(new ComponentNHKey(0, Composite::FABRIC, false,
-                    fabric_component_nh_key_list, obj->vrf_name()));
-        l2_component_nh_key_list.push_back(component_nh_key);
-    }
-
-    if (evpn_component_nh_key_list.size() != 0) {
-        component_nh_key.reset(new ComponentNHKey(0, Composite::EVPN, false,
-                    evpn_component_nh_key_list, obj->vrf_name()));
-        l2_component_nh_key_list.push_back(component_nh_key);
-    }
-
-    if (interface_component_nh_key_list.size() != 0) {
-        component_nh_key.reset(new ComponentNHKey(0, Composite::L2INTERFACE, false,
-                    interface_component_nh_key_list, obj->vrf_name()));
-        l2_component_nh_key_list.push_back(component_nh_key);
-    }
-
-    return l2_component_nh_key_list;
-}
-
-void MulticastHandler::FillEvpnCompositeNHReq(const string &vrf_name,
-                                              DBRequest &nh_req) {
-    boost::system::error_code ec;
-    Ip4Address broadcast =  IpAddress::from_string("255.255.255.255",
-                                                   ec).to_v4();
-    MulticastGroupObject *obj = FindGroupObject(vrf_name, broadcast);
-    if (obj && AddChangeEvpnCompositeNH(vrf_name, obj)) {
-        CompositeNHKey *nh_key = new CompositeNHKey(Composite::EVPN, false,
-                                     GetEvpnComponentNHKeyList(obj),
-                                     vrf_name);
-        nh_req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-        nh_req.key.reset(nh_key);
-        nh_req.data.reset(new CompositeNHData());
-    } else {
-        DiscardNH::Create();
-        nh_req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-        nh_req.key.reset(new DiscardNHKey());
-        nh_req.data.reset(new CompositeNHData());
-    }
-}
-
-bool MulticastHandler::AddChangeEvpnCompositeNH(const string &vrf_name,
-                                                MulticastGroupObject *obj)
-{
-    DBRequest req;
-    CompositeNHKey *key;
-    CompositeNHData *cnh_data;
-    ComponentNHKeyList component_nh_key_list;
-
-    component_nh_key_list = GetEvpnComponentNHKeyList(obj);
-    if (component_nh_key_list.size() == 0) {
-        return false;
-    }
-
-    MCTRACE(Log, "enqueue evpn comp", vrf_name, "255.255.255.255",
-            component_nh_key_list.size());
-    key = new CompositeNHKey(Composite::EVPN, false, component_nh_key_list,
-                             obj->vrf_name());
-    key->CreateTunnelNHReq(agent_);
-    req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-    req.key.reset(key);
-    cnh_data = new CompositeNHData();
-    req.data.reset(cnh_data);
-    Agent::GetInstance()->nexthop_table()->Enqueue(&req);
-    return true;
-}
-
-void MulticastHandler::AddChangeFabricCompositeNH(MulticastGroupObject *obj)
-{
-    DBRequest req;
-    CompositeNHKey *key;
-    ComponentNHKeyList component_nh_key_list;
-    CompositeNHData *cnh_data;
-
-    component_nh_key_list = GetFabricComponentNHKeyList(obj);
-    if (component_nh_key_list.size() == 0) {
+void MulticastHandler::TriggerLocalRouteChange(MulticastGroupObject *obj,
+                                          const Peer *peer) {
+    if (obj->layer2_forwarding() == false) {
         return;
     }
 
-    MCTRACE(Log, "enqueue fabric comp ", obj->vrf_name(),
-            obj->GetGroupAddress().to_string(), component_nh_key_list.size());
-    key = new CompositeNHKey(Composite::FABRIC, false, component_nh_key_list,
-                             obj->vrf_name());
-    key->CreateTunnelNHReq(agent_);
-    req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-    req.key.reset(key);
-    cnh_data = new CompositeNHData();
-    req.data.reset(cnh_data);
-    Agent::GetInstance()->nexthop_table()->Enqueue(&req);
-}
-
-void MulticastHandler::AddChangeInterfaceCompositeNH(MulticastGroupObject *obj,
-                                                     uint8_t type,
-                                                     Composite::Type comp_type)
-{
     DBRequest req;
-    NextHopKey *key; 
-    CompositeNHData *cnh_data;
     ComponentNHKeyList component_nh_key_list;
 
     component_nh_key_list =
-        GetInterfaceComponentNHKeyList(obj, type);
-    if (component_nh_key_list.size() == 0) {
-        return;
-    }
-
-    MCTRACE(Log, "enqueue interface comp ", obj->vrf_name(),
-            obj->GetGroupAddress().to_string(), component_nh_key_list.size());
-    key = new CompositeNHKey(comp_type, false, component_nh_key_list,
-                             obj->vrf_name());
-    req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-    req.key.reset(key);
-    cnh_data = new CompositeNHData();
-    req.data.reset(cnh_data);
-    Agent::GetInstance()->nexthop_table()->Enqueue(&req);
-}
-
-void MulticastHandler::TriggerL2CompositeNHChange(MulticastGroupObject *obj)
-{
-    DBRequest req;
-    NextHopKey *key; 
-    ComponentNHKeyList component_nh_key_list;
-
-    //Add fabric Comp NH
-    AddChangeFabricCompositeNH(obj);
-    AddChangeEvpnCompositeNH(obj->vrf_name(), obj);
-    AddChangeInterfaceCompositeNH(obj, InterfaceNHFlags::LAYER2,
-                                  Composite::L2INTERFACE);
-
-    component_nh_key_list = GetL2ComponentNHKeyList(obj);
-    MCTRACE(Log, "enqueue l2 comp ", obj->vrf_name(),
-            obj->GetGroupAddress().to_string(),component_nh_key_list.size());
-    key = new CompositeNHKey(Composite::L2COMP, false, component_nh_key_list,
-                             obj->vrf_name());
-    req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-    req.key.reset(key);
-    req.data.reset(new CompositeNHData());
-    Agent::GetInstance()->nexthop_table()->Enqueue(&req);
+        GetInterfaceComponentNHKeyList(obj, InterfaceNHFlags::LAYER2);
+    MCTRACE(Log, "enqueue route change with local peer",
+            obj->vrf_name(),
+            obj->GetGroupAddress().to_string(),
+            component_nh_key_list.size());
     //Add Layer2 FF:FF:FF:FF:FF:FF$
-    Layer2AgentRouteTable::AddLayer2BroadcastRoute(obj->vrf_name(),
+    Layer2AgentRouteTable::AddLayer2BroadcastRoute(peer,
+                                                   obj->vrf_name(),
                                                    obj->GetVnName(),
                                                    obj->evpn_mpls_label(),
                                                    obj->vxlan_id(),
+                                                   Composite::L2INTERFACE,
                                                    component_nh_key_list);
 }
 
-void MulticastHandler::TriggerCompositeNHChange(MulticastGroupObject *obj)
-{
-    if (obj->layer2_forwarding()) {
-        this->TriggerL2CompositeNHChange(obj);
-    }
-    if (obj->Ipv4Forwarding()) {
-        this->TriggerL3CompositeNHChange(obj);
+void MulticastHandler::TriggerRemoteRouteChange(MulticastGroupObject *obj,
+                                                const Peer *peer,
+                                                const TunnelOlist &olist,
+                                                uint64_t peer_identifier,
+                                                bool delete_op,
+                                                COMPOSITETYPE comp_type,
+                                                uint32_t label,
+                                                bool fabric) {
+    if (obj->layer2_forwarding() == false) {
+        return;
     }
 
-    if (obj->GetSourceMPLSLabel() != 0) {
-       this->AddChangeMultiProtocolCompositeNH(obj, obj->GetSourceMPLSLabel());
+    uint64_t obj_peer_identifier = obj->peer_identifier();
+
+    // Peer identifier cases
+    // if its a delete operation -
+    // 1) Internal delete (invalid peer identifier), dont update peer identifier
+    // as it is a forced removal.
+    // 2) Control node removing stales i.e. delete if local peer identifier is
+    // less than global peer identifier. 
+    //
+    // if its not a delete operation -
+    // 1) Update only if local peer identifier is less than or equal to sent
+    // global peer identifier.
+
+    // if its internal delete then peer_identifier will be 0xFFFFFFFF;
+    // if external delete(via control node) then its stale cleanup so delete 
+    // only when local peer identifier is less than global multicast sequence.
+    if (delete_op && peer_identifier <= obj_peer_identifier) {
+        return;
+    }
+
+    // - Update operation with lower sequence number sent compared to 
+    // local identifier, ignore
+    if (!delete_op && peer_identifier < obj_peer_identifier) {
+        return;
+    }
+
+    // After resetting tunnel and mpls label return if it was a delete call,
+    // dont update peer_identifier. Let it get updated via update operation only 
+    if (delete_op) {
+        MCTRACE(Log, "delete bcast path from remote peer", obj->vrf_name(),
+                "255.255.255.255", 0);
+        Layer2AgentRouteTable::DeleteBroadcastReq(peer, obj->vrf_name());
+        ComponentNHKeyList component_nh_key_list; //dummy list
+        RebakeSubnetRoute(peer, obj->vrf_name(), 0, obj->vxlan_id(),
+                          obj->GetVnName(), true, component_nh_key_list);
+        return;
+    }
+
+    // Ideally wrong update call
+    if (peer_identifier == INVALID_PEER_IDENTIFIER) {
+        MCTRACE(Log, "Invalid peer identifier sent for modification", 
+                obj->vrf_name(), "255.255.255.255", 0);
+        return;
+    }
+
+    obj->set_peer_identifier(peer_identifier);
+    ComponentNHKeyList component_nh_key_list;
+
+    for (TunnelOlist::const_iterator it = olist.begin();
+         it != olist.end(); it++) {
+        TunnelNHKey *key =
+            new TunnelNHKey(Agent::GetInstance()->fabric_vrf_name(), 
+                            Agent::GetInstance()->router_id(),
+                            it->daddr_, false, 
+                            TunnelType::ComputeType(it->tunnel_bmap_));
+        TunnelNHData *tnh_data = new TunnelNHData();
+        DBRequest req;
+        req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
+        req.key.reset(key);
+        req.data.reset(tnh_data);
+        Agent::GetInstance()->nexthop_table()->Enqueue(&req);
+        MCTRACE(Log, "Enqueue add TOR TUNNEL ",
+                Agent::GetInstance()->fabric_vrf_name(),
+                it->daddr_.to_string(), it->label_);
+
+        ComponentNHKeyPtr component_key_ptr(new ComponentNHKey(it->label_,
+                    agent_->fabric_vrf_name(),
+                    agent_->router_id(), it->daddr_,
+                    false, it->tunnel_bmap_));
+        component_nh_key_list.push_back(component_key_ptr);
+    }
+
+    MCTRACE(Log, "enqueue route change with remote peer",
+            obj->vrf_name(),
+            obj->GetGroupAddress().to_string(),
+            component_nh_key_list.size());
+
+    //Add Layer2 FF:FF:FF:FF:FF:FF$
+    Layer2AgentRouteTable::AddLayer2BroadcastRoute(peer,
+                                                   obj->vrf_name(),
+                                                   obj->GetVnName(),
+                                                   label,
+                                                   obj->vxlan_id(),
+                                                   comp_type,
+                                                   component_nh_key_list);
+    if (comp_type == Composite::EVPN) {
+        RebakeSubnetRoute(peer, obj->vrf_name(), label, obj->vxlan_id(),
+                          obj->GetVnName(), false, component_nh_key_list);
     }
 }
-/*
- * Send the updated list for composite NH
- * Updated list is derived from local and tunnel olist
- */
-void MulticastHandler::TriggerL3CompositeNHChange(MulticastGroupObject *obj)
+
+void MulticastHandler::RebakeSubnetRoute(const Peer *peer,
+                                         const std::string &vrf_name,
+                                         uint32_t label,
+                                         uint32_t vxlan_id,
+                                         const std::string &vn_name,
+                                         bool del_op,
+                                         const ComponentNHKeyList &comp_nh_list)
 {
-    DBRequest req;
-    NextHopKey *key;
-    boost::system::error_code ec;
-    ComponentNHKeyList component_nh_key_list;
-    CompositeNHData *cnh_data;
+    //Expect only to handle EVPN information.
+    if (peer->GetType() != Peer::BGP_PEER)
+        return;
 
-    //Add fabric Comp NH
-    AddChangeFabricCompositeNH(obj);
-    AddChangeInterfaceCompositeNH(obj, (InterfaceNHFlags::MULTICAST |
-                                  InterfaceNHFlags::INET4),
-                                  Composite::L3INTERFACE);
-    component_nh_key_list = GetL3ComponentNHKeyList(obj);
-    MCTRACE(Log, "enqueue l3 comp ", obj->vrf_name(),
-            obj->GetGroupAddress().to_string(), component_nh_key_list.size());
-    key = new CompositeNHKey(Composite::L3COMP, false, component_nh_key_list,
-                             obj->vrf_name());
-    req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-    req.key.reset(key);
-    cnh_data = new CompositeNHData();
-    req.data.reset(cnh_data);
-    Agent::GetInstance()->nexthop_table()->Enqueue(&req);
+    std::vector<VnIpam> &vrf_ipam =
+        (vrf_ipam_mapping_.find(vrf_name))->second;
+    for (std::vector<VnIpam>::iterator it = vrf_ipam.begin();
+         it != vrf_ipam.end(); it++) {
+        const Ip4Address &subnet_addr = (*it).GetSubnetAddress();
+        DBRequest req;
 
+        req.key.reset(new Inet4UnicastRouteKey(peer,
+                                               vrf_name,
+                                               subnet_addr,
+                                               (*it).plen));
+        if (del_op == false) {
+            DBRequest nh_req;
+            nh_req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
+            nh_req.key.reset(new CompositeNHKey(Composite::EVPN, false,
+                                                comp_nh_list, vrf_name));
+            nh_req.data.reset(new CompositeNHData());
+            //add route
+            req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
+            req.data.reset(new SubnetRoute(vn_name,
+                                           vxlan_id,
+                                           nh_req));
+        } else {
+            //del route
+            req.oper = DBRequest::DB_ENTRY_DELETE;
+            req.data.reset(NULL);
+        }
 
-    MCTRACE(Log, "add IP V4 bcast route ", obj->vrf_name(),
-            obj->GetGroupAddress().to_string(), component_nh_key_list.size());
-    //Trigger route change
-    if (IS_BCAST_MCAST(obj->GetGroupAddress())) {
-        Inet4MulticastAgentRouteTable::AddMulticastRoute(obj->vrf_name(),
-                obj->GetVnName(), IpAddress::from_string("0.0.0.0", ec).to_v4(),
-                obj->GetGroupAddress(), component_nh_key_list);
-    } else {
-        Inet4UnicastAgentRouteTable::AddSubnetBroadcastRoute(
-                agent_->local_vm_peer(), obj->vrf_name(),
-                IpAddress::from_string("0.0.0.0", ec).to_v4(),
-                obj->GetGroupAddress(), obj->GetVnName(), component_nh_key_list);
+        agent_->fabric_inet4_unicast_table()->Enqueue(&req);
     }
 }
 
@@ -942,37 +508,19 @@ void MulticastHandler::AddVmInterfaceInFloodGroup(const std::string &vrf_name,
     all_broadcast = this->FindGroupObject(vrf_name, broadcast);
     if (all_broadcast == NULL) {
         all_broadcast = new MulticastGroupObject(vrf_name, broadcast, 
-                                                 vn_name, true);
-        this->AddToMulticastObjList(all_broadcast); 
+                                                 vn_name);
+        AddToMulticastObjList(all_broadcast); 
         add_route = true;
     }
 
     //Modify Nexthops
     if (all_broadcast->AddLocalMember(intf_uuid) == true) {
-        if (vn->Ipv4Forwarding()) {
-            this->TriggerL3CompositeNHChange(all_broadcast);
-        }
         if (vn->layer2_forwarding()) {
-            this->TriggerL2CompositeNHChange(all_broadcast);
+            TriggerLocalRouteChange(all_broadcast, agent_->local_vm_peer());
         }
-        //Add l2/l3 comp nh in multi proto in case one of them is enabled later
-        if (!add_route && (all_broadcast->GetSourceMPLSLabel() != 0) &&
-            all_broadcast->IsMultiProtoSupported()) {
-            this->AddChangeMultiProtocolCompositeNH(all_broadcast,
-                    all_broadcast->GetSourceMPLSLabel());
-        }
-        this->AddVmToMulticastObjMap(intf_uuid, all_broadcast);
+        AddVmToMulticastObjMap(intf_uuid, all_broadcast);
     }
     //Modify routes
-    if ((add_route || (all_broadcast->Ipv4Forwarding() != 
-                       vn->Ipv4Forwarding())) && vn->Ipv4Forwarding()) {
-        all_broadcast->SetIpv4Forwarding(vn->Ipv4Forwarding());
-        this->TriggerL3CompositeNHChange(all_broadcast);
-        if (all_broadcast->GetSourceMPLSLabel() != 0) {
-            this->AddChangeMultiProtocolCompositeNH(all_broadcast,
-                    all_broadcast->GetSourceMPLSLabel());
-        }
-    }
     if ((add_route || (all_broadcast->layer2_forwarding() != 
                        vn->layer2_forwarding())) && vn->layer2_forwarding()) {
         if (TunnelType::ComputeType(TunnelType::AllType()) ==
@@ -980,150 +528,16 @@ void MulticastHandler::AddVmInterfaceInFloodGroup(const std::string &vrf_name,
             all_broadcast->set_vxlan_id(vn->GetVxLanId());
         } 
         all_broadcast->SetLayer2Forwarding(vn->layer2_forwarding());
-        this->TriggerL2CompositeNHChange(all_broadcast);
         uint32_t evpn_label = Agent::GetInstance()->mpls_table()->
             AllocLabel();
         if (evpn_label != MplsLabel::INVALID) { 
             all_broadcast->set_evpn_mpls_label(evpn_label);
-            ComponentNHKeyList l2_component_nh_key_list =
-                GetL2ComponentNHKeyList(all_broadcast);
-            MplsLabel::CreateMcastLabelReq(evpn_label, Composite::EVPN, 
-                                            l2_component_nh_key_list,
-                                            vrf_name);
         } else {
             MCTRACE(Log, "allocation of  evpn mpls label failed",
                     vrf_name, broadcast.to_string(), 0);
         }
-        if (all_broadcast->GetSourceMPLSLabel() != 0) {
-            this->AddChangeMultiProtocolCompositeNH(all_broadcast,
-                    all_broadcast->GetSourceMPLSLabel());
-        }
+        TriggerLocalRouteChange(all_broadcast, agent_->local_vm_peer());
     }
-}
-
-
-/*
- * VM addition helper
- * Adds subnet broadcast if VN Ipam is present
- */
-void MulticastHandler::AddVmInterfaceInSubnet(const std::string &vrf_name, 
-                                              const Ip4Address &dip, 
-                                              const uuid &intf_uuid, 
-                                              const VnEntry *vn) {
-    MulticastGroupObject *subnet_broadcast = NULL;
-    boost::system::error_code ec;
-    const string vn_name = vn->GetName();
-
-    //Subnet broadcast 
-    subnet_broadcast = this->FindGroupObject(vrf_name, dip);
-    if (subnet_broadcast == NULL) {
-        subnet_broadcast = new MulticastGroupObject(vrf_name, dip, 
-                                                    vn_name, false);
-        this->AddToMulticastObjList(subnet_broadcast); 
-    }
-    if ((subnet_broadcast->Ipv4Forwarding() != 
-                       vn->Ipv4Forwarding()) && vn->Ipv4Forwarding()) {
-        this->TriggerL3CompositeNHChange(subnet_broadcast);
-    }
-    subnet_broadcast->SetLayer2Forwarding(false);
-    subnet_broadcast->SetIpv4Forwarding(true);
-
-    if (subnet_broadcast->AddLocalMember(intf_uuid) == true) {
-        this->TriggerCompositeNHChange(subnet_broadcast);
-        this->AddVmToMulticastObjMap(intf_uuid, subnet_broadcast);
-    }
-}
-
-bool MulticastGroupObject::ModifyOlistMembers(const TunnelOlist &new_olist, 
-                                              TunnelOlist &obj_olist,
-                                              uint64_t peer_identifier,
-                                              bool delete_op) 
-{
-    DBRequest req;
-    NextHopKey *key; 
-    TunnelNHData *tnh_data;
-
-    // Peer identifier cases
-    // if its a delete operation -
-    // 1) Internal delete (invalid peer identifier), dont update peer identifier
-    // as it is a forced removal.
-    // 2) Control node removing stales i.e. delete if local peer identifier is
-    // less than global peer identifier. 
-    //
-    // if its not a delete operation -
-    // 1) Update only if local peer identifier is less than or equal to sent
-    // global peer identifier.
-
-    // if its internal delete then peer_identifier will be 0xFFFFFFFF;
-    // if external delete(via control node) then its stale cleanup so delete 
-    // only when local peer identifier is less than global multicast sequence.
-    if (delete_op && peer_identifier <= peer_identifier_) {
-        return false;
-    }
-
-    // - Update operation with lower sequence number sent compared to 
-    // local identifier, ignore
-    if (!delete_op && peer_identifier < peer_identifier_) {
-        return false;
-    }
-
-    obj_olist.clear();
-
-    // After resetting tunnel and mpls label return if it was a delete call,
-    // dont update peer_identifier. Let it get updated via update operation only 
-    if (delete_op) {
-        return true;
-    }
-
-    // Ideally wrong update call
-    if (peer_identifier == INVALID_PEER_IDENTIFIER) {
-        MCTRACE(Log, "Invalid peer identifier sent for modification", 
-                vrf_name_, grp_address_.to_string(), 0);
-        return true;
-    }
-
-    peer_identifier_ = peer_identifier;
-
-    for (TunnelOlist::const_iterator it = new_olist.begin();
-         it != new_olist.end(); it++) {
-        AddMemberInOlist(obj_olist, it->label_, it->daddr_, it->tunnel_bmap_);
-
-        key = new TunnelNHKey(Agent::GetInstance()->fabric_vrf_name(), 
-                              Agent::GetInstance()->router_id(),
-                              it->daddr_, false, 
-                              TunnelType::ComputeType(it->tunnel_bmap_));
-        tnh_data = new TunnelNHData();
-        req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-        req.key.reset(key);
-        req.data.reset(tnh_data);
-        Agent::GetInstance()->nexthop_table()->Enqueue(&req);
-        MCTRACE(Log, "Enqueue add TOR TUNNEL ",
-                Agent::GetInstance()->fabric_vrf_name(),
-                it->daddr_.to_string(), it->label_);
-    }
-    return true;
-}
-
-bool MulticastGroupObject::ModifyEvpnMembers(const TunnelOlist &olist, 
-                                               uint64_t peer_identifier,
-                                               bool delete_op) 
-{
-    return ModifyOlistMembers(olist, evpn_olist_, peer_identifier, delete_op);
-}
-
-/*
- * Release edge replicated info coming from ctrl node for this multicast object
- */
-bool MulticastGroupObject::ModifyFabricMembers(const TunnelOlist &olist, 
-                                               uint64_t peer_identifier,
-                                               bool delete_op, uint32_t label) 
-{
-    bool ret = ModifyOlistMembers(olist, tunnel_olist_, peer_identifier, 
-                                  delete_op);
-    if (ret) {
-        SetSourceMPLSLabel(label);
-    }
-    return ret;
 }
 
 /*
@@ -1132,7 +546,8 @@ bool MulticastGroupObject::ModifyFabricMembers(const TunnelOlist &olist,
  * Info has label (for source to vrouter) and
  * OLIST of NH (server IP + label for that server)
  */
-void MulticastHandler::ModifyFabricMembers(const std::string &vrf_name, 
+void MulticastHandler::ModifyFabricMembers(const Peer *peer,
+                                           const std::string &vrf_name, 
                                            const Ip4Address &grp, 
                                            const Ip4Address &src, 
                                            uint32_t label, 
@@ -1141,16 +556,16 @@ void MulticastHandler::ModifyFabricMembers(const std::string &vrf_name,
 {
     MulticastGroupObject *obj = 
         MulticastHandler::GetInstance()->FindActiveGroupObject(vrf_name, grp);
-    MCTRACE(Log, "XMPP call(edge replicate) multicast handler ", vrf_name, grp.to_string(), label);
+    MCTRACE(Log, "XMPP call(edge replicate) multicast handler ", vrf_name,
+            grp.to_string(), label);
 
     if (obj == NULL) {
         return;
     }
 
-    if (obj->ModifyFabricMembers(olist, peer_identifier, false, label) == true) {
-        MulticastHandler::GetInstance()->TriggerCompositeNHChange(obj);
-    }
-
+    MulticastHandler::GetInstance()->TriggerRemoteRouteChange(obj, peer, olist,
+                                     peer_identifier, false, Composite::FABRIC,
+                                     label, true);
     MCTRACE(Log, "Add fabric grp label ", vrf_name, grp.to_string(), label);
 }
 
@@ -1162,7 +577,8 @@ void MulticastHandler::ModifyFabricMembers(const std::string &vrf_name,
  * Note: Non Vrouter can talk in VXLAN/MPLS. Encap received in XMPP will
  * convey the same.
  */
-void MulticastHandler::ModifyEvpnMembers(const std::string &vrf_name, 
+void MulticastHandler::ModifyEvpnMembers(const Peer *peer,
+                                         const std::string &vrf_name, 
                                          const TunnelOlist &olist,
                                          uint64_t peer_identifier)
 {
@@ -1177,22 +593,24 @@ void MulticastHandler::ModifyEvpnMembers(const std::string &vrf_name,
         return;
     }
 
-    if (obj->ModifyEvpnMembers(olist, peer_identifier, false) == true) {
-        MulticastHandler::GetInstance()->TriggerCompositeNHChange(obj);
-    }
-
+    MulticastHandler::GetInstance()->TriggerRemoteRouteChange(obj, peer, olist,
+                                     peer_identifier, false, Composite::EVPN,
+                                     obj->evpn_mpls_label(), false);
     MCTRACE(Log, "Add EVPN TOR Olist ", vrf_name, grp.to_string(), 0);
 }
 
 // Helper to delete fabric nh
 // For internal delete it uses invalid identifier. 
 // For delete via control node it uses the sequence sent.
-void MulticastGroupObject::FlushAllPeerInfo(uint64_t peer_identifier) {
-    TunnelOlist olist;
-     MCTRACE(Log, "Flushing peer info", vrf_name_,
-                         grp_address_.to_string(), src_mpls_label_);
-    ModifyFabricMembers(olist, peer_identifier, true, 0);
-    ModifyEvpnMembers(olist, peer_identifier, true);
+void MulticastGroupObject::FlushAllPeerInfo(const Agent *agent,
+                                            uint64_t peer_identifier) {
+    if ((peer_identifier != peer_identifier_) ||
+        (peer_identifier == INVALID_PEER_IDENTIFIER)) {
+        MulticastHandler::GetInstance()->
+            DeleteBroadcast(agent->multicast_peer(), vrf_name_);
+    }
+    MCTRACE(Log, "Delete broadcast route", vrf_name_,
+            grp_address_.to_string(), 0);
 }
 
 MulticastHandler::MulticastHandler(Agent *agent)
@@ -1206,52 +624,10 @@ bool MulticastHandler::FlushPeerInfo(uint64_t peer_sequence) {
     for (std::set<MulticastGroupObject *>::iterator it = 
          GetMulticastObjList().begin(); it != GetMulticastObjList().end(); 
          it++) {
-        //Empty the tunnel OLIST
-        (*it)->FlushAllPeerInfo(peer_sequence);
-        //Update comp NH
-        //Ignore modification of comp NH if route is not present i.e. multicast
-        //object is marked for deletion.
-        if ((*it)->IsDeleted() == false) {
-            MulticastHandler::GetInstance()->TriggerCompositeNHChange(*it);
-        }
+        //Delete all control node given paths
+        (*it)->FlushAllPeerInfo(agent_, peer_sequence);
     }
     return false;
-}
-
-/*
- * handle mpls label changes/deletion/addition of new label
- */
-void MulticastGroupObject::SetSourceMPLSLabel(uint32_t label) { 
-    MCTRACE(Log, "current src label ", vrf_name_, 
-            grp_address_.to_string(), src_mpls_label_);
-    if (label == src_mpls_label_) {
-        return;
-    }
-
-    //Add new label
-    if ((label != 0) && (label != src_mpls_label_)) {
-        MCTRACE(Log, "new src label ", vrf_name_, 
-                grp_address_.to_string(), label);
-        if (IsMultiProtoSupported()) {
-            //EVPN may be off and put on later so keep 
-            //l2 comp prepared under multi proto.
-            //In case evpn is disabled then this is equivalent of drop NH
-            MulticastHandler::GetInstance()->
-                TriggerCompositeNHChange(this);
-        }
-    }
-    //Delete old_label
-    MplsLabel::DeleteMcastLabelReq(src_mpls_label_);
-    src_mpls_label_ = label; 
-}
-
-void MulticastHandler::ChangeTunnelType() {
-    std::set<MulticastGroupObject *>::iterator it =
-        multicast_obj_list_.begin();
-    while(it != multicast_obj_list_.end()) {
-        TriggerCompositeNHChange(*it);
-        it++;
-    }
 }
 
 /*
@@ -1262,23 +638,12 @@ void MulticastHandler::Shutdown() {
     for (std::set<MulticastGroupObject *>::iterator it =
          MulticastHandler::GetInstance()->GetMulticastObjList().begin(); 
          it != MulticastHandler::GetInstance()->GetMulticastObjList().end(); it++) {
-        //Empty the tunnel OLIST
-        (*it)->FlushAllPeerInfo(INVALID_PEER_IDENTIFIER);
-        //Update comp NH
-        MulticastHandler::GetInstance()->TriggerCompositeNHChange(*it);
+        //Delete the tunnel OLIST
+        (*it)->FlushAllPeerInfo(MulticastHandler::GetInstance()->agent(),
+                                INVALID_PEER_IDENTIFIER);
         //Delete the label and route
         MulticastHandler::GetInstance()->DeleteRouteandMPLS(*it);
-        if (!IS_BCAST_MCAST((*it)->GetGroupAddress())) { 
-            MulticastHandler::GetInstance()->DeleteSubnetRoute(
-                                                   (*it)->vrf_name(), 
-                                                   (*it)->GetGroupAddress());
-        }
         //Delete the multicast object
         delete (*it);
     }
-}
-
-void MulticastHandler::EncapChanged(const std::string &vrf_name) {
-    //TODO
-    //FillEvpnCompositeNHReq(vrf_name);
 }

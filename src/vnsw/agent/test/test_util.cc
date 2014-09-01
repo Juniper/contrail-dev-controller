@@ -1086,16 +1086,8 @@ bool RouteFind(const string &vrf_name, const string &addr, int plen) {
 }
 
 bool L2RouteFind(const string &vrf_name, const struct ether_addr &mac) {
-    VrfEntry *vrf = Agent::GetInstance()->
-        vrf_table()->FindVrfFromName(vrf_name);
-    if (vrf == NULL)
-        return false;
-
-    Layer2RouteKey key(Agent::GetInstance()->local_vm_peer(), vrf_name, mac);
-    Layer2RouteEntry *route = 
-        static_cast<Layer2RouteEntry *>
-        (static_cast<Layer2AgentRouteTable *>(vrf->
-             GetLayer2RouteTable())->FindActiveEntry(&key));
+    Layer2RouteEntry *route =
+        Layer2AgentRouteTable::FindRoute(Agent::GetInstance(), vrf_name, mac);
     return (route != NULL);
 }
 

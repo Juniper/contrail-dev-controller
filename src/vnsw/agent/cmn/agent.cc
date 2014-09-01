@@ -330,6 +330,10 @@ void Agent::InitPeers() {
     linklocal_peer_.reset(new Peer(Peer::LINKLOCAL_PEER, LINKLOCAL_PEER_NAME));
     ecmp_peer_.reset(new Peer(Peer::ECMP_PEER, ECMP_PEER_NAME));
     vgw_peer_.reset(new Peer(Peer::VGW_PEER, VGW_PEER_NAME));
+    multicast_peer_.reset(new Peer(Peer::MULTICAST_PEER, MULTICAST_PEER_NAME));
+    multicast_tree_builder_peer_.reset(
+                                 new Peer(Peer::MULTICAST_FABRIC_TREE_BUILDER,
+                                          MULTICAST_FABRIC_TREE_BUILDER_NAME));
 }
 
 Agent::Agent() :

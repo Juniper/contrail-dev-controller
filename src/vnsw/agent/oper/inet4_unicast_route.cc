@@ -337,6 +337,16 @@ bool Inet4UnicastRouteEntry::EcmpDeletePath(AgentPath *path) {
     return true;
 }
 
+bool Inet4UnicastRouteEntry::ReComputePaths(AgentPath *path, bool del) {
+    // ECMP path are managed by route module. Update ECMP path with 
+    // addition of new path
+    if (del) {
+        return EcmpDeletePath(path);
+    }
+
+    return EcmpAddPath(path);
+}
+
 // Handle add/update of a path in route. 
 // If there are more than one path of type LOCAL_VM_PORT_PEER, creates/updates
 // Composite-NH for them
@@ -1086,13 +1096,51 @@ Inet4UnicastAgentRouteTable::AddSubnetRoute(const string &vrf_name,
                                             uint8_t plen,
                                             const string &vn_name,
                                             uint32_t vxlan_id) {
-    DBRequest nh_req;
-    MulticastHandler::GetInstance()->FillEvpnCompositeNHReq(vrf_name, nh_req);
+    Agent *agent = Agent::GetInstance();
+    struct ether_addr flood_mac;
+
+    memcpy(&flood_mac, ether_aton("ff:ff:ff:ff:ff:ff"),
+           sizeof(struct ether_addr));
+    AgentRoute *route = Layer2AgentRouteTable::FindRoute(agent, vrf_name,
+                                                         flood_mac);
+
+    DBRequest nh_req(DBRequest::DB_ENTRY_ADD_CHANGE);
+    ComponentNHKeyList component_nh_list;
+
+    if (route != NULL) {
+        for(Route::PathList::iterator it = route->GetPathList().begin();
+            it != route->GetPathList().end(); it++) {
+            const AgentPath *path =
+                static_cast<const AgentPath *>(it.operator->());
+            if (path->peer()->GetType() != Peer::BGP_PEER) {
+                continue;
+            }
+            NextHopKey *evpn_peer_key =
+                static_cast<NextHopKey *>((path->nexthop(agent)->
+                                           GetDBRequestKey()).release());
+            DBRequest nh_req(DBRequest::DB_ENTRY_ADD_CHANGE);
+            nh_req.key.reset(evpn_peer_key);
+            nh_req.data.reset(new CompositeNHData());
+
+            //Add route with this peer
+            DBRequest req;
+            req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
+            req.key.reset(new Inet4UnicastRouteKey(path->peer(),
+                                                   vrf_name, dst_addr, plen));
+            req.data.reset(new SubnetRoute(vn_name, vxlan_id, nh_req));
+            UnicastTableEnqueue(Agent::GetInstance(), &req);
+        }
+    }
+
+    //Add local perr path with discard NH
+    DBRequest dscd_nh_req(DBRequest::DB_ENTRY_ADD_CHANGE);
+    dscd_nh_req.key.reset(new DiscardNHKey());
+    dscd_nh_req.data.reset(NULL);
 
     DBRequest req;
     req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
     req.key.reset(new Inet4UnicastRouteKey(Agent::GetInstance()->local_peer(),
                                             vrf_name, dst_addr, plen));
-    req.data.reset(new SubnetRoute(vn_name, vxlan_id, nh_req));
+    req.data.reset(new SubnetRoute(vn_name, vxlan_id, dscd_nh_req));
     UnicastTableEnqueue(Agent::GetInstance(), &req);
 }

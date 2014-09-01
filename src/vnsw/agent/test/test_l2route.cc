@@ -184,7 +184,6 @@ TEST_F(RouteTest, LocalVmRoute_1) {
     MulticastGroupObject *obj = 
         MulticastHandler::GetInstance()->FindFloodGroupObject("vrf1");
     EXPECT_TRUE(obj != NULL);
-    EXPECT_TRUE(obj->Ipv4Forwarding() == false);
     EXPECT_TRUE(obj->layer2_forwarding() == true);
     EXPECT_TRUE(L2RouteFind(vrf_name_, local_vm_mac_));
     Layer2RouteEntry *rt = L2RouteGet(vrf_name_, local_vm_mac_);
@@ -265,7 +264,6 @@ TEST_F(RouteTest, Mpls_sandesh_check_with_l2route) {
     MulticastGroupObject *obj = 
         MulticastHandler::GetInstance()->FindFloodGroupObject("vrf1");
     EXPECT_TRUE(obj != NULL);
-    EXPECT_TRUE(obj->Ipv4Forwarding() == false);
     EXPECT_TRUE(obj->layer2_forwarding() == true);
     EXPECT_TRUE(L2RouteFind(vrf_name_, local_vm_mac_));
 

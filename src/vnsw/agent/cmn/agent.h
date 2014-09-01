@@ -550,6 +550,9 @@ public:
     const Peer *link_local_peer() const {return linklocal_peer_.get();}
     const Peer *ecmp_peer() const {return ecmp_peer_.get();}
     const Peer *vgw_peer() const {return vgw_peer_.get();}
+    const Peer *multicast_peer() const {return multicast_peer_.get();}
+    const Peer *multicast_tree_builder_peer() const {
+        return multicast_tree_builder_peer_.get();}
 
     // Agent Modules
     AgentConfig *cfg() const; 
@@ -751,6 +754,8 @@ private:
     std::auto_ptr<Peer> linklocal_peer_;
     std::auto_ptr<Peer> ecmp_peer_;
     std::auto_ptr<Peer> vgw_peer_;
+    std::auto_ptr<Peer> multicast_peer_;
+    std::auto_ptr<Peer> multicast_tree_builder_peer_;
 
     std::auto_ptr<AgentSignal> agent_signal_;
 

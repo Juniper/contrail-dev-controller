@@ -338,6 +338,15 @@ public:
     virtual ~MulticastRoute() { }
     virtual bool AddChangePath(Agent *agent, AgentPath *path);
     virtual std::string ToString() const {return "multicast";}
+    static bool CopyPathParameters(Agent *agent,
+                                   AgentPath *path,
+                                   const std::string &dest_vn_name,
+                                   bool unresolved,
+                                   uint32_t vxlan_id,
+                                   uint32_t label,
+                                   uint32_t tunnel_type,
+                                   bool is_subnet_discard,
+                                   NextHop *nh);
 
 private:
     string vn_name_;

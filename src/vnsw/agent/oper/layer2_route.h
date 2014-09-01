@@ -49,10 +49,12 @@ public:
                                 struct ether_addr &mac,
                                 const Ip4Address &vm_ip,
                                 uint32_t plen); 
-    static void AddLayer2BroadcastRoute(const string &vrf_name,
+    static void AddLayer2BroadcastRoute(const Peer *peer,
+                                        const string &vrf_name,
                                         const string &vn_name,
                                         uint32_t label,
                                         int vxlan_id,
+                                        Composite::Type type,
                                         ComponentNHKeyList
                                         &component_nh_key_list);
     static void DeleteReq(const Peer *peer, const string &vrf_name,
@@ -60,7 +62,11 @@ public:
                           AgentRouteData *data);
     static void Delete(const Peer *peer, const string &vrf_name,
                        const struct ether_addr &mac);
-    static void DeleteBroadcastReq(const string &vrf_name);
+    static void DeleteBroadcastReq(const Peer *peer, const string &vrf_name);
+    static Layer2RouteEntry *FindRoute(const Agent *agent,
+                                       const string &vrf_name,
+                                       const struct ether_addr &mac);
+
 private:
     DBTableWalker::WalkId walkid_;
     DISALLOW_COPY_AND_ASSIGN(Layer2AgentRouteTable);
@@ -98,6 +104,7 @@ public:
     }
     virtual bool DBEntrySandesh(Sandesh *sresp, bool stale) const;
     virtual uint32_t GetActiveLabel() const;
+    virtual bool ReComputePaths(AgentPath *path, bool del);
 
     const struct ether_addr &GetAddress() const {return mac_;}
     const Ip4Address &GetVmIpAddress() const {return vm_ip_;}

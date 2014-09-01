@@ -238,6 +238,8 @@ bool VnTable::VnEntryWalk(DBTablePartBase *partition, DBEntryBase *entry) {
 
 void VnTable::VnEntryWalkDone(DBTableBase *partition) {
     walkid_ = DBTableWalker::kInvalidWalkerId;
+    Agent::GetInstance()->interface_table()->
+        UpdateVxLanNetworkIdentifierMode();
 }
 
 void VnTable::UpdateVxLanNetworkIdentifierMode() {
@@ -736,8 +738,7 @@ void VnTable::AddSubnetRoute(VnEntry *vn, VnIpam &ipam) {
     VrfEntry *vrf = vn->GetVrf();
     static_cast<Inet4UnicastAgentRouteTable *>(vrf->
         GetInet4UnicastRouteTable())->AddSubnetRoute
-        (vrf->GetName(), ipam.GetSubnetAddress(), ipam.plen, vn->GetName(),
-         vn->GetVxLanId());
+        (vrf->GetName(), ipam.GetSubnetAddress(), ipam.plen, vn->GetName(), 0);
 }
 
 // Del receive route for default gw

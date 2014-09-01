@@ -52,6 +52,7 @@ public:
     virtual Agent::RouteTableType GetTableType() const {
         return Agent::INET4_UNICAST;
     }
+    virtual bool ReComputePaths(AgentPath *path, bool del);
     virtual bool EcmpAddPath(AgentPath *path);
     virtual bool EcmpDeletePath(AgentPath *path);
     void AppendEcmpPath(Agent *agent, AgentPath *path);
