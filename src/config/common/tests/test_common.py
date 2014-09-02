@@ -19,10 +19,10 @@ import cfgm_common.ifmap.response as ifmap_response
 import kombu
 import discoveryclient.client as disc_client
 from cfgm_common.zkclient import ZookeeperClient
+from cfgm_common.uve.vnc_api.ttypes import VncApiConfigLog, VncApiError
+from cfgm_common import imid
 
 from test_utils import *
-sys.path.insert(0, '../../../../build/debug/api-lib/vnc_api')
-sys.path.insert(0, '../../../../distro/openstack/')
 import bottle
 bottle.catchall=False
 
@@ -37,6 +37,9 @@ def lineno():
 
 
 # import from package for non-api server test or directly from file
+sys.path.insert(0, '../../../../build/debug/api-lib/vnc_api')
+sys.path.insert(0, '../../../../distro/openstack/')
+sys.path.append('../../../../build/debug/config/api-server/vnc_cfg_api_server')
 import vnc_cfg_api_server
 if not hasattr(vnc_cfg_api_server, 'main'):
     from vnc_cfg_api_server import vnc_cfg_api_server
@@ -59,11 +62,13 @@ def generate_conf_file_contents(conf_sections):
     return cfg_parser
 # end generate_conf_file_contents
 
-def launch_api_server(listen_ip, listen_port, http_server_port, conf_sections):
+def launch_api_server(listen_ip, listen_port, http_server_port, admin_port,
+                      conf_sections):
     args_str = ""
     args_str = args_str + "--listen_ip_addr %s " % (listen_ip)
     args_str = args_str + "--listen_port %s " % (listen_port)
     args_str = args_str + "--http_server_port %s " % (http_server_port)
+    args_str = args_str + "--admin_port %s " % (admin_port)
     args_str = args_str + "--cassandra_server_list 0.0.0.0:9160 "
 
     import cgitb
@@ -104,7 +109,13 @@ def launch_schema_transformer(api_server_ip, api_server_port):
     to_bgp.main(args_str)
 # end launch_schema_transformer
 
-def setup_flexmock():
+def setup_extra_flexmock(mocks):
+    for (cls, method_name, val) in mocks:
+        kwargs = {method_name: val}
+        flexmock(cls, **kwargs)
+# end setup_extra_flexmock
+
+def setup_common_flexmock():
     flexmock(novaclient.client, Client=FakeNovaClient.initialize)
     flexmock(ifmap_client.client, __init__=FakeIfmapClient.initialize,
              call=FakeIfmapClient.call,
@@ -126,9 +137,8 @@ def setup_flexmock():
     flexmock(kombu.Exchange, __new__=FakeKombu.Exchange)
     flexmock(kombu.Queue, __new__=FakeKombu.Queue)
 
-    from cfgm_common.uve.vnc_api.ttypes import VncApiConfigLog, VncApiError
     flexmock(VncApiConfigLog, __new__=FakeApiConfigLog)
-#end setup_flexmock
+#end setup_common_flexmock
 
 cov_handle = None
 class TestCase(testtools.TestCase, fixtures.TestWithFixtures):
@@ -136,6 +146,8 @@ class TestCase(testtools.TestCase, fixtures.TestWithFixtures):
         'Content-type': 'application/json; charset="UTF-8"',
     }
     def __init__(self, *args, **kwargs):
+        self._logger = logging.getLogger(__name__)
+        self._assert_till_max_tries = 30
         self._config_knobs = [
             ('DEFAULTS', '', ''),
             ]
@@ -211,20 +223,55 @@ class TestCase(testtools.TestCase, fixtures.TestWithFixtures):
     def _create_test_object(self):
         return self._create_test_objects()[0]
 
+    def ifmap_has_ident(self, obj=None, id=None):
+        if obj:
+            _type = obj.get_type()
+            _fq_name = obj.get_fq_name()
+        if id:
+            _type = self._vnc_lib.id_to_fq_name_type(id)
+            _fq_name = self._vnc_lib.id_to_fq_name(id)
+
+        ifmap_id = imid.get_ifmap_id_from_fq_name(_type, _fq_name)
+        if ifmap_id in FakeIfmapClient._graph:
+            return True
+
+        return False
+
+    def assertTill(self, expr_or_cb, *cb_args, **cb_kwargs):
+        tries = 0
+        while True:
+            if callable(expr_or_cb):
+                ret = expr_or_cb(*cb_args, **cb_kwargs)
+            else:
+                ret = eval(expr_or_cb)
+
+            if ret:
+                break
+
+            tries = tries + 1
+            if tries >= self._assert_till_max_tries:
+                raise Exception('Max retries')
+
+            self._logger.warn('Retrying at ' + str(inspect.stack()[1]))
+            gevent.sleep(2)
+
+
     def setUp(self):
         super(TestCase, self).setUp()
         global cov_handle
         if not cov_handle:
             cov_handle = coverage.coverage(source=['./'], omit=['.venv/*'])
         cov_handle.start()
-        setup_flexmock()
+        setup_common_flexmock()
 
         self._api_server_ip = socket.gethostbyname(socket.gethostname())
         self._api_server_port = get_free_port()
         http_server_port = get_free_port()
+        self._api_admin_port = get_free_port()
         self._api_svr_greenlet = gevent.spawn(launch_api_server,
                                      self._api_server_ip, self._api_server_port,
-                                     http_server_port, self._config_knobs)
+                                     http_server_port, self._api_admin_port,
+                                     self._config_knobs)
         block_till_port_listened(self._api_server_ip, self._api_server_port)
         extra_env = {'HTTP_HOST':'%s%s' %(self._api_server_ip,
                                           self._api_server_port)}

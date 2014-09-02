@@ -1762,6 +1762,10 @@ bool AgentXmppChannel::ControllerSendMcastRoute(AgentXmppChannel *peer,
 }
 
 void AgentXmppChannel::UpdateConnectionInfo(xmps::PeerState state) {
+
+    if (agent_->connection_state() == NULL)
+        return;
+
     boost::asio::ip::tcp::endpoint ep;
     boost::system::error_code ec;
     string last_state_name;

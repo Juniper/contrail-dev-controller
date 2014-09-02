@@ -25,6 +25,7 @@ from lxml import etree
 import inspect
 import pycassa
 import kombu
+import requests
 
 from vnc_api.vnc_api import *
 from vnc_api.common import exceptions as vnc_exceptions
@@ -603,7 +604,6 @@ class TestVncCfgApiServer(test_case.ApiServerTestCase):
 
     def test_id_to_fq_name_http_post(self):
         test_obj = self._create_test_object()
-        self._vnc_lib.virtual_network_create(test_obj)
         fq_name = self._vnc_lib.id_to_fq_name(test_obj.uuid)
         self.assertEqual(test_obj.fq_name, fq_name)
         with ExpectedException(NoIdError) as e:
@@ -701,7 +701,94 @@ class TestVncCfgApiServer(test_case.ApiServerTestCase):
                 self._vnc_lib.virtual_network_read(fq_name=test_obj.get_fq_name())
         finally:
             api_server._db_conn._cassandra_db._cassandra_virtual_network_read = orig_vn_read
+
+    def test_sandesh_trace(self):
+        from lxml import etree
+        api_server = test_common.vnc_cfg_api_server.server
+        # the test
+        test_obj = self._create_test_object()
+        self.assertTill(self.ifmap_has_ident, obj=test_obj)
+        self._vnc_lib.virtual_network_delete(id=test_obj.uuid)
+
+        # and validations
+        introspect_port = api_server._args.http_server_port
+        traces = requests.get('http://localhost:%s/Snh_SandeshTraceRequest?x=RestApiTraceBuf' %(introspect_port))
+        self.assertThat(traces.status_code, Equals(200))
+        top_elem = etree.fromstring(traces.text)
+        self.assertThat(top_elem[0][0][0].text, Contains('POST'))
+        self.assertThat(top_elem[0][0][0].text, Contains('200 OK'))
+        self.assertThat(top_elem[0][0][1].text, Contains('DELETE'))
+        self.assertThat(top_elem[0][0][1].text, Contains('200 OK'))
+
+        traces = requests.get('http://localhost:%s/Snh_SandeshTraceRequest?x=DBRequestTraceBuf' %(introspect_port))
+        self.assertThat(traces.status_code, Equals(200))
+        top_elem = etree.fromstring(traces.text)
+        self.assertThat(top_elem[0][0][-1].text, Contains('delete'))
+        self.assertThat(top_elem[0][0][-1].text, Contains(test_obj.name))
+
+        traces = requests.get('http://localhost:%s/Snh_SandeshTraceRequest?x=MessageBusNotifyTraceBuf' %(introspect_port))
+        self.assertThat(traces.status_code, Equals(200))
+        top_elem = etree.fromstring(traces.text)
+        self.assertThat(top_elem[0][0][-1].text, Contains('DELETE'))
+        self.assertThat(top_elem[0][0][-1].text, Contains(test_obj.name))
+
+        traces = requests.get('http://localhost:%s/Snh_SandeshTraceRequest?x=IfmapTraceBuf' %(introspect_port))
+        self.assertThat(traces.status_code, Equals(200))
+        top_elem = etree.fromstring(traces.text)
+        print top_elem[0][0][-1].text
+        self.assertThat(top_elem[0][0][-1].text, Contains('delete'))
+        self.assertThat(top_elem[0][0][-1].text, Contains(test_obj.name))
 # end class TestVncCfgApiServer
+
+class TestLocalAuth(test_case.ApiServerTestCase):
+    def __init__(self, *args, **kwargs):
+        super(TestLocalAuth, self).__init__(*args, **kwargs)
+        self._config_knobs.extend([('DEFAULTS', 'auth', 'keystone'),
+                                   ('DEFAULTS', 'multi_tenancy', True),
+                                   ('KEYSTONE', 'admin_user', 'foo'),
+                                   ('KEYSTONE', 'admin_password', 'bar'),])
+
+    def setup_flexmock(self):
+        from keystoneclient.middleware import auth_token
+        class FakeAuthProtocol(object):
+            def __init__(self, app, *args, **kwargs):
+                self._app = app
+            # end __init__
+            def __call__(self, env, start_response):
+                return self._app(env, start_response)
+            # end __call__
+            def get_admin_token(self):
+                return None
+            # end get_admin_token
+        # end class FakeAuthProtocol
+        test_common.setup_extra_flexmock([(auth_token, 'AuthProtocol', FakeAuthProtocol)])
+    # end setup_flexmock
+
+    def setUp(self):
+        self.setup_flexmock()
+        super(TestLocalAuth, self).setUp()
+    # end setUp
+
+    def test_local_auth_on_8095(self):
+        from requests.auth import HTTPBasicAuth
+        admin_port = self._api_server._args.admin_port
+
+        # equivalent to curl -u foo:bar http://localhost:8095/virtual-networks
+        logger.info("Positive case")
+        url = 'http://localhost:%s/virtual-networks' %(admin_port)
+        resp = requests.get(url, auth=HTTPBasicAuth('foo', 'bar'))
+        self.assertThat(resp.status_code, Equals(200))
+
+        logger.info("Negative case without header")
+        resp = requests.get(url)
+        self.assertThat(resp.status_code, Equals(401))
+        self.assertThat(resp.text, Contains('HTTP_AUTHORIZATION header missing'))
+
+        logger.info("Negative case with wrong creds")
+        resp = requests.get(url, auth=HTTPBasicAuth('bar', 'foo'))
+        self.assertThat(resp.status_code, Equals(401))
+
+# end class TestLocalAuth
 
 if __name__ == '__main__':
     ch = logging.StreamHandler()

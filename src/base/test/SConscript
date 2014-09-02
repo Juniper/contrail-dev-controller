@@ -85,13 +85,13 @@ test_suite = [
     bitset_test,
     dependency_test,
     label_block_test,
-    queue_task_test,
     subset_test,
     patricia_test,
     task_annotations_test,
     factory_test,
     trace_test,
     util_test,
+    queue_task_test,
     ]
 
 test = env.TestSuite('base-test', test_suite)
