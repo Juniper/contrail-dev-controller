@@ -87,14 +87,9 @@ void MulticastHandler::HandleVxLanChange(const VnEntry *vn) {
     if (!obj || obj->IsDeleted())
         return;
 
-    int new_vxlan_id = 0;
-    int vn_vxlan_id = vn->GetVxLanId();
+    int new_vxlan_id = vn->GetVxLanId();
 
-    if (vn_vxlan_id != 0) {
-        new_vxlan_id = vn_vxlan_id;
-    }
-
-    if ((new_vxlan_id != 0) && (new_vxlan_id != obj->vxlan_id())) {
+    if (new_vxlan_id != obj->vxlan_id()) {
         boost::system::error_code ec;
         Ip4Address broadcast =  IpAddress::from_string("255.255.255.255",
                                                        ec).to_v4();

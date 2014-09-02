@@ -172,6 +172,10 @@ bool AgentPath::UpdateTunnelType(Agent *agent, const AgentRoute *sync_route) {
     }
 
     tunnel_type_ = TunnelType::ComputeType(tunnel_bmap_);
+    if (tunnel_type_ == TunnelType::VXLAN &&
+        vxlan_id_ == VxLanTable::kInvalidvxlan_id) {
+        tunnel_type_ = TunnelType::ComputeType(TunnelType::MplsType());
+    }
     if (nh_.get() && nh_->GetType() == NextHop::TUNNEL) {
         DBRequest nh_req(DBRequest::DB_ENTRY_ADD_CHANGE);
         TunnelNHKey *tnh_key =
@@ -793,11 +797,8 @@ void AgentPath::SetSandeshData(PathSandeshData &pdata) const {
     }
 
     pdata.set_sg_list(sg_list());
-    if ((tunnel_type() == TunnelType::VXLAN)) {
-        pdata.set_vxlan_id(vxlan_id());
-    } else {
-        pdata.set_label(label());
-    }
+    pdata.set_vxlan_id(vxlan_id());
+    pdata.set_label(label());
     pdata.set_active_tunnel_type(
             TunnelType(tunnel_type()).ToString());
     pdata.set_supported_tunnel_type(
