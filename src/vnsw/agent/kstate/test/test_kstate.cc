@@ -24,7 +24,7 @@
 #define MAX_VNET 1
 int fd_table[MAX_VNET];
 #define MAX_TEST_FD 5 
-#define MAX_TEST_MPLS 11 
+#define MAX_TEST_MPLS 11
 int test_fd[MAX_TEST_FD];
 
 TestIfKState *TestIfKState::singleton_;
@@ -107,10 +107,10 @@ public:
             WAIT_FOR(1000, 1000, ((oper_if_count) == 
                                 Agent::GetInstance()->interface_table()->Size()));
         }
-        WAIT_FOR(1000, 1000, (((num_ports * 2) + 1)== 
+        WAIT_FOR(1000, 1000, (((num_ports * 2) + 1)==
                             Agent::GetInstance()->mpls_table()->Size()));
         if (!ksync_init_) {
-            WAIT_FOR(1000, 1000, (((num_ports * 2) + 1)== 
+            WAIT_FOR(1000, 1000, (((num_ports * 2) + 1)==
                                   KSyncSockTypeMap::MplsCount()));
             if (if_count) {
                 WAIT_FOR(1000, 1000, ((num_ports + if_count) == 
@@ -121,7 +121,7 @@ public:
                 //(l2 with policy, l2 without policy, l3 with policy, l3 
                 // without policy and 1 multicast - mac as all f's)
                 //plus 4 Nexthops for each VRF (1 VRF NH and 6 Composite NHs)
-                WAIT_FOR(1000, 1000, ((nh_count + (num_ports * 5) + 7) == 
+                WAIT_FOR(1000, 1000, ((nh_count + (num_ports * 5) + 7) ==
                                     KSyncSockTypeMap::NHCount()));
             }
             if (rt_count) {

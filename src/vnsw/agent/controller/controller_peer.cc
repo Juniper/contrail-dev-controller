@@ -277,7 +277,7 @@ void AgentXmppChannel::ReceiveMulticastUpdate(XmlPugi *pugi) {
                 MulticastHandler::ModifyFabricMembers(agent_->
                                               multicast_tree_builder_peer(),
                                               vrf, g_addr.to_v4(),
-                                              s_addr.to_v4(), 0, olist, 
+                                              s_addr.to_v4(), 0, olist,
                                   ControllerPeerPath::kInvalidPeerIdentifier);
             }
         }
@@ -434,14 +434,14 @@ void AgentXmppChannel::AddEcmpRoute(string vrf_name, Ip4Address prefix_addr,
                                   prefix_addr, prefix_len, data);
 }
 
-void AgentXmppChannel::AddMulticastEvpnRoute(string vrf_name, 
-                                             struct ether_addr &mac, 
+void AgentXmppChannel::AddMulticastEvpnRoute(string vrf_name,
+                                             struct ether_addr &mac,
                                              EnetItemType *item) {
     TunnelOlist olist;
     for (uint32_t i = 0; i < item->entry.olist.next_hop.size(); i++) {
         boost::system::error_code ec;
-        IpAddress addr = 
-            IpAddress::from_string(item->entry.olist.next_hop[i].address, 
+        IpAddress addr =
+            IpAddress::from_string(item->entry.olist.next_hop[i].address,
                                    ec);
         if (ec.value() != 0) {
             CONTROLLER_TRACE(Trace, GetBgpPeerName(), vrf_name,
@@ -452,7 +452,7 @@ void AgentXmppChannel::AddMulticastEvpnRoute(string vrf_name,
         int label = item->entry.olist.next_hop[i].label;
         TunnelType::TypeBmap encap = GetEnetTypeBitmap(item->
                        entry.olist.next_hop[i].tunnel_encapsulation_list);
-        olist.push_back(OlistTunnelEntry(label, addr.to_v4(), encap)); 
+        olist.push_back(OlistTunnelEntry(label, addr.to_v4(), encap));
     }
 
     CONTROLLER_TRACE(Trace, GetBgpPeerName(), "Composite",
@@ -462,7 +462,7 @@ void AgentXmppChannel::AddMulticastEvpnRoute(string vrf_name,
                                         multicast_sequence_number());
 }
 
-void AgentXmppChannel::AddEvpnRoute(std::string vrf_name, 
+void AgentXmppChannel::AddEvpnRoute(std::string vrf_name,
                                     std::string mac_str,
                                     EnetItemType *item) {
     boost::system::error_code ec; 

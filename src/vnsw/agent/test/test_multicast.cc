@@ -392,11 +392,11 @@ TEST_F(MulticastTest, L2Broadcast_1) {
     EXPECT_TRUE(l2_intf_cnh->ComponentNHCount() == 3);
 
     for (uint8_t i = 0; i < l3_intf_cnh->ComponentNHCount(); i++) {
-        const InterfaceNH *l3_intf_nh = 
+        const InterfaceNH *l3_intf_nh =
             static_cast<const InterfaceNH *>(l3_intf_cnh->GetNH(i));
-        const InterfaceNH *l2_intf_nh = 
+        const InterfaceNH *l2_intf_nh =
             static_cast<const InterfaceNH *>(l2_intf_cnh->GetNH(i));
-        EXPECT_TRUE(l3_intf_nh->GetFlags() == 
+        EXPECT_TRUE(l3_intf_nh->GetFlags() ==
                     (InterfaceNHFlags::MULTICAST | InterfaceNHFlags::INET4));
         EXPECT_TRUE(l2_intf_nh->GetFlags() == InterfaceNHFlags::LAYER2);
         EXPECT_TRUE(l3_intf_nh->GetIfUuid() == l2_intf_nh->GetIfUuid());
@@ -1074,7 +1074,7 @@ TEST_F(MulticastTest, evpn_flood_l2l3_mode) {
     EXPECT_TRUE(L2RouteFind("vrf1", *ether_aton("FF:FF:FF:FF:FF:FF")));
 
     TunnelOlist olist_map;
-    olist_map.push_back(OlistTunnelEntry(2000, 
+    olist_map.push_back(OlistTunnelEntry(2000,
                                          IpAddress::from_string("8.8.8.8").to_v4(),
                                          TunnelType::AllType()));
     MulticastHandler::ModifyFabricMembers("vrf1",
@@ -1083,12 +1083,12 @@ TEST_F(MulticastTest, evpn_flood_l2l3_mode) {
                                           1111, olist_map);
     client->WaitForIdle();
 
-    AddArp("8.8.8.8", "00:00:08:08:08:08", 
+    AddArp("8.8.8.8", "00:00:08:08:08:08",
            Agent::GetInstance()->fabric_interface_name().c_str());
     client->WaitForIdle();
 
     TunnelOlist evpn_olist_map;
-    evpn_olist_map.push_back(OlistTunnelEntry(1000, 
+    evpn_olist_map.push_back(OlistTunnelEntry(1000,
                                               IpAddress::from_string("8.8.8.8").to_v4(),
                                               TunnelType::MplsType()));
     MulticastHandler::ModifyEvpnMembers("vrf1",
@@ -1099,7 +1099,7 @@ TEST_F(MulticastTest, evpn_flood_l2l3_mode) {
                                         evpn_olist_map);
     client->WaitForIdle();
 
-    Inet4MulticastRouteEntry *rt = 
+    Inet4MulticastRouteEntry *rt =
         MCRouteGet("vrf1", "255.255.255.255");
     nh = const_cast<NextHop *>(rt->GetActiveNextHop());
     cnh = static_cast<CompositeNH *>(nh);

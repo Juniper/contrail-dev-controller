@@ -117,7 +117,7 @@ private:
     void ReceiveInternal(const XmppStanza::XmppMessage *msg);
     void AddRoute(std::string vrf_name, Ip4Address ip, uint32_t plen, 
                   autogen::ItemType *item);
-    void AddMulticastEvpnRoute(std::string vrf_name, struct ether_addr &mac, 
+    void AddMulticastEvpnRoute(std::string vrf_name, struct ether_addr &mac,
                                autogen::EnetItemType *item);
     void AddEvpnRoute(std::string vrf_name, std::string mac_addr,
                       autogen::EnetItemType *item);

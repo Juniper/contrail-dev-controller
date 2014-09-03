@@ -119,7 +119,7 @@ void MulticastHandler::HandleFamilyConfig(const VnEntry *vn)
                 Layer2AgentRouteTable::DeleteBroadcastReq(agent_->
                                                           multicast_peer(),
                                                           (*it)->vrf_name());
-            } 
+            }
         }
     }
 }
@@ -203,7 +203,9 @@ void MulticastHandler::DeleteRouteandMPLS(MulticastGroupObject *obj)
 {
     //delete mcast routes, subnet bcast gets deleted via vn delete
     if (IS_BCAST_MCAST(obj->GetGroupAddress())) { 
-        obj->FlushAllPeerInfo(agent_, INVALID_PEER_IDENTIFIER);
+        obj->FlushAllPeerInfo(agent_,
+                              agent_->multicast_peer(),
+                              INVALID_PEER_IDENTIFIER);
     }
     MCTRACE(Log, "delete route ", obj->vrf_name(),
             obj->GetGroupAddress().to_string(), 0);
@@ -243,7 +245,7 @@ void MulticastHandler::DeleteVmInterface(const Interface *intf)
             DeleteRouteandMPLS(*it);
             /* delete mcast object */
             DeleteMulticastObject((*it)->vrf_name_, (*it)->grp_address_);
-        } 
+        }
     }
     vm_to_mcobj_list_[vm_itf->GetUuid()].clear();
     DeleteVmToMulticastObjMap(vm_itf->GetUuid());
@@ -360,27 +362,27 @@ void MulticastHandler::TriggerRemoteRouteChange(MulticastGroupObject *obj,
     // 1) Internal delete (invalid peer identifier), dont update peer identifier
     // as it is a forced removal.
     // 2) Control node removing stales i.e. delete if local peer identifier is
-    // less than global peer identifier. 
+    // less than global peer identifier.
     //
     // if its not a delete operation -
     // 1) Update only if local peer identifier is less than or equal to sent
     // global peer identifier.
 
     // if its internal delete then peer_identifier will be 0xFFFFFFFF;
-    // if external delete(via control node) then its stale cleanup so delete 
+    // if external delete(via control node) then its stale cleanup so delete
     // only when local peer identifier is less than global multicast sequence.
     if (delete_op && peer_identifier <= obj_peer_identifier) {
         return;
     }
 
-    // - Update operation with lower sequence number sent compared to 
+    // - Update operation with lower sequence number sent compared to
     // local identifier, ignore
     if (!delete_op && peer_identifier < obj_peer_identifier) {
         return;
     }
 
     // After resetting tunnel and mpls label return if it was a delete call,
-    // dont update peer_identifier. Let it get updated via update operation only 
+    // dont update peer_identifier. Let it get updated via update operation only
     if (delete_op) {
         MCTRACE(Log, "delete bcast path from remote peer", obj->vrf_name(),
                 "255.255.255.255", 0);
@@ -393,7 +395,7 @@ void MulticastHandler::TriggerRemoteRouteChange(MulticastGroupObject *obj,
 
     // Ideally wrong update call
     if (peer_identifier == INVALID_PEER_IDENTIFIER) {
-        MCTRACE(Log, "Invalid peer identifier sent for modification", 
+        MCTRACE(Log, "Invalid peer identifier sent for modification",
                 obj->vrf_name(), "255.255.255.255", 0);
         return;
     }
@@ -404,9 +406,9 @@ void MulticastHandler::TriggerRemoteRouteChange(MulticastGroupObject *obj,
     for (TunnelOlist::const_iterator it = olist.begin();
          it != olist.end(); it++) {
         TunnelNHKey *key =
-            new TunnelNHKey(Agent::GetInstance()->fabric_vrf_name(), 
+            new TunnelNHKey(Agent::GetInstance()->fabric_vrf_name(),
                             Agent::GetInstance()->router_id(),
-                            it->daddr_, false, 
+                            it->daddr_, false,
                             TunnelType::ComputeType(it->tunnel_bmap_));
         TunnelNHData *tnh_data = new TunnelNHData();
         DBRequest req;
@@ -504,10 +506,11 @@ void MulticastHandler::AddVmInterfaceInFloodGroup(const std::string &vrf_name,
     if (all_broadcast == NULL) {
         all_broadcast = new MulticastGroupObject(vrf_name, broadcast, 
                                                  vn_name);
-        AddToMulticastObjList(all_broadcast); 
+        AddToMulticastObjList(all_broadcast);
         add_route = true;
     }
 
+    all_broadcast->set_vxlan_id(vn->GetVxLanId());
     //Modify Nexthops
     if (all_broadcast->AddLocalMember(intf_uuid) == true) {
         if (vn->layer2_forwarding()) {
@@ -542,10 +545,10 @@ void MulticastHandler::AddVmInterfaceInFloodGroup(const std::string &vrf_name,
  * OLIST of NH (server IP + label for that server)
  */
 void MulticastHandler::ModifyFabricMembers(const Peer *peer,
-                                           const std::string &vrf_name, 
-                                           const Ip4Address &grp, 
-                                           const Ip4Address &src, 
-                                           uint32_t label, 
+                                           const std::string &vrf_name,
+                                           const Ip4Address &grp,
+                                           const Ip4Address &src,
+                                           uint32_t label,
                                            const TunnelOlist &olist,
                                            uint64_t peer_identifier)
 {
@@ -573,15 +576,15 @@ void MulticastHandler::ModifyFabricMembers(const Peer *peer,
  * convey the same.
  */
 void MulticastHandler::ModifyEvpnMembers(const Peer *peer,
-                                         const std::string &vrf_name, 
+                                         const std::string &vrf_name,
                                          const TunnelOlist &olist,
                                          uint64_t peer_identifier)
 {
     boost::system::error_code ec;
     Ip4Address grp = Ip4Address::from_string("255.255.255.255", ec);
-    MulticastGroupObject *obj = 
+    MulticastGroupObject *obj =
         MulticastHandler::GetInstance()->FindActiveGroupObject(vrf_name, grp);
-    MCTRACE(Log, "XMPP call(EVPN) multicast handler ", vrf_name, 
+    MCTRACE(Log, "XMPP call(EVPN) multicast handler ", vrf_name,
             grp.to_string(), 0);
 
     if (obj == NULL) {
@@ -598,11 +601,12 @@ void MulticastHandler::ModifyEvpnMembers(const Peer *peer,
 // For internal delete it uses invalid identifier. 
 // For delete via control node it uses the sequence sent.
 void MulticastGroupObject::FlushAllPeerInfo(const Agent *agent,
+                                            const Peer *peer,
                                             uint64_t peer_identifier) {
     if ((peer_identifier != peer_identifier_) ||
         (peer_identifier == INVALID_PEER_IDENTIFIER)) {
         MulticastHandler::GetInstance()->
-            DeleteBroadcast(agent->multicast_peer(), vrf_name_);
+            DeleteBroadcast(peer, vrf_name_);
     }
     MCTRACE(Log, "Delete broadcast route", vrf_name_,
             grp_address_.to_string(), 0);
@@ -620,7 +624,8 @@ bool MulticastHandler::FlushPeerInfo(uint64_t peer_sequence) {
          GetMulticastObjList().begin(); it != GetMulticastObjList().end(); 
          it++) {
         //Delete all control node given paths
-        (*it)->FlushAllPeerInfo(agent_, peer_sequence);
+        (*it)->FlushAllPeerInfo(agent_, agent_->multicast_tree_builder_peer(),
+                                peer_sequence);
     }
     return false;
 }
@@ -629,12 +634,14 @@ bool MulticastHandler::FlushPeerInfo(uint64_t peer_sequence) {
  * Shutdown for clearing all stuff related to multicast
  */
 void MulticastHandler::Shutdown() {
+    const Agent *agent = MulticastHandler::GetInstance()->agent();
     //Delete all route mpls and trigger cnh change
     for (std::set<MulticastGroupObject *>::iterator it =
          MulticastHandler::GetInstance()->GetMulticastObjList().begin(); 
          it != MulticastHandler::GetInstance()->GetMulticastObjList().end(); it++) {
         //Delete the tunnel OLIST
-        (*it)->FlushAllPeerInfo(MulticastHandler::GetInstance()->agent(),
+        (*it)->FlushAllPeerInfo(agent,
+                                agent->multicast_peer(),
                                 INVALID_PEER_IDENTIFIER);
         //Delete the label and route
         MulticastHandler::GetInstance()->DeleteRouteandMPLS(*it);

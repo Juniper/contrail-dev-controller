@@ -88,7 +88,7 @@ public:
         sip_ =  IpAddress::from_string("0.0.0.0", ec).to_v4();
     }
     Inet4MulticastRouteKey(const string &vrf_name) : 
-        AgentRouteKey(Agent::GetInstance()->multicast_peer(), vrf_name) { 
+        AgentRouteKey(Agent::GetInstance()->multicast_peer(), vrf_name) {
             boost::system::error_code ec;
             dip_ =  IpAddress::from_string("255.255.255.255", ec).to_v4();
             sip_ =  IpAddress::from_string("0.0.0.0", ec).to_v4();

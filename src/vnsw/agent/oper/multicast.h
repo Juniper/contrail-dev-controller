@@ -86,7 +86,9 @@ public:
     uint32_t GetLocalListSize() { return local_olist_.size(); };
 
     //Labels for server + server list + ingress source label
-    void FlushAllPeerInfo(const Agent *agent, uint64_t peer_identifier);
+    void FlushAllPeerInfo(const Agent *agent,
+                          const Peer *peer,
+                          uint64_t peer_identifier);
 
     //Gets
     const std::string &vrf_name() { return vrf_name_; };
@@ -130,17 +132,17 @@ public:
 
     /* Called by XMPP to add ctrl node sent olist and label */
     static void ModifyFabricMembers(const Peer *peer,
-                                    const std::string &vrf_name, 
+                                    const std::string &vrf_name,
                                     const Ip4Address &group,
                                     const Ip4Address &source, 
                                     uint32_t source_label,
                                     const TunnelOlist &olist,
                                     uint64_t peer_identifier = 0);
-    /* Called as a result of XMPP message received with OLIST of 
+    /* Called as a result of XMPP message received with OLIST of
      * evpn endpoints with mpls or vxlan encap
      */
     static void ModifyEvpnMembers(const Peer *peer,
-                                  const std::string &vrf_name, 
+                                  const std::string &vrf_name,
                                   const TunnelOlist &olist,
                                   uint64_t peer_identifier = 0);
     //Registered for VN notification
@@ -239,11 +241,11 @@ private:
     static MulticastHandler *obj_;
 
     Agent *agent_;
-    std::map<std::string, std::vector<VnIpam> > vrf_ipam_mapping_; 
+    std::map<std::string, std::vector<VnIpam> > vrf_ipam_mapping_;
     //VN uuid to VRF name mapping
     std::map<uuid, string> vn_vrf_mapping_;
     //VM uuid <-> VN uuid
-    //List of all multicast objects(VRF/G/S) 
+    //List of all multicast objects(VRF/G/S)
     std::set<MulticastGroupObject *> multicast_obj_list_;
     //Reference mapping of VM to participating multicast object list
     std::map<uuid, std::list<MulticastGroupObject *> > vm_to_mcobj_list_;

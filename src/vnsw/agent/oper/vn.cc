@@ -431,7 +431,7 @@ bool VnTable::IFNodeToReq(IFMapNode *node, DBRequest &req) {
     boost::uuids::uuid u;
     CfgUuidSet(id_perms.uuid.uuid_mslong, id_perms.uuid.uuid_lslong, u);
 
-    if ((properties.forwarding_mode == "l2") || 
+    if ((properties.forwarding_mode == "l2") ||
         (Agent::GetInstance()->simulate_evpn_tor())) {
         ipv4_forwarding = false;
     }

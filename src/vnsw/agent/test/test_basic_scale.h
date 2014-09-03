@@ -310,7 +310,7 @@ public:
         SendDocument(xdoc);
     }
 
-    void SendL2RouteMessage(std::string vrf, std::string mac_string, std::string address, int label, 
+    void SendL2RouteMessage(std::string vrf, std::string mac_string, std::string address, int label,
                             const char *vn = "vn1", bool is_vxlan = false) {
         if (mac_string == "ff:ff:ff:ff:ff:ff") {
             SendL2FloodRouteMessage(vrf, mac_string, address, label, vn, is_vxlan);
@@ -330,7 +330,7 @@ public:
             item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation.push_back("gre");
             item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation.push_back("udp");
         }
-        
+
         autogen::EnetItemType item;
         item.entry.nlri.af = 25;
         item.entry.nlri.safi = 242;

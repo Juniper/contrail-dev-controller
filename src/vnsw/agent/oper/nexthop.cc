@@ -1945,13 +1945,13 @@ static void ExpandCompositeNextHop(const CompositeNH *comp_nh,
     stringstream comp_str;
     switch (comp_nh->composite_nh_type()) {
     case Composite::EVPN: {
-        comp_str << "evpn Composite"  << " sub nh count: " 
+        comp_str << "evpn Composite"  << " sub nh count: "
             << comp_nh->ComponentNHCount();
         data.set_type(comp_str.str());
         if (comp_nh->ComponentNHCount() == 0)
             break;
         std::vector<McastData> data_list;
-        FillComponentNextHop(comp_nh, data_list);                          
+        FillComponentNextHop(comp_nh, data_list);
         data.set_mc_list(data_list);
         break;
     }
@@ -1983,24 +1983,24 @@ static void ExpandCompositeNextHop(const CompositeNH *comp_nh,
         data.set_type(comp_str.str());
         if (comp_nh->ComponentNHCount() == 0)
             break;
-        std::vector<McastData> data_list;                      
-        FillComponentNextHop(comp_nh, data_list);                          
+        std::vector<McastData> data_list;
+        FillComponentNextHop(comp_nh, data_list);
         data.set_mc_list(data_list);
         break;
     }
     case Composite::L2INTERFACE: {
-        comp_str << "L2 interface Composite"  << " sub nh count: " 
+        comp_str << "L2 interface Composite"  << " sub nh count: "
             << comp_nh->ComponentNHCount();
         data.set_type(comp_str.str());
         if (comp_nh->ComponentNHCount() == 0)
             break;
-        std::vector<McastData> data_list;                      
-        FillComponentNextHop(comp_nh, data_list);                          
+        std::vector<McastData> data_list;
+        FillComponentNextHop(comp_nh, data_list);
         data.set_mc_list(data_list);
         break;
     }
     case Composite::L3INTERFACE: {
-        comp_str << "L3 interface Composite"  << " sub nh count: " 
+        comp_str << "L3 interface Composite"  << " sub nh count: "
             << comp_nh->ComponentNHCount();
         data.set_type(comp_str.str());
         if (comp_nh->ComponentNHCount() == 0)

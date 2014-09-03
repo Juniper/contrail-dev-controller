@@ -215,7 +215,9 @@ public:
     virtual std::string ToString() const = 0;
     virtual const std::string GetAddressString() const = 0;
     virtual bool ReComputePaths(AgentPath *path, bool del) {return false;}
-    virtual bool ReComputeMulticastPaths(AgentPath *path, bool del);
+    virtual bool ReComputeMulticastPaths(AgentPath *path, bool del) {
+        return false;
+    }
     virtual uint32_t GetActiveLabel() const;
 
     // Accessor functions

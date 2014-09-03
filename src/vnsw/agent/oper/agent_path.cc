@@ -632,7 +632,7 @@ bool PathPreferenceData::AddChangePath(Agent *agent, AgentPath *path) {
 // Subnet Route route data
 SubnetRoute::SubnetRoute(const string &vn_name,
                          uint32_t vxlan_id, DBRequest &nh_req) :
-    MulticastRoute(vn_name, 0, vxlan_id, nh_req) { 
+    MulticastRoute(vn_name, 0, vxlan_id, nh_req) {
         is_multicast_ = false;
 }
 

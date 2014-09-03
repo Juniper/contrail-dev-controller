@@ -338,7 +338,7 @@ bool Inet4UnicastRouteEntry::EcmpDeletePath(AgentPath *path) {
 }
 
 bool Inet4UnicastRouteEntry::ReComputePaths(AgentPath *path, bool del) {
-    // ECMP path are managed by route module. Update ECMP path with 
+    // ECMP path are managed by route module. Update ECMP path with
     // addition of new path
     if (del) {
         return EcmpDeletePath(path);

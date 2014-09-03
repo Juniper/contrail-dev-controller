@@ -105,6 +105,7 @@ public:
     virtual bool DBEntrySandesh(Sandesh *sresp, bool stale) const;
     virtual uint32_t GetActiveLabel() const;
     virtual bool ReComputePaths(AgentPath *path, bool del);
+    virtual bool ReComputeMulticastPaths(AgentPath *path, bool del);
 
     const struct ether_addr &GetAddress() const {return mac_;}
     const Ip4Address &GetVmIpAddress() const {return vm_ip_;}
