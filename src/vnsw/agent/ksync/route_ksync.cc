@@ -181,15 +181,7 @@ bool RouteKSyncEntry::Sync(DBEntry *e) {
 
     Agent *agent = ksync_obj_->ksync()->agent();
     const NextHop *tmp = NULL;
-    if (route->is_multicast()) {
-        const AgentPath *multicast_path =
-            route->FindPath(agent->multicast_peer());
-        if (multicast_path != NULL) {
-            tmp = multicast_path->nexthop(agent);
-        }
-    } else {
-        tmp = route->GetActiveNextHop();
-    }
+    tmp = route->GetActiveNextHop();
     if (tmp == NULL) {
         DiscardNHKey key;
         tmp = static_cast<NextHop *>(agent->nexthop_table()->

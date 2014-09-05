@@ -125,9 +125,13 @@ void AgentXmppChannel::ReceiveEvpnUpdate(XmlPugi *pugi) {
 
                 char *mac_str = 
                     strtok_r(const_cast<char *>(id.c_str()), "-", &saveptr);
+                uint32_t ethernet_tag = 0;
                 if (strlen(saveptr) != 0) {
+                    ethernet_tag = atoi(mac_str);
                     mac_str = saveptr;
                 }
+                CONTROLLER_TRACE(Trace, GetBgpPeerName(), vrf_name,
+                                 "EVPN Retract ethernet tag:" + ethernet_tag);
                 struct ether_addr mac = *ether_aton(mac_str);;
                 if (strcmp("ff:ff:ff:ff:ff:ff", mac_str) == 0) {
                     TunnelOlist olist;
@@ -1493,17 +1497,7 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
     size_t datalen_;
    
     if (!peer) return false;
-    assert (label != MplsTable::kInvalidLabel);
-
-    /*
-    if (route->is_multicast() && add_route && (peer->agent()->
-                              mulitcast_builder() != peer)) {
-        CONTROLLER_TRACE(Trace, peer->GetBgpPeerName(),
-                         route->vrf()->GetName(),
-                         "Peer not elected Multicast Tree Builder (EVPN)");
-        return false;
-    }
-    */
+    if (label == MplsTable::kInvalidLabel) return false;
 
     //Build the DOM tree
     auto_ptr<XmlBase> impl(XmppStanza::AllocXmppXmlImpl());
@@ -1566,17 +1560,6 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
         item.entry.nlri.ethernet_tag = label;
     }
 
-    stringstream print_str;
-    print_str << "Sending EVPN route: ";
-    print_str << rstr.str();
-    print_str << " passed ";
-    print_str << label;
-    print_str << " calculated ";
-    print_str << nh.label;
-    print_str << " ethernet tag: ";
-    print_str << item.entry.nlri.ethernet_tag;
-    print_str << " associate " << add_route;
-    CONTROLLER_TRACE(Trace, "", "", print_str.str());
     item.entry.next_hops.next_hop.push_back(nh);
     //item.entry.version = 1; //TODO
     //item.entry.virtual_network = vn;

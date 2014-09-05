@@ -142,26 +142,43 @@ void RouteExport::UnicastNotify(AgentXmppChannel *bgp_xmpp_peer,
                 //In case of layer2 routes any change in vxlan id or
                 //movement of tunnelt type from vxlan to mpls should result in
                 //withdraw and re add of route.
-                if ((state->tunnel_type_ == TunnelType::VXLAN) &&
-                    (path->GetActiveLabel() != state->label_))
+                bool withdraw = false;
+                uint32_t withdraw_label = state->label_;
+                if (state->tunnel_type_ == TunnelType::VXLAN) {
+                    //Vxlan ID changed or tunnel type is no more VXLAN
+                    if ((path->GetActiveLabel() != state->label_) ||
+                        (TunnelType::ComputeType(path->GetTunnelBmap()) !=
+                         TunnelType::VXLAN)) {
+                        withdraw = true;
+                    }
+                } else {
+                    if (TunnelType::ComputeType(path->GetTunnelBmap()) ==
+                        TunnelType::VXLAN) {
+                        withdraw = true;
+                        withdraw_label = 0;
+                    }
+                }
+
+                if (withdraw) {
                     state->exported_ =
                         AgentXmppChannel::ControllerSendRoute(bgp_xmpp_peer,
                              static_cast<AgentRoute * >(route), state->vn_,
-                             state->label_, path->GetTunnelBmap(),
+                             withdraw_label, path->GetTunnelBmap(),
                              &path->sg_list(), false, type,
                              state->path_preference_);
-                CONTROLLER_TRACE(RouteExport,
-                                 bgp_xmpp_peer->GetBgpPeerName(),
-                                 route->vrf()->GetName(),
-                                 route->ToString(),
-                                 false, 0);
+                    CONTROLLER_TRACE(RouteExport,
+                                     bgp_xmpp_peer->GetBgpPeerName(),
+                                     route->vrf()->GetName(),
+                                     route->ToString(),
+                                     false, 0);
+                }
             }
             state->Update(path);
             CONTROLLER_TRACE(RouteExport,
                              bgp_xmpp_peer->GetBgpPeerName(),
                              route->vrf()->GetName(),
                              route->ToString(),
-                             true, path->GetActiveLabel());
+                             true, state->label_);
             state->exported_ = 
                 AgentXmppChannel::ControllerSendRoute(bgp_xmpp_peer, 
                         static_cast<AgentRoute * >(route), state->vn_, 
@@ -268,7 +285,7 @@ void RouteExport::MulticastNotify(AgentXmppChannel *bgp_xmpp_peer,
         //Sending ff:ff:ff:ff:ff:ff for evpn replication
         TunnelType::Type old_tunnel_type = state->tunnel_type_;
         uint32_t old_label = state->label_;
-        const AgentPath *active_path = route->FindPath(agent->multicast_peer());
+        const AgentPath *active_path = route->GetActivePath();
 
         if (route->GetTableType() == Agent::LAYER2) {
             if (active_path) {
