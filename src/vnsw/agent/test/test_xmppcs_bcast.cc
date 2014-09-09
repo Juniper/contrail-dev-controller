@@ -507,11 +507,11 @@ protected:
     WAIT_FOR(1000, 10000, (client->CompositeNHCount() == 4));
     NextHop *nh = const_cast<NextHop *>(rt->GetActiveNextHop());
 	CompositeNH *cnh = static_cast<CompositeNH *>(nh);
-        MulticastGroupObject *obj;
+    //    MulticastGroupObject *obj;
 	ASSERT_TRUE(nh != NULL);
 	ASSERT_TRUE(nh->GetType() == NextHop::COMPOSITE);
-	obj = MulticastHandler::GetInstance()->FindGroupObject("vrf1", addr);
-	WAIT_FOR(1000, 1000, (obj->GetSourceMPLSLabel() != 0));
+	//obj = MulticastHandler::GetInstance()->FindGroupObject("vrf1", addr);
+	//WAIT_FOR(1000, 1000, (obj->GetSourceMPLSLabel() != 0));
     WAIT_FOR(1000, 10000, (cnh->ComponentNHCount() == 2));
     const CompositeNH *intf_cnh = static_cast<const CompositeNH *>(cnh->GetNH(1));
     EXPECT_TRUE(intf_cnh->ComponentNHCount() == 2);
@@ -541,8 +541,8 @@ protected:
 	ASSERT_TRUE(nh != NULL);
 	ASSERT_TRUE(nh->GetType() == NextHop::COMPOSITE);
 	cnh = static_cast<CompositeNH *>(nh);
-	obj = MulticastHandler::GetInstance()->FindGroupObject("vrf1", addr);
-	WAIT_FOR(1000, 1000, (obj->GetSourceMPLSLabel() != 0));
+	//obj = MulticastHandler::GetInstance()->FindGroupObject("vrf1", addr);
+	//WAIT_FOR(1000, 1000, (obj->GetSourceMPLSLabel() != 0));
     ASSERT_TRUE(cnh->ComponentNHCount() == 3);
     intf_cnh = static_cast<const CompositeNH *>(cnh->GetNH(1));
     EXPECT_TRUE(intf_cnh->ComponentNHCount() == 2);

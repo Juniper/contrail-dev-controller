@@ -1135,7 +1135,7 @@ Layer2RouteEntry *L2RouteGet(const string &vrf_name,
     if (vrf == NULL)
         return NULL;
 
-    Layer2RouteKey key(Agent::GetInstance()->local_vm_peer(), vrf_name, mac);
+    Layer2RouteKey key(Agent::GetInstance()->local_vm_peer(), vrf_name, mac, 0);
     Layer2RouteEntry *route = 
         static_cast<Layer2RouteEntry *>
         (static_cast<Layer2AgentRouteTable *>(vrf->
@@ -1217,7 +1217,7 @@ bool Layer2TunnelRouteAdd(const Peer *peer, const string &vm_vrf,
                               bmap, label, "", SecurityGroupList(),
                               PathPreference());
     Layer2AgentRouteTable::AddRemoteVmRouteReq(peer, vm_vrf, remote_vm_mac,
-                                        vm_addr, plen, data);
+                                        vm_addr, 0, plen, data);
     return true;
 }
 

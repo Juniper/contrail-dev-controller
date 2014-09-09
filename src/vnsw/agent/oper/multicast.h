@@ -144,6 +144,7 @@ public:
     static void ModifyEvpnMembers(const Peer *peer,
                                   const std::string &vrf_name,
                                   const TunnelOlist &olist,
+                                  uint32_t ethernet_tag,
                                   uint64_t peer_identifier = 0);
     //Registered for VN notification
     static void ModifyVN(DBTablePartBase *partition, DBEntryBase *e);
@@ -164,7 +165,8 @@ public:
                                   bool delete_op,
                                   COMPOSITETYPE comp_type,
                                   uint32_t label,
-                                  bool fabric);
+                                  bool fabric,
+                                  uint32_t ethernet_tag);
     void RebakeSubnetRoute(const Peer *peer,
                            const std::string &vrf_name,
                            uint32_t label,
@@ -187,7 +189,8 @@ public:
                                                       uint8_t flags);
     bool FlushPeerInfo(uint64_t peer_sequence);
     void DeleteBroadcast(const Peer *peer,
-                         const std::string &vrf_name);
+                         const std::string &vrf_name,
+                         uint32_t ethernet_tag);
 
     const Agent *agent() const {return agent_;}
     void Terminate();
@@ -216,7 +219,9 @@ private:
                              const std::string &vrf_name,
                              const std::string &vn_name,
                              const Ip4Address &addr,
-                             uint32_t label, int vxlan_id);
+                             uint32_t label,
+                             int vxlan_id,
+                             uint32_t ethernet_tag);
 
     //VM itf to multicast ob
     void AddVmToMulticastObjMap(const uuid &vm_itf_uuid, 

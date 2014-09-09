@@ -130,16 +130,18 @@ void AgentXmppChannel::ReceiveEvpnUpdate(XmlPugi *pugi) {
                     ethernet_tag = atoi(mac_str);
                     mac_str = saveptr;
                 }
-                CONTROLLER_TRACE(Trace, GetBgpPeerName(), vrf_name,
-                                 "EVPN Retract ethernet tag:" + ethernet_tag);
                 struct ether_addr mac = *ether_aton(mac_str);;
                 if (strcmp("ff:ff:ff:ff:ff:ff", mac_str) == 0) {
+                    //Deletes the peer path for all boradcast and 
+                    //traverses the subnet route in VRF to issue delete of peer
+                    //for them as well.
                     TunnelOlist olist;
                     MulticastHandler::ModifyEvpnMembers(bgp_peer_id(),
                                                         vrf_name, olist,
+                                                        ethernet_tag,
                              ControllerPeerPath::kInvalidPeerIdentifier);
                 } else {
-                    rt_table->DeleteReq(bgp_peer_id(), vrf_name, mac,
+                    rt_table->DeleteReq(bgp_peer_id(), vrf_name, mac, ethernet_tag,
                                         new ControllerVmRoute(bgp_peer_id()));
                 }
             }
@@ -462,6 +464,7 @@ void AgentXmppChannel::AddMulticastEvpnRoute(string vrf_name,
     CONTROLLER_TRACE(Trace, GetBgpPeerName(), "Composite",
                      "add evpn multicast route");
     MulticastHandler::ModifyEvpnMembers(bgp_peer_id(), vrf_name, olist,
+                                        item->entry.nlri.ethernet_tag,
                                         agent_->controller()->
                                         multicast_sequence_number());
 }
@@ -520,6 +523,7 @@ void AgentXmppChannel::AddEvpnRoute(std::string vrf_name,
                                                     item->entry.virtual_network,
                                                     sg, PathPreference());
         rt_table->AddRemoteVmRouteReq(bgp_peer_id(), vrf_name, mac, prefix_addr,
+                                      item->entry.nlri.ethernet_tag,
                                       prefix_len, data);
         return;
     }
@@ -529,7 +533,7 @@ void AgentXmppChannel::AddEvpnRoute(std::string vrf_name,
         VrfEntry *vrf = 
             agent_->vrf_table()->FindVrfFromName(vrf_name);
         Layer2RouteKey key(agent_->local_vm_peer(), 
-                           vrf_name, mac);
+                           vrf_name, mac, item->entry.nlri.ethernet_tag);
         if (vrf != NULL) {
             Layer2RouteEntry *route = 
                 static_cast<Layer2RouteEntry *>
@@ -583,7 +587,9 @@ void AgentXmppChannel::AddEvpnRoute(std::string vrf_name,
                                                this);
             }
             rt_table->AddLocalVmRouteReq(bgp_peer, vrf_name, mac,
-                                         prefix_addr, prefix_len,
+                                         prefix_addr,
+                                         item->entry.nlri.ethernet_tag,
+                                         prefix_len,
                                          static_cast<LocalVmRoute *>(local_vm_route));
             break;
             }

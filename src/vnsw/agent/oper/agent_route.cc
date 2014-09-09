@@ -115,12 +115,12 @@ bool AgentRouteTable::DeleteAllBgpPath(DBTablePartBase *part,
     if (route && !route->IsDeleted()) {
         for(Route::PathList::iterator it = route->GetPathList().begin();
             it != route->GetPathList().end();) {
-            const AgentPath *path =
-                static_cast<const AgentPath *>(it.operator->());
+            AgentPath *path =
+                static_cast<AgentPath *>(it.operator->());
             const Peer *peer = path->peer();
             it++;
             if (peer && peer->GetType() == Peer::BGP_PEER) {
-                DeletePathFromPeer(part, route, path->peer());
+                DeletePathFromPeer(part, route, path);
             }
         }
     }
@@ -208,13 +208,11 @@ void AgentRouteTable::RemoveUnresolvedRoute(const AgentRoute *rt) {
 // LOCAL_VM peer path. But, controller-peer needs to know deletion of 
 // LOCAL_VM path to retract the route.  So, force notify deletion of any path.
 void AgentRouteTable::DeletePathFromPeer(DBTablePartBase *part,
-                                         AgentRoute *rt, const Peer *peer) {
+                                         AgentRoute *rt,
+                                         AgentPath *path) {
     if (rt == NULL) {
         return;
     }
-
-    // Find path for the peer
-    AgentPath *path = rt->FindPath(peer);
 
     RouteInfo rt_info;
     rt->FillTrace(rt_info, AgentRoute::DELETE_PATH, path);
@@ -224,6 +222,7 @@ void AgentRouteTable::DeletePathFromPeer(DBTablePartBase *part,
         return;
     }
 
+    const Peer *peer = path->peer();
     // Remove path from the route
     rt->RemovePath(path);
     // Local path(non BGP type) is going away and so will route.
@@ -356,7 +355,7 @@ void AgentRouteTable::Input(DBTablePartition *part, DBClient *client,
                                 GETPEERNAME(key->peer()));
             } else {
                 // RT present. Check if path is also present by peer
-                path = rt->FindPath(key->peer());
+                path = rt->FindPathUsingKey(key);
             }
 
             // Allocate path if not yet present
@@ -406,7 +405,8 @@ void AgentRouteTable::Input(DBTablePartition *part, DBClient *client,
         }
     } else if (req->oper == DBRequest::DB_ENTRY_DELETE) {
         assert (key->sub_op_ == AgentKey::ADD_DEL_CHANGE);
-        DeletePathFromPeer(part, rt, key->peer());
+        if (rt)
+            rt->DeletePath(key);
     } else {
         assert(0);
     }
@@ -518,12 +518,26 @@ AgentPath *AgentRoute::FindLocalVmPortPath() const {
         }
         if (path->peer()->GetType() == Peer::ECMP_PEER ||
             path->peer()->GetType() == Peer::VGW_PEER ||
-            path->peer()->GetType() == Peer::MULTICAST_PEER ||
             path->peer()->GetType() == Peer::LOCAL_VM_PORT_PEER) {
             return const_cast<AgentPath *>(path);
         }
     }
     return NULL;
+}
+
+void AgentRoute::DeletePathInternal(AgentPath *path) {
+    AgentRouteTable *table = static_cast<AgentRouteTable *>(get_table());
+    table->DeletePathFromPeer(get_table_partition(), this, path);
+}
+
+void AgentRoute::DeletePath(const AgentRouteKey *key) {
+    // Find path for the peer
+    AgentPath *path = FindPath(key->peer());
+    DeletePathInternal(path);
+}
+
+AgentPath *AgentRoute::FindPathUsingKey(const AgentRouteKey *key) {
+    return FindPath(key->peer());
 }
 
 AgentPath *AgentRoute::FindPath(const Peer *peer) const {

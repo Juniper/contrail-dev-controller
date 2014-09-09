@@ -53,7 +53,9 @@ void MulticastHandler::AddL2BroadcastRoute(MulticastGroupObject *obj,
                                            const string &vrf_name,
                                            const string &vn_name,
                                            const Ip4Address &addr,
-                                           uint32_t label, int vxlan_id)
+                                           uint32_t label,
+                                           int vxlan_id,
+                                           uint32_t ethernet_tag)
 {
     boost::system::error_code ec;
     MCTRACE(Log, "add L2 bcast route ", vrf_name, addr.to_string(), 0);
@@ -63,6 +65,7 @@ void MulticastHandler::AddL2BroadcastRoute(MulticastGroupObject *obj,
     Layer2AgentRouteTable::AddLayer2BroadcastRoute(agent_->local_vm_peer(),
                                                    vrf_name, vn_name,
                                                    label, vxlan_id,
+                                                   ethernet_tag,
                                                    Composite::L2INTERFACE,
                                                    component_nh_key_list);
 }
@@ -71,11 +74,12 @@ void MulticastHandler::AddL2BroadcastRoute(MulticastGroupObject *obj,
  * Route address 255.255.255.255 deletion from last VM in VN del
  */
 void MulticastHandler::DeleteBroadcast(const Peer *peer,
-                                       const std::string &vrf_name)
+                                       const std::string &vrf_name,
+                                       uint32_t ethernet_tag)
 {
     boost::system::error_code ec;
     MCTRACE(Log, "delete bcast route ", vrf_name, "255.255.255.255", 0);
-    Layer2AgentRouteTable::DeleteBroadcastReq(peer, vrf_name);
+    Layer2AgentRouteTable::DeleteBroadcastReq(peer, vrf_name, ethernet_tag);
 }
 
 void MulticastHandler::HandleVxLanChange(const VnEntry *vn) {
@@ -94,8 +98,9 @@ void MulticastHandler::HandleVxLanChange(const VnEntry *vn) {
         Ip4Address broadcast =  IpAddress::from_string("255.255.255.255",
                                                        ec).to_v4();
         obj->set_vxlan_id(new_vxlan_id);
+        //Rebake new vxlan id in mcast route
         AddL2BroadcastRoute(obj, vn->GetVrf()->GetName(), vn->GetName(),
-                            broadcast, obj->evpn_mpls_label(), new_vxlan_id);
+                            broadcast, obj->evpn_mpls_label(), new_vxlan_id, 0);
     }
 }
 
@@ -113,12 +118,13 @@ void MulticastHandler::HandleFamilyConfig(const VnEntry *vn)
         if (vrf_name != (*it)->vrf_name())
             continue;
 
+        //L2 family disabled
         if (!(new_layer2_forwarding) && (*it)->layer2_forwarding()) {
             (*it)->SetLayer2Forwarding(new_layer2_forwarding);
             if (IS_BCAST_MCAST((*it)->GetGroupAddress())) { 
                 Layer2AgentRouteTable::DeleteBroadcastReq(agent_->
                                                           multicast_peer(),
-                                                          (*it)->vrf_name());
+                                                          (*it)->vrf_name(), 0);
             }
         }
     }
@@ -333,12 +339,13 @@ void MulticastHandler::TriggerLocalRouteChange(MulticastGroupObject *obj,
             obj->vrf_name(),
             obj->GetGroupAddress().to_string(),
             component_nh_key_list.size());
-    //Add Layer2 FF:FF:FF:FF:FF:FF$
+    //Add Layer2 FF:FF:FF:FF:FF:FF, local_vm_peer
     Layer2AgentRouteTable::AddLayer2BroadcastRoute(peer,
                                                    obj->vrf_name(),
                                                    obj->GetVnName(),
                                                    obj->evpn_mpls_label(),
                                                    obj->vxlan_id(),
+                                                   0,
                                                    Composite::L2INTERFACE,
                                                    component_nh_key_list);
 }
@@ -350,7 +357,8 @@ void MulticastHandler::TriggerRemoteRouteChange(MulticastGroupObject *obj,
                                                 bool delete_op,
                                                 COMPOSITETYPE comp_type,
                                                 uint32_t label,
-                                                bool fabric) {
+                                                bool fabric,
+                                                uint32_t ethernet_tag) {
     if (obj->layer2_forwarding() == false) {
         return;
     }
@@ -386,7 +394,8 @@ void MulticastHandler::TriggerRemoteRouteChange(MulticastGroupObject *obj,
     if (delete_op) {
         MCTRACE(Log, "delete bcast path from remote peer", obj->vrf_name(),
                 "255.255.255.255", 0);
-        Layer2AgentRouteTable::DeleteBroadcastReq(peer, obj->vrf_name());
+        Layer2AgentRouteTable::DeleteBroadcastReq(peer, obj->vrf_name(),
+                                                  ethernet_tag);
         ComponentNHKeyList component_nh_key_list; //dummy list
         RebakeSubnetRoute(peer, obj->vrf_name(), 0, obj->vxlan_id(),
                           obj->GetVnName(), true, component_nh_key_list);
@@ -438,6 +447,7 @@ void MulticastHandler::TriggerRemoteRouteChange(MulticastGroupObject *obj,
                                                    obj->GetVnName(),
                                                    label,
                                                    obj->vxlan_id(),
+                                                   ethernet_tag,
                                                    comp_type,
                                                    component_nh_key_list);
     if (comp_type == Composite::EVPN) {
@@ -563,7 +573,7 @@ void MulticastHandler::ModifyFabricMembers(const Peer *peer,
 
     MulticastHandler::GetInstance()->TriggerRemoteRouteChange(obj, peer, olist,
                                      peer_identifier, false, Composite::FABRIC,
-                                     label, true);
+                                     label, true, 0);
     MCTRACE(Log, "Add fabric grp label ", vrf_name, grp.to_string(), label);
 }
 
@@ -578,6 +588,7 @@ void MulticastHandler::ModifyFabricMembers(const Peer *peer,
 void MulticastHandler::ModifyEvpnMembers(const Peer *peer,
                                          const std::string &vrf_name,
                                          const TunnelOlist &olist,
+                                         uint32_t ethernet_tag,
                                          uint64_t peer_identifier)
 {
     boost::system::error_code ec;
@@ -593,7 +604,7 @@ void MulticastHandler::ModifyEvpnMembers(const Peer *peer,
 
     MulticastHandler::GetInstance()->TriggerRemoteRouteChange(obj, peer, olist,
                                      peer_identifier, false, Composite::EVPN,
-                                     obj->evpn_mpls_label(), false);
+                                     obj->evpn_mpls_label(), false, ethernet_tag);
     MCTRACE(Log, "Add EVPN TOR Olist ", vrf_name, grp.to_string(), 0);
 }
 
@@ -606,7 +617,7 @@ void MulticastGroupObject::FlushAllPeerInfo(const Agent *agent,
     if ((peer_identifier != peer_identifier_) ||
         (peer_identifier == INVALID_PEER_IDENTIFIER)) {
         MulticastHandler::GetInstance()->
-            DeleteBroadcast(peer, vrf_name_);
+            DeleteBroadcast(peer, vrf_name_, 0);
     }
     MCTRACE(Log, "Delete broadcast route", vrf_name_,
             grp_address_.to_string(), 0);

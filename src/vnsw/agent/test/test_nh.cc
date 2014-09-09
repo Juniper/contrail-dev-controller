@@ -1938,7 +1938,7 @@ TEST_F(CfgTest, Nexthop_keys) {
     tnh->SetKey(tnh->GetDBRequestKey().get());
     DoNextHopSandesh();
     Layer2AgentRouteTable::DeleteReq(agent_->local_peer(),
-                                     "vrf10", remote_vm_mac, NULL);
+                                     "vrf10", remote_vm_mac, 0, NULL);
     client->WaitForIdle();
 
     //CompositeNHKey

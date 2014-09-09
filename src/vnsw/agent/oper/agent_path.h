@@ -249,6 +249,8 @@ public:
     void set_path_preference(const PathPreference &path_preference) {
         path_preference_ = path_preference;
     }
+    uint32_t vxlan_id() const {return vxlan_id_;}
+    uint32_t tunnel_bmap() const {return tunnel_bmap_;}
 
 private:
     VmInterfaceKey intf_;

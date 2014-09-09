@@ -195,7 +195,9 @@ void RouteExport::UnicastNotify(AgentXmppChannel *bgp_xmpp_peer,
 
             AgentXmppChannel::ControllerSendRoute(bgp_xmpp_peer, 
                     static_cast<AgentRoute *>(route), state->vn_, 
-                    state->label_, TunnelType::AllType(), NULL, false,
+                    (state->tunnel_type_ == TunnelType::VXLAN ?
+                     state->label_ : 0),
+                    TunnelType::AllType(), NULL, false,
                     type, state->path_preference_);
             state->exported_ = false;
         }
@@ -283,11 +285,39 @@ void RouteExport::MulticastNotify(AgentXmppChannel *bgp_xmpp_peer,
         }
 
         //Sending ff:ff:ff:ff:ff:ff for evpn replication
+        const AgentPath *active_path = route->FindPath(agent->local_vm_peer());
+        //const AgentPath *active_path = route->GetActivePath();
         TunnelType::Type old_tunnel_type = state->tunnel_type_;
         uint32_t old_label = state->label_;
-        const AgentPath *active_path = route->GetActivePath();
+        TunnelType::Type new_tunnel_type = active_path->tunnel_type();
+        uint32_t new_label = active_path->GetActiveLabel();
 
         if (route->GetTableType() == Agent::LAYER2) {
+            if ((state->evpn_exported_ == true) && (state->force_chg_ ==
+                                                    true)) {
+                bool withdraw = false;
+                uint32_t withdraw_label = 0;
+
+                if (old_tunnel_type == TunnelType::VXLAN) {
+                    if ((new_tunnel_type != TunnelType::VXLAN) ||
+                        (old_label != new_label)) {
+                        withdraw_label = old_label; 
+                        withdraw = true;
+                    }
+                } else if (new_tunnel_type != TunnelType::VXLAN) {
+                        withdraw = true;
+                }
+                if (withdraw) {
+                    AgentXmppChannel::ControllerSendEvpnRoute(bgp_xmpp_peer,
+                                                              route,
+                                                              state->vn_,
+                                                              withdraw_label,
+                                                              state->tunnel_type_,
+                                                              false);
+                    state->evpn_exported_ = false;
+                }
+            }
+
             if (active_path) {
                 if (active_path->tunnel_type() != state->tunnel_type_) {
                     state->force_chg_ = true;
@@ -300,45 +330,15 @@ void RouteExport::MulticastNotify(AgentXmppChannel *bgp_xmpp_peer,
                 }
             }
 
-            if ((state->evpn_exported_ == true) && (state->force_chg_ ==
-                                                    true)) {
-                uint32_t label_to_be_withdrawn = 0;
-                TunnelType::TypeBmap tunnel_type_to_be_withdrawn =
-                    TunnelType::AllType();
-
-                if ((old_tunnel_type == TunnelType::VXLAN) &&
-                    (state->tunnel_type_ == TunnelType::VXLAN) &&
-                    (old_label != state->label_)) {
-                    //Vxlan id changed
-                    label_to_be_withdrawn = old_label;
-                    tunnel_type_to_be_withdrawn = TunnelType::VxlanType();
-                } else if ((old_tunnel_type != TunnelType::VXLAN) &&
-                           (state->tunnel_type_ == TunnelType::VXLAN)) {
-                    //Tunnel type moved from MPLS to VXLAN
-                    label_to_be_withdrawn = 0;
-                    tunnel_type_to_be_withdrawn = TunnelType::MplsType();
-                } else if ((old_tunnel_type == TunnelType::VXLAN) &&
-                           (state->tunnel_type_ != TunnelType::VXLAN)) {
-                    //Tunnel type changed from Vxlan to Mpls
-                    label_to_be_withdrawn = old_label;
-                    tunnel_type_to_be_withdrawn = TunnelType::VxlanType();
-                }
-                AgentXmppChannel::ControllerSendEvpnRoute(bgp_xmpp_peer,
-                                                route,
-                                                state->vn_,
-                                                label_to_be_withdrawn,
-                                                tunnel_type_to_be_withdrawn,
-                                                false);
-                state->evpn_exported_ = false;
-            }
-
             if ((state->evpn_exported_ == false) || (state->force_chg_
                                                      == true)) {
+                state->label_ = active_path->GetActiveLabel();
+                state->vn_ = route->dest_vn_name();
                 state->evpn_exported_ =
                     AgentXmppChannel::ControllerSendEvpnRoute(bgp_xmpp_peer,
                                                               route,
                                                               route->dest_vn_name(),
-                                                              route->GetActiveLabel(),
+                                                              state->label_,
                                                               TunnelType::AllType(),
                                                               associate);
                 CONTROLLER_TRACE(RouteExport, bgp_xmpp_peer->GetBgpPeerName(),
@@ -346,8 +346,6 @@ void RouteExport::MulticastNotify(AgentXmppChannel *bgp_xmpp_peer,
                                  route->ToString(), associate,
                                  route->GetActiveLabel());
 
-                state->label_ = active_path->GetActiveLabel();
-                state->vn_ = route->dest_vn_name();
             }
         }
 

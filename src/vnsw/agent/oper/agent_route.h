@@ -42,9 +42,11 @@ struct AgentRouteKey : public AgentKey {
     virtual std::string ToString() const = 0;
     virtual AgentRoute *AllocRouteEntry(VrfEntry *vrf,
                                         bool is_multicast) const = 0;
+    virtual AgentRouteKey *Clone() const {return NULL;}
 
     const std::string &vrf_name() const { return vrf_name_; }
     const Peer *peer() const { return peer_; }
+    void set_peer(Peer *peer) {peer_ = peer;}
 
     const Peer *peer_;
     std::string vrf_name_;
@@ -158,7 +160,8 @@ public:
     static bool PathSelection(const Path &path1, const Path &path2);
     static const std::string &GetSuffix(Agent::RouteTableType type);
     void DeletePathFromPeer(DBTablePartBase *part, AgentRoute *rt,
-                            const Peer *peer);
+                            AgentPath *path);
+                            //const Peer *peer);
     //Stale path handling
     void StalePathFromPeer(DBTablePartBase *part, AgentRoute *rt,
                            const Peer *peer);
@@ -219,6 +222,8 @@ public:
         return false;
     }
     virtual uint32_t GetActiveLabel() const;
+    virtual AgentPath *FindPathUsingKey(const AgentRouteKey *key);
+    virtual void DeletePath(const AgentRouteKey *key);
 
     // Accessor functions
     bool is_multicast() const {return is_multicast_;}
@@ -251,6 +256,7 @@ protected:
     void RemovePathInternal(AgentPath *path);
     void RemovePath(AgentPath *path);
     void InsertPath(const AgentPath *path);
+    void DeletePathInternal(AgentPath *path);
 
 private:
     friend class AgentRouteTable;
