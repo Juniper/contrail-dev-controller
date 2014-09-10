@@ -520,9 +520,11 @@ class VirtualNetworkST(DictST):
 
         alloc_new = False
         rinst_fq_name_str = '%s:%s' % (self.obj.get_fq_name_str(), rinst_name)
+        old_rtgt = None
         try:
             rtgt_num = int(self._rt_cf.get(rinst_fq_name_str)['rtgt_num'])
             if rtgt_num < common.BGP_RTGT_MIN_ID:
+                old_rtgt = rtgt_num
                 raise pycassa.NotFoundException
             rtgt_ri_fq_name_str = self._rt_allocator.read(rtgt_num)
             if (rtgt_ri_fq_name_str != rinst_fq_name_str):
@@ -567,6 +569,10 @@ class VirtualNetworkST(DictST):
 
         rinst = RoutingInstanceST(rinst_obj, service_chain, rt_key)
         self.rinst[rinst_name] = rinst
+
+        if old_rtgt:
+            rt_key = "target:%s:%d" % (self.get_autonomous_system(), old_rtgt)
+            _vnc_lib.route_target_delete(fq_name=[rt_key])
         return rinst
     # end locate_routing_instance
 
@@ -1009,44 +1015,44 @@ class VirtualNetworkST(DictST):
                             else:
                                 action.assign_routing_instance = None
 
-                        if saddr_match.virtual_network:
-                            sa_list = [saddr_match.virtual_network]
-                        elif saddr_match.network_policy:
+                        if saddr_match.network_policy:
                             pol = NetworkPolicyST.get(saddr_match.network_policy)
                             if not pol:
                                 _sandesh._logger.debug(
                                     "Policy %s not found while applying policy "
-                                    "to network %s", sadr_match.network_policy,
+                                    "to network %s", saddr_match.network_policy,
                                      self.name)
                                 continue
-                            sa_list = pol.networks_back_ref
+                            sa_list = [AddressType(virtual_network=x)
+                                       for x in pol.networks_back_ref]
+                        else:
+                            sa_list = [saddr_match]
 
-                        if daddr_match.virtual_network:
-                            da_list = [daddr_match.virtual_network]
-                        elif daddr_match.network_policy:
+                        if daddr_match.network_policy:
                             pol = NetworkPolicyST.get(daddr_match.network_policy)
                             if not pol:
                                 _sandesh._logger.debug(
                                     "Policy %s not found while applying policy "
-                                    "to network %s", dadr_match.network_policy,
+                                    "to network %s", daddr_match.network_policy,
                                      self.name)
                                 continue
-                            da_list = pol.networks_back_ref
+                            da_list = [AddressType(virtual_network=x)
+                                       for x in pol.networks_back_ref]
+                        else:
+                            da_list = [daddr_match]
 
                         for sa in sa_list:
-                            sa1 = AddressType(virtual_network=sa)
                             for da in da_list:
-                                da1 = AddressType(virtual_network=da)
                                 match = MatchConditionType(arule_proto,
-                                                           sa1, sp,
-                                                           da1, dp)
+                                                           sa, sp,
+                                                           da, dp)
                                 acl = AclRuleType(match, action, rule_uuid)
                                 result_acl_rule_list.append(acl)
                                 if ((prule.direction == "<>") and
                                     (sa != da or sp != dp)):
                                     rmatch = MatchConditionType(arule_proto,
-                                                                da1, dp,
-                                                                sa1, sp)
+                                                                da, dp,
+                                                                sa, sp)
                                     raction = copy.deepcopy(action)
                                     if (service_list and dvn in [self.name, 'any']):
                                         service_ri = self.get_service_name(
@@ -2494,11 +2500,12 @@ class LogicalRouterST(DictST):
         self.virtual_networks = set()
         obj = _vnc_lib.logical_router_read(fq_name_str=name)
         rt_ref = obj.get_route_target_refs()
+        old_rt_key = None
         if rt_ref:
             rt_key = rt_ref[0]['to'][0]
             rtgt_num = int(rt_key.split(':')[-1])
             if rtgt_num < common.BGP_RTGT_MIN_ID:
-                _vnc_lib.route_target_delete(fq_name=[rt_key])
+                old_rt_key = rt_key
                 rt_ref = None
         if not rt_ref:
             rtgt_num = VirtualNetworkST._rt_allocator.alloc(name)
@@ -2508,6 +2515,8 @@ class LogicalRouterST(DictST):
             obj.set_route_target(rtgt_obj)
             _vnc_lib.logical_router_update(obj)
 
+        if old_rt_key:
+            _vnc_lib.route_target_delete(fq_name=[old_rt_key])
         self.route_target = rt_key
     # end __init__
 
@@ -3283,12 +3292,6 @@ class SchemaTransformer(object):
                         net = VirtualNetworkST.get(net_name)
                         if net is not None:
                             virtual_network.add_connection(net_name)
-
-            for lr in LogicalRouterST.values():
-                if network_name in lr.virtual_networks:
-                    for vn_name in (lr.virtual_networks - set(network_name)):
-                        virtual_network.add_connection(vn_name)
-            # end for lr
 
             # Derive connectivity changes between VNs
             new_connections = virtual_network.expand_connections()

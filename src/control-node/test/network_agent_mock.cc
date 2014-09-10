@@ -584,7 +584,6 @@ bool NetworkAgentMock::ConnectionDestroyed() const {
 }
 
 void NetworkAgentMock::Delete() {
-    AgentPeer *peer = peer_.get();
     peer_.reset();
     client_->Shutdown();
     client_->WaitForEmpty();

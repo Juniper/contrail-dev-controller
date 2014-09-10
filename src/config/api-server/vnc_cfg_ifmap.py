@@ -62,6 +62,7 @@ import signal, os
 from provision_defaults import *
 import cfgm_common.imid
 from cfgm_common.exceptions import *
+from vnc_quota import *
 from gen.vnc_ifmap_client_gen import *
 from gen.vnc_cassandra_client_gen import *
 from pysandesh.connection_info import ConnectionState
@@ -1317,6 +1318,7 @@ class VncZkClient(object):
     # end create_subnet_allocator
 
     def delete_subnet_allocator(self, subnet):
+        self._subnet_allocators.pop(subnet, None)
         IndexAllocator.delete_all(self._zk_client,
                                   self._subnet_path+'/'+subnet+'/')
     # end delete_subnet_allocator
@@ -1412,6 +1414,24 @@ class VncDbClient(object):
                                   reset_config, db_prefix)
     # end __init__
 
+    def _update_default_quota(self):
+        """ Read the default quotas from the configuration
+        and update it in the project object if not already
+        updated.
+        """
+        default_quota = QuotaHelper.default_quota
+
+        proj_id = self.fq_name_to_uuid('project',
+                                       ['default-domain', 'default-project'])
+        (ok, proj_dict) = self.dbe_read('project', {'uuid':proj_id})
+        if not ok:
+            return
+        quota = QuotaType()
+
+        proj_dict['quota'] = default_quota
+        self.dbe_update('project', {'uuid':proj_id}, proj_dict)
+    # end _update_default_quota
+
     def db_resync(self):
         # Read contents from cassandra and publish to ifmap
         mapclient = self._ifmap_db._mapclient
@@ -1426,6 +1446,7 @@ class VncDbClient(object):
                     PublishRequest(mapclient.get_session_id(), upd_str))
         self._ifmap_db.accumulator = None
         self._ifmap_db.accumulated_request_len = 0
+        self._update_default_quota()
         end_time = datetime.datetime.utcnow()
         logger.info("Time elapsed in syncing ifmap: %s" % (str(end_time - start_time)))
         self._db_resync_done.set()

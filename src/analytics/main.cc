@@ -270,9 +270,17 @@ int main(int argc, char *argv[])
          ostream_iterator<string>(css, " "));
     LOG(INFO, "COLLECTOR CASSANDRA SERVERS: " << css.str());
     LOG(INFO, "COLLECTOR SYSLOG LISTEN PORT: " << options.syslog_port());
+    uint16_t protobuf_port(0);
+    bool protobuf_server_enabled =
+        options.collector_protobuf_port(&protobuf_port);
+    if (protobuf_server_enabled) {
+        LOG(INFO, "COLLECTOR PROTOBUF LISTEN PORT: " << protobuf_port);
+    }
 
     VizCollector analytics(a_evm,
             options.collector_port(),
+            protobuf_server_enabled,
+            protobuf_port,
             cassandra_ips,
             cassandra_ports,
             string("127.0.0.1"),
@@ -347,10 +355,12 @@ int main(int argc, char *argv[])
     // 3. Redis To
     // 4. Discovery Collector Publish
     // 5. Database global
+    // 6. Database protobuf if enabled
     ConnectionStateManager<NodeStatusUVE, NodeStatus>::
         GetInstance()->Init(*a_evm->io_service(),
             analytics.name(), module_id, instance_id,
-            boost::bind(&GetProcessStateCb, _1, _2, _3, 5));
+            boost::bind(&GetProcessStateCb, _1, _2, _3,
+            protobuf_server_enabled ? 6 : 5));
     collector_info_trigger =
         new TaskTrigger(boost::bind(&CollectorInfoLogger, vsc),
                     TaskScheduler::GetInstance()->GetTaskId("vizd::Stats"), 0);

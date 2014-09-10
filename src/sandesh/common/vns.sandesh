@@ -19,6 +19,7 @@ const string SERVICE_COLLECTOR = "contrail-collector"
 const string SERVICE_QUERY_ENGINE = "contrail-query-engine"
 const string SERVICE_OPSERVER = "contrail-analytics-api"
 const string SERVICE_DISCOVERY = "contrail-discovery:0"
+const string SERVICE_STORAGE_STATS_MGR = "contrail-storage-stats"
 
 // NodeMgr names
 const string SERVICE_COMPUTE_NODE_MGR = "contrail-vrouter-nodemgr"
@@ -41,6 +42,7 @@ const u16 HttpPortControlNodemgr = 8101
 const u16 HttpPortVRouterNodemgr = 8102
 const u16 HttpPortDatabaseNodemgr = 8103
 const u16 HttpPortAnalyticsNodemgr = 8104
+const u16 HttpPortStorageStatsmgr = 8105
 
 const u16 HttpPortControl = 8083
 const u16 HttpPortApiServer = 8084
@@ -72,6 +74,7 @@ const u16 WebConsolePort = 8080
 const u16 OpServerPort = 8081
 const u16 ApiServerPort = 8082
 const u16 CollectorPort = 8086
+const u16 CollectorProtobufPort = 3333
 const u16 DnsXmppPort = 8093
 const u16 DnsRndcPort = 8094
 const u16 ApiServerOpenPort = 8095
@@ -93,15 +96,7 @@ const map<string, u16> ServiceHttpPortMap = {
     SERVICE_COMPUTE_NODE_MGR : HttpPortVRouterNodemgr,
     SERVICE_CONTROL_NODE_MGR : HttpPortControlNodemgr,
     SERVICE_DATABASE_NODE_MGR : HttpPortDatabaseNodemgr,
-}
-
-const map <string, u16> SupervisorPortMap = {
-    SERVICE_ANALYTICS_SUPERVISOR : AnalyticsSupervisorPort,
-    SERVICE_CONFIG_SUPERVISOR : ConfigSupervisorPort,
-    SERVICE_CONTROL_SUPERVISOR : ControlSupervisorPort,
-    SERVICE_COMPUTE_SUPERVISOR : VRouterSupervisorPort,
-    SERVICE_DATABASE_SUPERVISOR : DatabaseSupervisorPort,
-    SERVICE_WEBUI_SUPERVISOR : WebuiSupervisorPort,
+    SERVICE_STORAGE_STATS_MGR : HttpPortStorageStatsmgr,
 }
 
 enum Module {

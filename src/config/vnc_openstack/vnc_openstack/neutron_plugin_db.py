@@ -37,142 +37,7 @@ IP_PROTOCOL_MAP = {constants.PROTO_NUM_TCP: constants.PROTO_NAME_TCP,
 
 # SNAT defines
 SNAT_SERVICE_TEMPLATE_FQ_NAME = ['default-domain', 'netns-snat-template']
-
-# Security group Exceptions
-class SecurityGroupInvalidPortRange(exceptions.InvalidInput):
-    message = _("For TCP/UDP protocols, port_range_min must be "
-                "<= port_range_max")
-
-
-class SecurityGroupInvalidPortValue(exceptions.InvalidInput):
-    message = _("Invalid value for port %(port)s")
-
-
-class SecurityGroupInvalidIcmpValue(exceptions.InvalidInput):
-    message = _("Invalid value for ICMP %(field)s (%(attr)s) "
-                "%(value)s. It must be 0 to 255.")
-
-
-class SecurityGroupMissingIcmpType(exceptions.InvalidInput):
-    message = _("ICMP code (port-range-max) %(value)s is provided"
-                " but ICMP type (port-range-min) is missing.")
-
-
-class SecurityGroupInUse(exceptions.InUse):
-    message = _("Security Group %(id)s in use.")
-
-
-class SecurityGroupCannotRemoveDefault(exceptions.InUse):
-    message = _("Removing default security group not allowed.")
-
-
-class SecurityGroupCannotUpdateDefault(exceptions.InUse):
-    message = _("Updating default security group not allowed.")
-
-
-class SecurityGroupDefaultAlreadyExists(exceptions.InUse):
-    message = _("Default security group already exists.")
-
-
-class SecurityGroupRuleInvalidProtocol(exceptions.InvalidInput):
-    message = _("Security group rule protocol %(protocol)s not supported. "
-                "Only protocol values %(values)s and their integer "
-                "representation (0 to 255) are supported.")
-
-class SecurityGroupRulesNotSingleTenant(exceptions.InvalidInput):
-    message = _("Multiple tenant_ids in bulk security group rule create"
-                " not allowed")
-
-
-class SecurityGroupRemoteGroupAndRemoteIpPrefix(exceptions.InvalidInput):
-    message = _("Only remote_ip_prefix or remote_group_id may "
-                "be provided.")
-
-
-class SecurityGroupProtocolRequiredWithPorts(exceptions.InvalidInput):
-    message = _("Must also specify protocol if port range is given.")
-
-
-class SecurityGroupNotSingleGroupRules(exceptions.InvalidInput):
-    message = _("Only allowed to update rules for "
-                "one security profile at a time")
-
-
-class SecurityGroupNotFound(exceptions.NotFound):
-    message = _("Security group %(id)s does not exist")
-
-
-class SecurityGroupRuleNotFound(exceptions.NotFound):
-    message = _("Security group rule %(id)s does not exist")
-
-
-class DuplicateSecurityGroupRuleInPost(exceptions.InUse):
-    message = _("Duplicate Security Group Rule in POST.")
-
-
-class SecurityGroupRuleExists(exceptions.InUse):
-    message = _("Security group rule already exists. Group id is %(id)s.")
-
-
-class SecurityGroupRuleParameterConflict(exceptions.InvalidInput):
-    message = _("Conflicting value ethertype %(ethertype)s for CIDR %(cidr)s")
-
-
-# L3 Exceptions
-class RouterNotFound(exceptions.NotFound):
-    message = _("Router %(router_id)s could not be found")
-
-
-class RouterInUse(exceptions.InUse):
-    message = _("Router %(router_id)s still has ports")
-
-
-class RouterInterfaceNotFound(exceptions.NotFound):
-    message = _("Router %(router_id)s does not have "
-                "an interface with id %(port_id)s")
-
-
-class RouterInterfaceNotFoundForSubnet(exceptions.NotFound):
-    message = _("Router %(router_id)s has no interface "
-                "on subnet %(subnet_id)s")
-
-
-class RouterInterfaceInUseByFloatingIP(exceptions.InUse):
-    message = _("Router interface for subnet %(subnet_id)s on router "
-                "%(router_id)s cannot be deleted, as it is required "
-                "by one or more floating IPs.")
-
-
-class FloatingIPNotFound(exceptions.NotFound):
-    message = _("Floating IP %(floatingip_id)s could not be found")
-
-
-class ExternalGatewayForFloatingIPNotFound(exceptions.NotFound):
-    message = _("External network %(external_network_id)s is not reachable "
-                "from subnet %(subnet_id)s.  Therefore, cannot associate "
-                "Port %(port_id)s with a Floating IP.")
-
-
-class FloatingIPPortAlreadyAssociated(exceptions.InUse):
-    message = _("Cannot associate floating IP %(floating_ip_address)s "
-                "(%(fip_id)s) with port %(port_id)s "
-                "using fixed IP %(fixed_ip)s, as that fixed IP already "
-                "has a floating IP on external network %(net_id)s.")
-
-
-class L3PortInUse(exceptions.InUse):
-    message = _("Port %(port_id)s has owner %(device_owner)s and therefore"
-                " cannot be deleted directly via the port API.")
-
-
-class RouterExternalGatewayInUseByFloatingIp(exceptions.InUse):
-    message = _("Gateway cannot be updated for router %(router_id)s, since a "
-                "gateway to external network %(net_id)s is required by one or "
-                "more floating IPs.")
-
-# Allowed Address Pair
-class AddressPairMatchesPortFixedIPAndMac(exceptions.InvalidInput):
-    message = _("Port's Fixed IP and Mac Address match an address pair entry.")
+_IFACE_ROUTE_TABLE_NAME_PREFIX = 'NEUTRON_IFACE_RT'
 
 class DBInterface(object):
     """
@@ -183,9 +48,11 @@ class DBInterface(object):
     def __init__(self, admin_name, admin_password, admin_tenant_name,
                  api_srvr_ip, api_srvr_port, user_info=None,
                  contrail_extensions_enabled=True,
-                 list_optimization_enabled=False):
+                 list_optimization_enabled=False,
+                 apply_subnet_host_routes=False):
         self._api_srvr_ip = api_srvr_ip
         self._api_srvr_port = api_srvr_port
+        self._apply_subnet_host_routes = apply_subnet_host_routes
 
         self._contrail_extensions_enabled = contrail_extensions_enabled
         self._list_optimization_enabled = list_optimization_enabled
@@ -384,20 +251,26 @@ class DBInterface(object):
         elif ('tenant_id' in resource and
               resource['tenant_id'] != context['tenant_id']):
             reason = _('Cannot create resource for another tenant')
-            self._raise_contrail_exception(400, exceptions.AdminRequired(reason=reason))
+            self._raise_contrail_exception(400, 'AdminRequired', reason=reason)
         else:
             tenant_id = context['tenant_id']
         return tenant_id
 
-    def _raise_contrail_exception(self, code, exc):
-        exc_info = {'message': str(exc)}
+    # Encode and send an excption information to neutron. exc must be a
+    # valid exception class name in neutron, kwargs must contain all
+    # necessary arguments to create that exception
+    def _raise_contrail_exception(self, code, exc, **kwargs):
+        exc_info = {'exception': exc}
+        exc_info.update(kwargs)
         bottle.abort(code, json.dumps(exc_info))
+    #end _raise_contrail_exception
 
     def _security_group_rule_create(self, sg_id, sg_rule):
         try:
             sg_vnc = self._vnc_lib.security_group_read(id=sg_id)
         except NoIdError:
-            self._raise_contrail_exception(404, SecurityGroupNotFound(id=sg_id))
+            self._raise_contrail_exception(404, 'SecurityGroupNotFound',
+                                           id=sg_id)
 
         rules = sg_vnc.get_security_group_entries()
         if rules is None:
@@ -444,8 +317,8 @@ class DBInterface(object):
         try:
             si_uuid = self._vnc_lib.service_instance_create(si_obj)
         except RefsExistError as e:
-            self._raise_contrail_exception(400, exceptions.BadRequest(
-                resource='svc_instance', msg=str(e)))
+            self._raise_contrail_exception(400, 'BadRequest',
+                resource='svc_instance', msg=str(e))
         st_fq_name = ['default-domain', 'nat-template']
         st_obj = self._vnc_lib.service_template_read(fq_name=st_fq_name)
         si_obj.set_service_template(st_obj)
@@ -468,16 +341,17 @@ class DBInterface(object):
     #end _route_table_delete
 
     def _resource_create(self, resource_type, obj):
+        create_method = getattr(self._vnc_lib, resource_type + '_create')
         try:
-            obj_uuid = getattr(self._vnc_lib, resource_type + '_create')(obj)
+            obj_uuid = create_method(obj)
         except RefsExistError:
             obj.uuid = str(uuid.uuid4())
             obj.name += '-' + obj.uuid
             obj.fq_name[-1] += '-' + obj.uuid
-            obj_uuid = getattr(self._vnc_lib, resource_type + '_create')(obj)
+            obj_uuid = create_method(obj)
         except PermissionDenied as e:
-            exc_info = {'type': 'BadRequest', 'message': str(e)}
-            bottle.abort(400, json.dumps(exc_info))
+            self._raise_contrail_exception(400, 'BadRequest',
+                resource=resource_type, msg=str(e))
 
         return obj_uuid
     #end _resource_create
@@ -496,8 +370,8 @@ class DBInterface(object):
             exc_info = {'type': 'BadRequest', 'message': str(e)}
             bottle.abort(400, json.dumps(exc_info))
         except RefsExistError as e:
-            self._raise_contrail_exception(400, exceptions.BadRequest(
-                resource='network', msg=str(e)))
+            self._raise_contrail_exception(400, 'BadRequest',
+                resource='network', msg=str(e))
 
         # read back to get subnet gw allocated by api-server
         fq_name_str = json.dumps(net_obj.get_fq_name())
@@ -519,7 +393,7 @@ class DBInterface(object):
 
             self._vnc_lib.virtual_network_delete(id=net_id)
         except RefsExistError:
-            self._raise_contrail_exception(404, exceptions.NetworkInUse(net_id=net_id))
+            self._raise_contrail_exception(404, 'NetworkInUse', net_id=net_id)
     #end _virtual_network_delete
 
     def _virtual_network_list(self, parent_id=None, obj_uuids=None,
@@ -737,7 +611,7 @@ class DBInterface(object):
         try:
             self._vnc_lib.logical_router_delete(id=rtr_id)
         except RefsExistError:
-            self._raise_contrail_exception(409, RouterInUse(router_id=rtr_id))
+            self._raise_contrail_exception(409, 'RouterInUse', router_id=rtr_id)
     #end _logical_router_delete
 
     def _floatingip_list(self, back_ref_id=None):
@@ -918,7 +792,8 @@ class DBInterface(object):
                 subnet_key = self._vnc_lib.kv_retrieve(id)
                 return subnet_key
             except NoIdError:
-                self._raise_contrail_exception(404, exceptions.SubnetNotFound(subnet_id=id))
+                self._raise_contrail_exception(404, 'SubnetNotFound',
+                                               subnet_id=id)
 
         if key:
             subnet_id = self._vnc_lib.kv_retrieve(key)
@@ -1178,7 +1053,8 @@ class DBInterface(object):
             try:
                 sg_obj = self._vnc_lib.security_group_read(id=sg_id)
             except NoIdError:
-                self._raise_contrail_exception(404, SecurityGroupNotFound(id=sg_id))
+                self._raise_contrail_exception(404, 'SecurityGroupNotFound',
+                                               id=sg_id)
 
         remote_cidr = None
         remote_sg_uuid = None
@@ -1191,7 +1067,8 @@ class DBInterface(object):
             direction = 'ingress'
             addr = saddr
         else:
-            self._raise_contrail_exception(404, SecurityGroupRuleNotFound(id=sg_rule.get_rule_uuid()))
+            self._raise_contrail_exception(404, 'SecurityGroupRuleNotFound',
+                                           id=sg_rule.get_rule_uuid())
 
         if addr.get_subnet():
             remote_cidr = '%s/%s' % (addr.get_subnet().get_ip_prefix(),
@@ -1338,7 +1215,8 @@ class DBInterface(object):
                     net_obj.set_route_table(rt_obj)
                 except NoIdError:
                     # TODO add route table specific exception
-                    self._raise_contrail_exception(404, exceptions.NetworkNotFound(net_id=net_obj.uuid))
+                    self._raise_contrail_exception(404, 'NetworkNotFound',
+                                                   net_id=net_obj.uuid)
 
         return net_obj
     #end _network_neutron_to_vnc
@@ -1417,7 +1295,11 @@ class DBInterface(object):
             exc_info = {'type': 'BadRequest',
                         'message': "Bad subnet request: IPv6 is not supported"}
             bottle.abort(400, json.dumps(exc_info))
-
+        elif cidr.version != int(subnet_q['ip_version']):
+            msg = _("cidr '%s' does not match the ip_version '%s'") \
+                    %(subnet_q['cidr'], subnet_q['ip_version'])
+            self._raise_contrail_exception(400, 'InvalidInput',
+                error_message=msg)
         if 'gateway_ip' in subnet_q:
             default_gw = subnet_q['gateway_ip']
         else:
@@ -1681,8 +1563,9 @@ class DBInterface(object):
             except IndexError:
                 # IndexError could happens when an attempt to
                 # retrieve a floating ip pool from a private network.
-                self._raise_contrail_exception(404, Exception(
-                    "Network %s doesn't provide a floatingip pool", net_id))
+                msg = "Network %s doesn't provide a floatingip pool" % net_id
+                self._raise_contrail_exception(404, 'BadRequest',
+                                               resource="floatingip", msg=msg)
             fip_pool_obj = self._vnc_lib.floating_ip_pool_read(fq_name=fq_name)
             fip_name = str(uuid.uuid4())
             fip_obj = FloatingIp(fip_name, fip_pool_obj)
@@ -1695,8 +1578,13 @@ class DBInterface(object):
             fip_obj = self._vnc_lib.floating_ip_read(id=fip_q['id'])
 
         if fip_q.get('port_id'):
-            port_obj = self._virtual_machine_interface_read(
-                port_id=fip_q['port_id'])
+            try:
+                port_obj = self._virtual_machine_interface_read(
+                    port_id=fip_q['port_id'])
+            except NoIdError:
+                self._raise_contrail_exception(404, 'PortNotFound',
+                                               resource='floatingip',
+                                               port_id=fip_q['port_id'])
             fip_obj.set_virtual_machine_interface(port_obj)
         else:
             fip_obj.set_virtual_machine_interface_list([])
@@ -1843,8 +1731,8 @@ class DBInterface(object):
                         subnet=SubnetType(cidr[0], int(cidr[1]));
                     else:
                         self._raise_contrail_exception(400,
-                               exceptions.BadRequest(resource='port',
-                                         msg='Invalid address pair argument'))
+                               'BadRequest', resource='port',
+                               msg='Invalid address pair argument')
                     ip_back_refs = port_obj.get_instance_ip_back_refs()
                     if ip_back_refs:
                         for ip_back_ref in ip_back_refs:
@@ -1858,7 +1746,7 @@ class DBInterface(object):
                             if ((ip_addr == address_pair['ip_address']) and
                                 (mac_refs.mac_address[0] == address_pair['mac_address'])):
                                 self._raise_contrail_exception(400,
-                                       AddressPairMatchesPortFixedIPAndMac())
+                                       'AddressPairMatchesPortFixedIPAndMac')
                     aap = AllowedAddressPair(subnet,
                                              address_pair['mac_address'], mode)
                     aap_array.append(aap)
@@ -1892,8 +1780,8 @@ class DBInterface(object):
                         continue
                     if self._ip_addr_in_net_id(ip_addr, net_id):
                         self._raise_contrail_exception(
-                            409, exceptions.IpAddressInUse(net_id=net_id,
-                                                           ip_address=ip_addr))
+                            409, 'IpAddressInUse', net_id=net_id,
+                            ip_address=ip_addr)
 
         return port_obj
     #end _port_neutron_to_vnc
@@ -2025,6 +1913,183 @@ class DBInterface(object):
         return port_q_dict
     #end _port_vnc_to_neutron
 
+    def _port_get_host_prefixes(self, host_routes, subnet_cidr):
+        """This function returns the host prefixes 
+        Eg. If host_routes have the below routes
+           ---------------------------
+           |destination   | next hop  |
+           ---------------------------
+           |  10.0.0.0/24 | 8.0.0.2   |
+           |  12.0.0.0/24 | 10.0.0.4  |
+           |  14.0.0.0/24 | 12.0.0.23 |
+           |  16.0.0.0/24 | 8.0.0.4   |
+           |  15.0.0.0/24 | 16.0.0.2  |
+           |  20.0.0.0/24 | 8.0.0.12  |
+           ---------------------------
+           subnet_cidr is 8.0.0.0/24
+           
+           This function returns the dictionary
+           '8.0.0.2' : ['10.0.0.0/24', '12.0.0.0/24', '14.0.0.0/24']
+           '8.0.0.4' : ['16.0.0.0/24', '15.0.0.0/24']
+           '8.0.0.12': ['20.0.0.0/24']
+        """
+        temp_host_routes = list(host_routes)
+        cidr_ip_set = IPSet([subnet_cidr])
+        host_route_dict = {}
+        for route in temp_host_routes[:]:
+            next_hop = route.get_next_hop()
+            if IPAddress(next_hop) in cidr_ip_set:
+                if next_hop in host_route_dict:
+                    host_route_dict[next_hop].append(route.get_prefix())
+                else:
+                    host_route_dict[next_hop] = [route.get_prefix()]
+                temp_host_routes.remove(route)
+        
+        # look for indirect routes
+        if temp_host_routes:
+            for ipaddr in host_route_dict:
+                self._port_update_prefixes(host_route_dict[ipaddr],
+                                           temp_host_routes)
+        return host_route_dict
+                        
+    def _port_update_prefixes(self, matched_route_list, unmatched_host_routes):
+        process_host_routes = True
+        while process_host_routes:
+            process_host_routes = False
+            for route in unmatched_host_routes:
+                ip_addr = IPAddress(route.get_next_hop())
+                if ip_addr in IPSet(matched_route_list):
+                    matched_route_list.append(route.get_prefix())
+                    unmatched_host_routes.remove(route)
+                    process_host_routes = True
+
+    def _port_check_and_add_iface_route_table(self, fixed_ips, net_obj,
+                                              port_obj):
+        ipam_refs = net_obj.get_network_ipam_refs()
+        if not ipam_refs:
+            return
+        
+        for ipam_ref in ipam_refs:
+            subnets = ipam_ref['attr'].get_ipam_subnets()
+            for subnet in subnets:
+                host_routes = subnet.get_host_routes()
+                if host_routes is None:
+                    continue
+                subnet_key = self._subnet_vnc_get_key(subnet, net_obj.uuid)
+                sn_id = self._subnet_vnc_read_mapping(key=subnet_key)
+                subnet_cidr = '%s/%s' % (subnet.subnet.get_ip_prefix(),
+                                         subnet.subnet.get_ip_prefix_len())
+
+                for ip_addr in [fixed_ip['ip_address'] for fixed_ip in \
+                                fixed_ips if fixed_ip['subnet_id'] == sn_id]:
+                    host_prefixes = self._port_get_host_prefixes(host_routes.route,
+                                                                 subnet_cidr)
+                    if ip_addr in host_prefixes:
+                        self._port_add_iface_route_table(host_prefixes[ip_addr],
+                                                         port_obj, sn_id) 
+
+    def _port_add_iface_route_table(self, route_prefix_list, port_obj,
+                                    subnet_id):
+        project_obj = self._project_read(proj_id=port_obj.parent_uuid)
+        intf_rt_name = '%s_%s_%s' % (_IFACE_ROUTE_TABLE_NAME_PREFIX,
+                                     subnet_id, port_obj.uuid)
+        intf_rt_fq_name = list(project_obj.get_fq_name())
+        intf_rt_fq_name.append(intf_rt_name)
+
+        try:
+            intf_route_table_obj = self._vnc_lib.interface_route_table_read(
+                                    fq_name=intf_rt_fq_name)
+        except vnc_exc.NoIdError:
+            route_table = RouteTableType(intf_rt_name)
+            route_table.set_route([])
+            intf_route_table = InterfaceRouteTable(
+                                interface_route_table_routes=route_table,
+                                parent_obj=project_obj,
+                                name=intf_rt_name)
+
+            intf_route_table_id = self._vnc_lib.interface_route_table_create(
+                                    intf_route_table)
+            intf_route_table_obj = self._vnc_lib.interface_route_table_read(
+                                    id=intf_route_table_id)
+
+        rt_routes = intf_route_table_obj.get_interface_route_table_routes()
+        routes = rt_routes.get_route()
+        # delete any old routes
+        routes = []
+        for prefix in route_prefix_list:
+            routes.append(RouteType(prefix=prefix))
+        rt_routes.set_route(routes)
+        intf_route_table_obj.set_interface_route_table_routes(rt_routes)
+        self._vnc_lib.interface_route_table_update(intf_route_table_obj)
+        port_obj.add_interface_route_table(intf_route_table_obj)
+        self._vnc_lib.virtual_machine_interface_update(port_obj)
+
+    def _port_update_iface_route_table(self, net_obj, subnet_cidr, subnet_id,
+                                       new_host_routes, old_host_routes=None):
+        old_host_prefixes = {}
+        if old_host_routes:
+            old_host_prefixes = self._port_get_host_prefixes(old_host_routes.route,
+                                                             subnet_cidr)
+        new_host_prefixes = self._port_get_host_prefixes(new_host_routes,
+                                                         subnet_cidr)
+        
+        for ipaddr, prefixes in old_host_prefixes.items():
+            if ipaddr in new_host_prefixes:
+                need_update = False
+                if len(prefixes) == len(new_host_prefixes[ipaddr]):
+                    for prefix in prefixes:
+                        if prefix not in new_host_prefixes[ipaddr]:
+                            need_update = True
+                            break
+                else:
+                    need_update= True
+                if need_update:
+                    old_host_prefixes.pop(ipaddr)
+                else:
+                    # both the old and new are same. No need to do 
+                    # anything
+                    old_host_prefixes.pop(ipaddr)
+                    new_host_prefixes.pop(ipaddr)
+                                        
+        if not new_host_prefixes and not old_host_prefixes:
+            # nothing to be done as old_host_routes and  
+            # new_host_routes match exactly
+            return
+
+        # get the list of all the ip objs for this network
+        ipobjs = self._instance_ip_list(back_ref_id=[net_obj.uuid])
+        for ipobj in ipobjs:
+            ipaddr = ipobj.get_instance_ip_address()
+            if ipaddr in old_host_prefixes:
+                self._port_remove_iface_route_table(ipobj, subnet_id)
+                continue
+
+            if ipaddr in new_host_prefixes:
+                port_back_refs = ipobj.get_virtual_machine_interface_refs()
+                for port_ref in port_back_refs: 
+                    port_obj = self._virtual_machine_interface_read(
+                                    port_id=port_ref['uuid'])
+                    self._port_add_iface_route_table(new_host_prefixes[ipaddr],
+                                                     port_obj, subnet_id)
+                
+    def _port_remove_iface_route_table(self, ipobj, subnet_id):
+        port_refs = ipobj.get_virtual_machine_interface_refs()
+        for port_ref in port_refs or []:
+            port_obj = self._virtual_machine_interface_read(port_id=port_ref['uuid'])
+            intf_rt_name = '%s_%s_%s' % (_IFACE_ROUTE_TABLE_NAME_PREFIX,
+                                         subnet_id, port_obj.uuid)
+            for rt_ref in port_obj.get_interface_route_table_refs() or []:
+                if rt_ref['to'][2] != intf_rt_name:
+                    continue
+                try:
+                    intf_route_table_obj = self._vnc_lib.interface_route_table_read(
+                                                               id=rt_ref['uuid'])
+                    port_obj.del_interface_route_table(intf_route_table_obj)
+                    self._vnc_lib.virtual_machine_interface_update(port_obj)
+                    self._vnc_lib.interface_route_table_delete(id=rt_ref['uuid'])
+                except vnc_exc.NoIdError:
+                    pass
+
     # public methods
     # network api handlers
     def network_create(self, network_q):
@@ -2032,8 +2097,8 @@ class DBInterface(object):
         try:
             net_uuid = self._resource_create('virtual_network', net_obj)
         except RefsExistError:
-            self._raise_contrail_exception(400, exceptions.BadRequest(
-                resource='network', msg='Network Already exists'))
+            self._raise_contrail_exception(400, 'BadRequest',
+                resource='network', msg='Network Already exists')
 
         if net_obj.router_external:
             fip_pool_obj = FloatingIpPool('floating-ip-pool', net_obj)
@@ -2052,7 +2117,7 @@ class DBInterface(object):
         try:
             net_obj = self._network_read(net_uuid)
         except NoIdError:
-            self._raise_contrail_exception(404, exceptions.NetworkNotFound(net_id=net_uuid))
+            self._raise_contrail_exception(404, 'NetworkNotFound', net_id=net_uuid)
 
         return self._network_vnc_to_neutron(net_obj, net_repr='SHOW')
     #end network_read
@@ -2075,14 +2140,16 @@ class DBInterface(object):
                         pool_id = fip_pool['uuid']
                         self._floating_ip_pool_delete(fip_pool_id=pool_id)
                     except RefsExistError:
-                        self._raise_contrail_exception(409, exceptions.NetworkInUse(net_id=net_id))
+                        self._raise_contrail_exception(409, 'NetworkInUse',
+                                                       net_id=net_id)
         if shared and not net_obj.is_shared:
             for vmi in net_obj.get_virtual_machine_interface_back_refs() or []:
                 vmi_obj = self._virtual_machine_interface_read(port_id=vmi['uuid'])
                 if (vmi_obj.parent_type == 'project' and
                     vmi_obj.parent_uuid != net_obj.parent_uuid):
                     self._raise_contrail_exception(
-                        409, exceptions.InvalidSharedSetting(network=net_obj.display_name))
+                        409, 'InvalidSharedSetting',
+                        network=net_obj.display_name)
         self._virtual_network_update(net_obj)
 
         ret_network_q = self._network_vnc_to_neutron(net_obj, net_repr='SHOW')
@@ -2288,7 +2355,8 @@ class DBInterface(object):
         try:
             net_obj = self._network_read(net_id)
         except NoIdError:
-            self._raise_contrail_exception(404, exceptions.SubnetNotFound(subnet_id=subnet_id))
+            self._raise_contrail_exception(404, 'SubnetNotFound',
+                                           subnet_id=subnet_id)
 
         ipam_refs = net_obj.get_network_ipam_refs()
         if ipam_refs:
@@ -2360,6 +2428,15 @@ class DBInterface(object):
                             for host_route in subnet_q['host_routes']:
                                 host_routes.append(RouteType(prefix=host_route['destination'],
                                                              next_hop=host_route['nexthop']))
+                            if self._apply_subnet_host_routes:
+                                old_host_routes = subnet_vnc.get_host_routes()
+                                subnet_cidr = '%s/%s' % (subnet_vnc.subnet.get_ip_prefix(),
+                                                         subnet_vnc.subnet.get_ip_prefix_len())
+                                self._port_update_iface_route_table(net_obj,
+                                                                    subnet_cidr,
+                                                                    subnet_id,
+                                                                    host_routes,
+                                                                    old_host_routes)
                             if host_routes:
                                 subnet_vnc.set_host_routes(RouteTableType(host_routes))
                             else:
@@ -2394,7 +2471,8 @@ class DBInterface(object):
                     try:
                         self._virtual_network_update(net_obj)
                     except RefsExistError:
-                        self._raise_contrail_exception(409, exceptions.SubnetInUse(subnet_id=subnet_id))
+                        self._raise_contrail_exception(409, 'SubnetInUse',
+                                                       subnet_id=subnet_id)
                     self._subnet_vnc_delete_mapping(subnet_id, subnet_key)
 
                     return
@@ -2484,8 +2562,8 @@ class DBInterface(object):
         try:
             ipam_uuid = self._vnc_lib.network_ipam_create(ipam_obj)
         except RefsExistError as e:
-            self._raise_contrail_exception(400, exceptions.BadRequest(
-                resource='ipam', msg=str(e)))
+            self._raise_contrail_exception(400, 'BadRequest',
+                resource='ipam', msg=str(e))
         return self._ipam_vnc_to_neutron(ipam_obj)
     #end ipam_create
 
@@ -2494,7 +2572,8 @@ class DBInterface(object):
             ipam_obj = self._vnc_lib.network_ipam_read(id=ipam_id)
         except NoIdError:
             # TODO add ipam specific exception
-            self._raise_contrail_exception(404, exceptions.NetworkNotFound(net_id=ipam_id))
+            self._raise_contrail_exception(404, 'NetworkNotFound',
+                                           net_id=ipam_id)
 
         return self._ipam_vnc_to_neutron(ipam_obj)
     #end ipam_read
@@ -2558,8 +2637,8 @@ class DBInterface(object):
         try:
             policy_uuid = self._vnc_lib.network_policy_create(policy_obj)
         except RefsExistError as e:
-            self._raise_contrail_exception(400, exceptions.BadRequest(
-                resource='policy', msg=str(e)))
+            self._raise_contrail_exception(400, 'BadRequest',
+                resource='policy', msg=str(e))
         return self._policy_vnc_to_neutron(policy_obj)
     #end policy_create
 
@@ -2637,7 +2716,8 @@ class DBInterface(object):
                                     'message': "Network %s is not a valid external network" % network_id}
                         bottle.abort(400, json.dumps(exc_info))
                 except NoIdError:
-                    self._raise_contrail_exception(404, exceptions.NetworkNotFound(net_id=network_id))
+                    self._raise_contrail_exception(404, 'NetworkNotFound',
+                                                   net_id=network_id)
 
                 self._router_set_external_gateway(rtr_obj, net_obj)
             else:
@@ -2713,7 +2793,7 @@ class DBInterface(object):
                 net_obj = self._vnc_lib.virtual_network_read(id=net_id)
             except NoIdError:
                 self._raise_contrail_exception(
-                    404, exceptions.NetworkNotFound(net_id=net_id))
+                    404, 'NetworkNotFound', net_id=net_id)
             net_obj.set_route_table(rt_obj)
             self._vnc_lib.virtual_network_update(net_obj)
 
@@ -2823,7 +2903,8 @@ class DBInterface(object):
         try:
             rtr_obj = self._logical_router_read(rtr_uuid)
         except NoIdError:
-            self._raise_contrail_exception(404, RouterNotFound(router_id=rtr_uuid))
+            self._raise_contrail_exception(404, 'RouterNotFound',
+                                           router_id=rtr_uuid)
 
         return self._router_vnc_to_neutron(rtr_obj, rtr_repr='SHOW')
     #end router_read
@@ -2842,9 +2923,11 @@ class DBInterface(object):
         try:
             rtr_obj = self._logical_router_read(rtr_id)
             if rtr_obj.get_virtual_machine_interface_refs():
-                self._raise_contrail_exception(409, RouterInUse(router_id=rtr_id))
+                self._raise_contrail_exception(409, 'RouterInUse',
+                                               router_id=rtr_id)
         except NoIdError:
-            self._raise_contrail_exception(404, RouterNotFound(router_id=rtr_id))
+            self._raise_contrail_exception(404, 'RouterNotFound',
+                                           router_id=rtr_id)
 
         self._router_clear_external_gateway(rtr_obj)
         self._logical_router_delete(rtr_id=rtr_id)
@@ -2913,6 +2996,7 @@ class DBInterface(object):
                                                 proj_rtr_fq_name):
                     continue
                 try:
+                    rtr_obj = self._logical_router_read(proj_rtr['uuid'])
                     if not self._filters_is_present(
                         filters, 'name',
                         rtr_obj.get_display_name() or rtr_obj.name):
@@ -2944,7 +3028,7 @@ class DBInterface(object):
                        msg = (_("Router %s already has a port "
                                 "on subnet %s") % (router_id, subnet_id))
                        self._raise_contrail_exception(400, 
-                           exceptions.BadRequest(resource='router', msg=msg))
+                           'BadRequest', resource='router', msg=msg)
                     sub_id = ip['subnet_id']
                     subnet = self.subnet_read(sub_id)
                     cidr = subnet['cidr']
@@ -2971,9 +3055,10 @@ class DBInterface(object):
             port = self.port_read(port_id)
             if (port['device_owner'] == constants.DEVICE_OWNER_ROUTER_INTF and
                     port['device_id']):
-                self._raise_contrail_exception(409, exceptions.PortInUse(net_id=port['network_id'],
-                                           port_id=port['id'],
-                                           device_id=port['device_id']))
+                self._raise_contrail_exception(409, 'PortInUse',
+                                               net_id=port['network_id'],
+                                               port_id=port['id'],
+                                               device_id=port['device_id'])
             fixed_ips = [ip for ip in port['fixed_ips']]
             if len(fixed_ips) != 1:
                 msg = _('Router port must have exactly one fixed IP')
@@ -3018,7 +3103,7 @@ class DBInterface(object):
         vmi_obj = self._vnc_lib.virtual_machine_interface_read(id=port_id)
         vmi_obj.set_virtual_machine_interface_device_owner(
             constants.DEVICE_OWNER_ROUTER_INTF)
-        vmi_obj = self._vnc_lib.virtual_machine_interface_update(vmi_obj)
+        self._vnc_lib.virtual_machine_interface_update(vmi_obj)
         router_obj.add_virtual_machine_interface(vmi_obj)
         self._logical_router_update(router_obj)
         info = {'id': router_id,
@@ -3035,12 +3120,14 @@ class DBInterface(object):
             port_db = self.port_read(port_id)
             if (port_db['device_owner'] != constants.DEVICE_OWNER_ROUTER_INTF
                 or port_db['device_id'] != router_id):
-                self._raise_contrail_exception(404, RouterInterfaceNotFound(router_id=router_id,
-                                                 port_id=port_id))
+                self._raise_contrail_exception(404, 'RouterInterfaceNotFound',
+                                               router_id=router_id,
+                                               port_id=port_id)
             port_subnet_id = port_db['fixed_ips'][0]['subnet_id']
             if subnet_id and (port_subnet_id != subnet_id):
-                self._raise_contrail_exception(409, exceptions.SubnetMismatchForPort(port_id=port_id,
-                                                       subnet_id=subnet_id))
+                self._raise_contrail_exception(409, 'SubnetMismatchForPort',
+                                               port_id=port_id,
+                                               subnet_id=subnet_id)
             subnet_id = port_subnet_id
             subnet = self.subnet_read(subnet_id)
             network_id = subnet['network_id']
@@ -3085,8 +3172,8 @@ class DBInterface(object):
         try:
             fip_uuid = self._vnc_lib.floating_ip_create(fip_obj)
         except Exception as e:
-            self._raise_contrail_exception(409,
-                   exceptions.IpAddressGenerationFailure(net_id=fip_q['floating_network_id']))
+            self._raise_contrail_exception(409, 'IpAddressGenerationFailure',
+                                           net_id=fip_q['floating_network_id'])
         fip_obj = self._vnc_lib.floating_ip_read(id=fip_uuid)
 
         return self._floatingip_vnc_to_neutron(fip_obj)
@@ -3096,7 +3183,8 @@ class DBInterface(object):
         try:
             fip_obj = self._vnc_lib.floating_ip_read(id=fip_uuid)
         except NoIdError:
-            self._raise_contrail_exception(404, FloatingIPNotFound(floatingip_id=fip_uuid))
+            self._raise_contrail_exception(404, 'FloatingIPNotFound',
+                                           floatingip_id=fip_uuid)
 
         return self._floatingip_vnc_to_neutron(fip_obj)
     #end floatingip_read
@@ -3189,12 +3277,12 @@ class DBInterface(object):
 
                 ip_id = self._create_instance_ip(net_obj, port_obj, ip_addr)
                 created_iip_ids.append(ip_id)
-            except Exception as e:
+            except vnc_exc.HttpError as e:
                 # Resources are not available
                 for iip_id in created_iip_ids:
                     self._instance_ip_delete(instance_ip_id=iip_id)
-                self._raise_contrail_exception(409,
-                    exceptions.IpAddressGenerationFailure(net_id=net_obj.uuid))
+                raise e
+
         for iip in getattr(port_obj, 'instance_ip_back_refs', []):
             if iip['uuid'] not in created_iip_ids:
                 iip_obj = self._instance_ip_delete(instance_ip_id=iip['uuid'])
@@ -3212,14 +3300,26 @@ class DBInterface(object):
 
         # create the object
         port_id = self._resource_create('virtual_machine_interface', port_obj)
-        if 'fixed_ips' in port_q:
-            self._port_create_instance_ip(net_obj, port_obj, port_q)
-        elif net_obj.get_network_ipam_refs():
-            self._port_create_instance_ip(net_obj, port_obj,
-                                          {'fixed_ips':[{'ip_address': None}]})
+        try:
+            if 'fixed_ips' in port_q:
+                self._port_create_instance_ip(net_obj, port_obj, port_q)
+            elif net_obj.get_network_ipam_refs():
+                self._port_create_instance_ip(net_obj, port_obj,
+                                              {'fixed_ips':[{'ip_address': None}]})
+        except vnc_exc.HttpError:
+            # failure in creating the instance ip. Roll back
+            self._virtual_machine_interface_delete(port_id=port_id)
+            self._raise_contrail_exception(409,
+                    'IpAddressGenerationFailure', net_id=net_obj.uuid)
         # TODO below reads back default parent name, fix it
         port_obj = self._virtual_machine_interface_read(port_id=port_id)
         ret_port_q = self._port_vnc_to_neutron(port_obj)
+
+        # create interface route table for the port if
+        # subnet has a host route for this port ip.
+        if self._apply_subnet_host_routes:
+            self._port_check_and_add_iface_route_table(ret_port_q['fixed_ips'],
+                                                       net_obj, port_obj)
 
         # update cache on successful creation
         tenant_id = proj_id.replace('-', '')
@@ -3233,7 +3333,7 @@ class DBInterface(object):
         try:
             port_obj = self._virtual_machine_interface_read(port_id=port_id)
         except NoIdError:
-            self._raise_contrail_exception(404, exceptions.PortNotFound(port_id=port_id))
+            self._raise_contrail_exception(404, 'PortNotFound', port_id=port_id)
 
         ret_port_q = self._port_vnc_to_neutron(port_obj)
 
@@ -3249,9 +3349,13 @@ class DBInterface(object):
         net_id = port_obj.get_virtual_network_refs()[0]['uuid']
         net_obj = self._network_read(net_id)
         self._virtual_machine_interface_update(port_obj)
-        self._port_create_instance_ip(net_obj, port_obj, port_q)
-        ret_port_q = self._port_vnc_to_neutron(port_obj)
+        try:
+            self._port_create_instance_ip(net_obj, port_obj, port_q)
+        except vnc_exc.HttpError:
+            self._raise_contrail_exception(409,
+                    'IpAddressGenerationFailure', net_id=net_obj.uuid)
         port_obj = self._virtual_machine_interface_read(port_id=port_id)
+        ret_port_q = self._port_vnc_to_neutron(port_obj)
 
         return ret_port_q
     #end port_update
@@ -3267,12 +3371,8 @@ class DBInterface(object):
             else:
                 instance_id = None
         if port_obj.get_logical_router_back_refs():
-            self._raise_contrail_exception(409, L3PortInUse(port_id=port_id,
-                device_owner=constants.DEVICE_OWNER_ROUTER_INTF))
-
-        if port_obj.get_logical_router_back_refs():
-            self._raise_contrail_exception(409, L3PortInUse(port_id=port_id,
-                device_owner=constants.DEVICE_OWNER_ROUTER_INTF))
+            self._raise_contrail_exception(409, 'L3PortInUse', port_id=port_id,
+                device_owner=constants.DEVICE_OWNER_ROUTER_INTF)
 
         # release instance IP address
         iip_back_refs = getattr(port_obj, 'instance_ip_back_refs', None)
@@ -3298,6 +3398,13 @@ class DBInterface(object):
 
         tenant_id = self._get_obj_tenant_id('port', port_id)
         self._virtual_machine_interface_delete(port_id=port_id)
+
+        # delete any interface route table associatd with the port
+        for rt_ref in port_obj.get_interface_route_table_refs() or []:
+            try:
+                self._vnc_lib.interface_route_table_delete(id=rt_ref['uuid'])
+            except vnc_exc.NoIdError:
+                pass
 
         # delete instance if this was the last port
         try:
@@ -3460,7 +3567,8 @@ class DBInterface(object):
         try:
             sg_obj = self._vnc_lib.security_group_read(id=sg_id)
         except NoIdError:
-            self._raise_contrail_exception(404, SecurityGroupNotFound(id=sg_id))
+            self._raise_contrail_exception(404, 'SecurityGroupNotFound',
+                                           id=sg_id)
 
         return self._security_group_vnc_to_neutron(sg_obj)
     #end security_group_read
@@ -3469,14 +3577,15 @@ class DBInterface(object):
         try:
             sg_obj = self._vnc_lib.security_group_read(id=sg_id)
             if sg_obj.name == 'default':
-                self._raise_contrail_exception(409, SecurityGroupCannotRemoveDefault())
+                self._raise_contrail_exception(
+                    409, 'SecurityGroupCannotRemoveDefault')
         except NoIdError:
             return
 
         try:
             self._security_group_delete(sg_id)
         except RefsExistError:
-            self._raise_contrail_exception(409, SecurityGroupInUse(id=sg_id))
+            self._raise_contrail_exception(409, 'SecurityGroupInUse', id=sg_id)
 
    #end security_group_delete
 
@@ -3525,16 +3634,19 @@ class DBInterface(object):
             #TODO(ethuleau): support all protocol numbers
             if val >= 0 and val <= 255 and IP_PROTOCOL_MAP.has_key(val):
                 return IP_PROTOCOL_MAP[val]
-            self._raise_contrail_exception(400, SecurityGroupRuleInvalidProtocol(
-                protocol=value, values=IP_PROTOCOL_MAP.values()))
+            self._raise_contrail_exception(
+                400, 'SecurityGroupRuleInvalidProtocol',
+                protocol=value, values=IP_PROTOCOL_MAP.values())
         except (ValueError, TypeError):
             if value.lower() in IP_PROTOCOL_MAP.values():
                 return value.lower()
-            self._raise_contrail_exception(400, SecurityGroupRuleInvalidProtocol(
-                protocol=value, values=IP_PROTOCOL_MAP.values()))
+            self._raise_contrail_exception(
+                400, 'SecurityGroupRuleInvalidProtocol',
+                protocol=value, values=IP_PROTOCOL_MAP.values())
         except AttributeError:
-            self._raise_contrail_exception(400, SecurityGroupRuleInvalidProtocol(
-                protocol=value, values=IP_PROTOCOL_MAP.values()))
+            self._raise_contrail_exception(
+                400, 'SecurityGroupRuleInvalidProtocol',
+                protocol=value, values=IP_PROTOCOL_MAP.values())
 
     def _validate_port_range(self, rule):
         """Check that port_range is valid."""
@@ -3542,21 +3654,25 @@ class DBInterface(object):
             rule['port_range_max'] is None):
             return
         if not rule['protocol']:
-            self._raise_contrail_exception(400, SecurityGroupProtocolRequiredWithPorts())
+            self._raise_contrail_exception(
+                400, 'SecurityGroupProtocolRequiredWithPorts')
         if rule['protocol'] in [constants.PROTO_NAME_TCP, constants.PROTO_NAME_UDP]:
             if (rule['port_range_min'] is not None and
                 rule['port_range_min'] <= rule['port_range_max']):
                 pass
             else:
-                self._raise_contrail_exception(400, SecurityGroupInvalidPortRange())
+                self._raise_contrail_exception(400, 'SecurityGroupInvalidPortRange')
         elif rule['protocol'] == constants.PROTO_NAME_ICMP:
             for attr, field in [('port_range_min', 'type'),
                                 ('port_range_max', 'code')]:
                 if rule[attr] > 255:
-                    self._raise_contrail_exception(400, SecurityGroupInvalidIcmpValue(field=field, attr=attr, value=rule[attr]))
+                    self._raise_contrail_exception(
+                        400, 'SecurityGroupInvalidIcmpValue', field=field,
+                        attr=attr, value=rule[attr])
             if (rule['port_range_min'] is None and
                     rule['port_range_max']):
-                self._raise_contrail_exception(400, SecurityGroupMissingIcmpType(value=rule['port_range_max']))
+                self._raise_contrail_exception(400, 'SecurityGroupMissingIcmpType',
+                                               value=rule['port_range_max'])
 
     def security_group_rule_create(self, sgr_q):
         sgr_q['protocol'] = self._convert_protocol(sgr_q['protocol'])
@@ -3576,7 +3692,8 @@ class DBInterface(object):
             return self._security_group_rule_vnc_to_neutron(sg_obj.uuid,
                                                             sg_rule, sg_obj)
 
-        self._raise_contrail_exception(404, SecurityGroupRuleNotFound(id=sgr_id))
+        self._raise_contrail_exception(404, 'SecurityGroupRuleNotFound',
+                                       id=sgr_id)
     #end security_group_rule_read
 
     def security_group_rule_delete(self, sgr_id):
@@ -3584,7 +3701,8 @@ class DBInterface(object):
         if sg_obj and sg_rule:
             return self._security_group_rule_delete(sg_obj, sg_rule)
 
-        self._raise_contrail_exception(404, SecurityGroupRuleNotFound(id=sgr_id))
+        self._raise_contrail_exception(404, 'SecurityGroupRuleNotFound',
+                                       id=sgr_id)
     #end security_group_rule_delete
 
     def security_group_rules_read(self, sg_id, sg_obj=None):
@@ -3603,7 +3721,8 @@ class DBInterface(object):
                                                                    sg_obj)
                 sg_rules.append(sg_info)
         except NoIdError:
-            self._raise_contrail_exception(404, SecurityGroupNotFound(id=sg_id))
+            self._raise_contrail_exception(404, 'SecurityGroupNotFound',
+                                           id=sg_id)
 
         return sg_rules
     #end security_group_rules_read
@@ -3641,8 +3760,8 @@ class DBInterface(object):
         try:
             rt_uuid = self._route_table_create(rt_obj)
         except RefsExistError as e:
-            self._raise_contrail_exception(400, exceptions.BadRequest(
-                resource='route_table', msg=str(e)))
+            self._raise_contrail_exception(400, 'BadRequest',
+                resource='route_table', msg=str(e))
         ret_rt_q = self._route_table_vnc_to_neutron(rt_obj)
         return ret_rt_q
     #end security_group_create
@@ -3652,7 +3771,7 @@ class DBInterface(object):
             rt_obj = self._vnc_lib.route_table_read(id=rt_id)
         except NoIdError:
             # TODO add route table specific exception
-            self._raise_contrail_exception(404, exceptions.NetworkNotFound(net_id=rt_id))
+            self._raise_contrail_exception(404, 'NetworkNotFound', net_id=rt_id)
 
         return self._route_table_vnc_to_neutron(rt_obj)
     #end route_table_read
@@ -3719,7 +3838,7 @@ class DBInterface(object):
             si_obj = self._vnc_lib.service_instance_read(id=si_id)
         except NoIdError:
             # TODO add svc instance specific exception
-            self._raise_contrail_exception(404, exceptions.NetworkNotFound(net_id=si_id))
+            self._raise_contrail_exception(404, 'NetworkNotFound', net_id=si_id)
 
         return self._svc_instance_vnc_to_neutron(si_obj)
     #end svc_instance_read

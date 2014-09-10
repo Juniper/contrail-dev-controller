@@ -32,11 +32,11 @@ public:
     enum Type {
         MULTICAST_PEER,
         BGP_PEER,
+        LINKLOCAL_PEER,
         ECMP_PEER,
         LOCAL_VM_PEER,
         LOCAL_PEER,
         LOCAL_VM_PORT_PEER,
-        LINKLOCAL_PEER,
         NOVA_PEER,
         VGW_PEER,
         MULTICAST_FABRIC_TREE_BUILDER
