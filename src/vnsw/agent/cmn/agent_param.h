@@ -194,8 +194,6 @@ private:
         (const boost::program_options::variables_map &v);
     void ParseHeadlessModeArguments
         (const boost::program_options::variables_map &v);
-    void ParseSimulateEvpnTorArguments
-        (const boost::program_options::variables_map &v);
     void ParseServiceInstanceArguments
         (const boost::program_options::variables_map &v);
 
@@ -244,6 +242,9 @@ private:
     boost::property_tree::ptree tree_;
     std::auto_ptr<VirtualGatewayConfigTable> vgw_config_table_;
     bool headless_mode_;
+    //Simulate EVPN TOR mode moves agent into L2 mode. This mode is required
+    //only for testing where MX and bare metal are simulated. VM on the
+    //simulated compute node behaves as bare metal.
     bool simulate_evpn_tor_;
     std::string si_netns_command_;
     int si_netns_workers_;

@@ -238,7 +238,7 @@ bool VnTable::VnEntryWalk(DBTablePartBase *partition, DBEntryBase *entry) {
 
 void VnTable::VnEntryWalkDone(DBTableBase *partition) {
     walkid_ = DBTableWalker::kInvalidWalkerId;
-    Agent::GetInstance()->interface_table()->
+    agent()->interface_table()->
         UpdateVxLanNetworkIdentifierMode();
 }
 

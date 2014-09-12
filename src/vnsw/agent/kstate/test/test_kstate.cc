@@ -24,7 +24,7 @@
 #define MAX_VNET 1
 int fd_table[MAX_VNET];
 #define MAX_TEST_FD 5 
-#define MAX_TEST_MPLS 11
+#define MAX_TEST_MPLS 10
 int test_fd[MAX_TEST_FD];
 
 TestIfKState *TestIfKState::singleton_;
@@ -107,10 +107,10 @@ public:
             WAIT_FOR(1000, 1000, ((oper_if_count) == 
                                 Agent::GetInstance()->interface_table()->Size()));
         }
-        WAIT_FOR(1000, 1000, (((num_ports * 2) + 1)==
+        WAIT_FOR(1000, 1000, ((num_ports * 2)==
                             Agent::GetInstance()->mpls_table()->Size()));
         if (!ksync_init_) {
-            WAIT_FOR(1000, 1000, (((num_ports * 2) + 1)==
+            WAIT_FOR(1000, 1000, ((num_ports * 2) ==
                                   KSyncSockTypeMap::MplsCount()));
             if (if_count) {
                 WAIT_FOR(1000, 1000, ((num_ports + if_count) == 
@@ -120,8 +120,8 @@ public:
                 //5 interface nexthops get created for each interface 
                 //(l2 with policy, l2 without policy, l3 with policy, l3 
                 // without policy and 1 multicast - mac as all f's)
-                //plus 4 Nexthops for each VRF (1 VRF NH and 6 Composite NHs)
-                WAIT_FOR(1000, 1000, ((nh_count + (num_ports * 5) + 7) ==
+                //plus 4 Nexthops for each VRF (1 VRF NH and 2 Composite NHs)
+                WAIT_FOR(1000, 1000, ((nh_count + (num_ports * 5) + 3) ==
                                     KSyncSockTypeMap::NHCount()));
             }
             if (rt_count) {
@@ -252,8 +252,8 @@ TEST_F(KStateTest, NHDumpTest) {
     //5 interface nexthops get created for each interface 
     //(l2 with policy, l2 without policy, l3 with policy, l3 without policy 
     // and 1 multicast - mac as all f's )
-    //plus 4 Nexthops for each VRF (1 VRF NH and 6 Composite NHs)
-    TestNHKState::Init(-1, true, nh_count + (max_ports * 5) + 7);
+    //plus 4 Nexthops for each VRF (1 VRF NH and 2 Composite NHs)
+    TestNHKState::Init(-1, true, nh_count + (max_ports * 5) + 3);
     client->WaitForIdle();
     client->KStateResponseWait(1);
 
@@ -310,7 +310,8 @@ TEST_F(KStateTest, MplsGetTest) {
 
     CreatePorts(0, 0, 0);
     for (int i = 0; i < MAX_TEST_FD; i++) {
-        TestMplsKState::Init(MplsTable::kStartLabel + mpls_count + i);
+        //TODO Why this 8 needed?
+        TestMplsKState::Init(MplsTable::kStartLabel + mpls_count + i + 8);
         client->WaitForIdle();
         client->KStateResponseWait(1);
     }
@@ -379,8 +380,8 @@ TEST_F(KStateTest, RouteDumpTest) {
         CreatePorts(0, 0, rt_count);
         //Addition of 2 vm ports in a new VN (VRF) will result in the following routes
         // 2 routes corresponding to the addresses of VM
-        // broadcast + l2 broadcast
-        TestRouteKState::Init(true, rt_count + (MAX_TEST_FD * 2) + 2);
+        // l2 broadcast
+        TestRouteKState::Init(true, rt_count + (MAX_TEST_FD * 2) + 1);
         client->WaitForIdle();
         client->KStateResponseWait(1);
         DeletePorts();

@@ -98,6 +98,7 @@ public:
     virtual Agent::RouteTableType GetRouteTableType() {
        return Agent::INET4_MULTICAST;
     }
+    virtual AgentRouteKey *Clone() const;
     virtual string ToString() const;
 
     const Ip4Address &dest_ip_addr() const {return dip_;}

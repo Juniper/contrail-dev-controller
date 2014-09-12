@@ -223,6 +223,8 @@ void AgentRouteTable::DeletePathFromPeer(DBTablePartBase *part,
     }
 
     const Peer *peer = path->peer();
+    //Recompute paths since one is going off before deleting.
+    rt->ReComputePathDeletion(path);
     // Remove path from the route
     rt->RemovePath(path);
     // Local path(non BGP type) is going away and so will route.
@@ -231,9 +233,6 @@ void AgentRouteTable::DeletePathFromPeer(DBTablePartBase *part,
     if (peer && (peer->GetType() != Peer::BGP_PEER)) {
         rt->SquashStalePaths(NULL);
     }
-
-    //Recompute paths after deletion of peer path.
-    rt->ReComputePaths(path, true);
 
     // Delete route if no more paths 
     if (rt->GetActivePath() == NULL) {
@@ -376,7 +375,7 @@ void AgentRouteTable::Input(DBTablePartition *part, DBClient *client,
                 //If a path transition from ECMP to non ECMP
                 //remote the path from ecmp peer
                 if (ecmp && ecmp != path->path_preference().ecmp()) {
-                    rt->ReComputePaths(path, true);
+                    rt->ReComputePathDeletion(path);
                 }
 
                 RouteInfo rt_info;
@@ -397,7 +396,7 @@ void AgentRouteTable::Input(DBTablePartition *part, DBClient *client,
 
             //Used for routes which have use more than one peer information
             //to compute the nexthops.
-            if (rt->ReComputePaths(path, false)) {
+            if (rt->ReComputePathAdd(path)) {
                 notify = true;
             }
         } else {
@@ -531,9 +530,8 @@ void AgentRoute::DeletePathInternal(AgentPath *path) {
 }
 
 void AgentRoute::DeletePath(const AgentRouteKey *key) {
-    // Find path for the peer
-    AgentPath *path = FindPath(key->peer());
-    DeletePathInternal(path);
+    AgentPath *peer_path = FindPath(key->peer());
+    DeletePathInternal(peer_path);
 }
 
 AgentPath *AgentRoute::FindPathUsingKey(const AgentRouteKey *key) {
@@ -587,22 +585,6 @@ bool AgentRoute::IsRPFInvalid() const {
     }
 
     return path->is_subnet_discard();
-}
-
-// This is for handling shared tree across different multicast routes,
-// Unsubscribe shud be sent when all routes using tree are gone. Similarly
-// subscription should be sent only for first route.
-// Currently shared tree is only used for flood multicast.
-// TODO: Move this to controller code
-bool AgentRoute::CanDissociate() const {
-    bool can_dissociate = IsDeleted();
-    if (is_multicast()) {
-        const NextHop *nh = GetActiveNextHop();
-        const CompositeNH *cnh = static_cast<const CompositeNH *>(nh);
-        if (cnh && cnh->ComponentNHCount() == 0) 
-            return true;
-    }
-    return can_dissociate;
 }
 
 // If a direct route has changed, invoke a change on tunnel NH dependent on it

@@ -42,7 +42,7 @@ struct AgentRouteKey : public AgentKey {
     virtual std::string ToString() const = 0;
     virtual AgentRoute *AllocRouteEntry(VrfEntry *vrf,
                                         bool is_multicast) const = 0;
-    virtual AgentRouteKey *Clone() const {return NULL;}
+    virtual AgentRouteKey *Clone() const = 0;
 
     const std::string &vrf_name() const { return vrf_name_; }
     const Peer *peer() const { return peer_; }
@@ -217,10 +217,8 @@ public:
     virtual bool DBEntrySandesh(Sandesh *sresp, bool stale) const = 0;
     virtual std::string ToString() const = 0;
     virtual const std::string GetAddressString() const = 0;
-    virtual bool ReComputePaths(AgentPath *path, bool del) {return false;}
-    virtual bool ReComputeMulticastPaths(AgentPath *path, bool del) {
-        return false;
-    }
+    virtual bool ReComputePathDeletion(AgentPath *path) {return false;}
+    virtual bool ReComputePathAdd(AgentPath *path) {return false;}
     virtual uint32_t GetActiveLabel() const;
     virtual AgentPath *FindPathUsingKey(const AgentRouteKey *key);
     virtual void DeletePath(const AgentRouteKey *key);
@@ -240,7 +238,6 @@ public:
     void EnqueueRouteResync() const;
     void ResyncTunnelNextHop();
     bool HasUnresolvedPath();
-    bool CanDissociate() const;
     bool Sync(void);
     void SquashStalePaths(const AgentPath *path);
 

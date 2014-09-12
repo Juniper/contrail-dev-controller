@@ -160,6 +160,7 @@ public:
     void TriggerLocalRouteChange(MulticastGroupObject *obj, const Peer *peer);
     void TriggerRemoteRouteChange(MulticastGroupObject *obj,
                                   const Peer *peer,
+                                  const string &vrf_name,
                                   const TunnelOlist &olist,
                                   uint64_t peer_identifier,
                                   bool delete_op,
@@ -205,9 +206,6 @@ private:
     std::set<MulticastGroupObject *> &GetMulticastObjList() {
         return this->multicast_obj_list_;
     };
-
-    //Delete teh route and mpls label for the object
-    void DeleteRouteandMPLS(MulticastGroupObject *obj);
 
     //VM intf add-delete
     void DeleteVmInterface(const Interface *intf);

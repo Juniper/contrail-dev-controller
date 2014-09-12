@@ -1138,7 +1138,6 @@ NextHop *CompositeNHKey::AllocEntry() const {
                            component_nh_key_list_, vrf);
 }
 
-//TODO multicast change check
 void CompositeNHKey::ChangeTunnelType(TunnelType::Type tunnel_type) {
     ComponentNHKeyList::iterator it = component_nh_key_list_.begin();
     for (;it != component_nh_key_list_.end(); it++) {

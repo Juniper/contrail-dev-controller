@@ -235,6 +235,7 @@ bool ControllerRouteWalker::RouteDelPeer(DBTablePartBase *partition,
                                       GetDBRequestKey().get()))->Clone();
     key->set_peer(peer_);
     route->DeletePath(key);
+    delete key;
     return true;
 }
 

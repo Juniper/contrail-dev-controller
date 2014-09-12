@@ -1254,8 +1254,8 @@ void AgentXmppChannel::HandleAgentXmppClientChannelEvent(AgentXmppChannel *peer,
     }
 }
 
-bool AgentXmppChannel::ControllerSendVmCfgSubscribe(AgentXmppChannel *peer, 
-                         const boost::uuids::uuid &vm_id, 
+bool AgentXmppChannel::ControllerSendVmCfgSubscribe(AgentXmppChannel *peer,
+                         const boost::uuids::uuid &vm_id,
                          bool subscribe) {
     uint8_t data_[4096];
     size_t datalen_;
@@ -1334,7 +1334,7 @@ bool AgentXmppChannel::ControllerSendCfgSubscribe(AgentXmppChannel *peer) {
     return (peer->SendUpdate(data_,datalen_));
 }
 
-bool AgentXmppChannel::ControllerSendSubscribe(AgentXmppChannel *peer, 
+bool AgentXmppChannel::ControllerSendSubscribe(AgentXmppChannel *peer,
                                                VrfEntry *vrf,
                                                bool subscribe) {
     static int req_id = 0;
@@ -1380,23 +1380,19 @@ bool AgentXmppChannel::ControllerSendSubscribe(AgentXmppChannel *peer,
     return (peer->SendUpdate(data_,datalen_));
 }
 
-bool AgentXmppChannel::ControllerSendV4UnicastRoute(AgentXmppChannel *peer,
-                                               AgentRoute *route, 
-                                               std::string vn, 
-                                               const SecurityGroupList *sg_list,
-                                               uint32_t mpls_label,
-                                               TunnelType::TypeBmap bmap,
-                                               bool add_route,
-                                               const PathPreference
-                                               &path_preference) {
+bool AgentXmppChannel::ControllerSendV4UnicastRouteCommon(AgentRoute *route,
+                                       std::string vn,
+                                       const SecurityGroupList *sg_list,
+                                       uint32_t mpls_label,
+                                       TunnelType::TypeBmap bmap,
+                                       const PathPreference &path_preference,
+                                       bool associate) {
 
     static int id = 0;
     ItemType item;
     uint8_t data_[4096];
     size_t datalen_;
    
-    if (!peer) return false;
-
     //Build the DOM tree
     auto_ptr<XmlBase> impl(XmppStanza::AllocXmppXmlImpl());
     XmlPugi *pugi = reinterpret_cast<XmlPugi *>(impl.get());
@@ -1407,7 +1403,7 @@ bool AgentXmppChannel::ControllerSendV4UnicastRoute(AgentXmppChannel *peer,
     rstr << route->ToString();
     item.entry.nlri.address = rstr.str();
 
-    string rtr(peer->agent()->router_id().to_string());
+    string rtr(agent_->router_id().to_string());
 
     autogen::NextHopType nh;
     nh.af = BgpAf::IPv4;
@@ -1435,8 +1431,8 @@ bool AgentXmppChannel::ControllerSendV4UnicastRoute(AgentXmppChannel *peer,
     pugi->AddNode("iq", "");
     pugi->AddAttribute("type", "set");
     
-    pugi->AddAttribute("from", peer->channel_->FromString());
-    std::string to(peer->channel_->ToString());
+    pugi->AddAttribute("from", channel_->FromString());
+    std::string to(channel_->ToString());
     to += "/";
     to += XmppInit::kBgpPeer; 
     pugi->AddAttribute("to", to);
@@ -1466,7 +1462,7 @@ bool AgentXmppChannel::ControllerSendV4UnicastRoute(AgentXmppChannel *peer,
 
     datalen_ = XmppProto::EncodeMessage(impl.get(), data_, sizeof(data_));
     // send data
-    peer->SendUpdate(data_,datalen_);
+    SendUpdate(data_,datalen_);
 
     pugi->DeleteNode("pubsub");
     pugi->ReadNode("iq");
@@ -1479,7 +1475,7 @@ bool AgentXmppChannel::ControllerSendV4UnicastRoute(AgentXmppChannel *peer,
     pugi->AddChildNode("collection", "");
 
     pugi->AddAttribute("node", route->vrf()->GetName());
-    if (add_route) {
+    if (associate) {
         pugi->AddChildNode("associate", "");
     } else {
         pugi->AddChildNode("dissociate", "");
@@ -1488,28 +1484,26 @@ bool AgentXmppChannel::ControllerSendV4UnicastRoute(AgentXmppChannel *peer,
 
     datalen_ = XmppProto::EncodeMessage(impl.get(), data_, sizeof(data_));
     // send data
-    return (peer->SendUpdate(data_,datalen_));
+    return (SendUpdate(data_,datalen_));
 }
 
-bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
-                                               AgentRoute *route, 
-                                               std::string vn, 
-                                               uint32_t label,
-                                               uint32_t tunnel_bmap,
-                                               bool add_route) {
+bool AgentXmppChannel::ControllerSendEvpnRouteCommon(AgentRoute *route,
+                                                     std::string vn,
+                                                     uint32_t label,
+                                                     uint32_t tunnel_bmap,
+                                                     bool associate) {
     static int id = 0;
     EnetItemType item;
     uint8_t data_[4096];
     size_t datalen_;
-   
-    if (!peer) return false;
+
     if (label == MplsTable::kInvalidLabel) return false;
 
     //Build the DOM tree
     auto_ptr<XmlBase> impl(XmppStanza::AllocXmppXmlImpl());
     XmlPugi *pugi = reinterpret_cast<XmlPugi *>(impl.get());
 
-    if (route->is_multicast() && peer->agent()->simulate_evpn_tor()) {
+    if (route->is_multicast() && agent_->simulate_evpn_tor()) {
         item.entry.edge_replication_not_supported = true;
     } else {
         item.entry.edge_replication_not_supported = false;
@@ -1526,7 +1520,7 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
     item.entry.nlri.address = rstr.str();
     assert(item.entry.nlri.address != "0.0.0.0");
 
-    string rtr(peer->agent()->router_id().to_string());
+    string rtr(agent_->router_id().to_string());
 
     autogen::EnetNextHopType nh;
     nh.af = Address::INET;
@@ -1537,7 +1531,7 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
     TunnelType::Type tunnel_type = TunnelType::ComputeType(tunnel_bmap);
     const AgentPath *active_path = NULL;
     if (l2_route->is_multicast()) {
-        active_path = l2_route->FindPath(peer->agent()->multicast_peer());
+        active_path = l2_route->FindPath(agent_->multicast_peer());
     } else {
         active_path = l2_route->FindLocalVmPortPath();
     }
@@ -1545,7 +1539,7 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
     if (active_path) {
         tunnel_type = active_path->tunnel_type();
     }
-    if (add_route) {
+    if (associate) {
         if (tunnel_type != TunnelType::VXLAN) {
             if (tunnel_bmap & TunnelType::GREType()) {
                 nh.tunnel_encapsulation_list.tunnel_encapsulation.push_back("gre");
@@ -1573,8 +1567,8 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
     pugi->AddNode("iq", "");
     pugi->AddAttribute("type", "set");
     
-    pugi->AddAttribute("from", peer->channel_->FromString());
-    std::string to(peer->channel_->ToString());
+    pugi->AddAttribute("from", channel_->FromString());
+    std::string to(channel_->ToString());
     to += "/";
     to += XmppInit::kBgpPeer; 
     pugi->AddAttribute("to", to);
@@ -1601,7 +1595,7 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
 
     datalen_ = XmppProto::EncodeMessage(impl.get(), data_, sizeof(data_));
     // send data
-    peer->SendUpdate(data_,datalen_);
+    SendUpdate(data_,datalen_);
 
     pugi->DeleteNode("pubsub");
     pugi->ReadNode("iq");
@@ -1614,7 +1608,7 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
     pugi->AddChildNode("collection", "");
 
     pugi->AddAttribute("node", route->vrf()->GetName());
-    if (add_route) {
+    if (associate) {
         pugi->AddChildNode("associate", "");
     } else {
         pugi->AddChildNode("dissociate", "");
@@ -1623,52 +1617,25 @@ bool AgentXmppChannel::ControllerSendEvpnRoute(AgentXmppChannel *peer,
 
     datalen_ = XmppProto::EncodeMessage(impl.get(), data_, sizeof(data_));
     // send data
-    return (peer->SendUpdate(data_,datalen_));
+    return (SendUpdate(data_,datalen_));
 }
 
-bool AgentXmppChannel::ControllerSendRoute(AgentXmppChannel *peer,
-                                           AgentRoute *route, 
-                                           std::string vn, 
-                                           uint32_t label,
-                                           TunnelType::TypeBmap bmap,
-                                           const SecurityGroupList *sg_list,
-                                           bool add_route,
-                                           Agent::RouteTableType type,
-                                           const PathPreference
-                                           &path_preference)
-{
-    bool ret = false;
-    if ((type == Agent::INET4_UNICAST) &&
-        (peer->agent()->simulate_evpn_tor() == false)) {
-        ret = AgentXmppChannel::ControllerSendV4UnicastRoute(peer, route, vn,
-                                          sg_list, label, bmap, add_route,
-                                          path_preference);
-    } 
-    if (type == Agent::LAYER2) {
-        ret = AgentXmppChannel::ControllerSendEvpnRoute(peer, route, vn, 
-                                         label, bmap, add_route);
-    } 
-    return ret;
-}
-
-bool AgentXmppChannel::ControllerSendMcastRoute(AgentXmppChannel *peer,
-                                                AgentRoute *route, 
-                                                bool add_route) {
+bool AgentXmppChannel::ControllerSendMcastRouteCommon(AgentRoute *route,
+                                                      bool add_route) {
 
     static int id = 0;
     autogen::McastItemType item;
     uint8_t data_[4096];
     size_t datalen_;
    
-    if (!peer) return false;
-    if (add_route && (peer->agent()->mulitcast_builder() != peer)) {
-        CONTROLLER_TRACE(Trace, peer->GetBgpPeerName(),
+    if (add_route && (agent_->mulitcast_builder() != this)) {
+        CONTROLLER_TRACE(Trace, GetBgpPeerName(),
                          route->vrf()->GetName(),
                          "Peer not elected Multicast Tree Builder");
         return false;
     }
 
-    CONTROLLER_TRACE(McastSubscribe, peer->GetBgpPeerName(),
+    CONTROLLER_TRACE(McastSubscribe, GetBgpPeerName(),
                      route->vrf()->GetName(), " ",
                      route->ToString());
 
@@ -1683,9 +1650,9 @@ bool AgentXmppChannel::ControllerSendMcastRoute(AgentXmppChannel *peer,
 
     autogen::McastNextHopType item_nexthop;
     item_nexthop.af = BgpAf::IPv4;
-    string rtr(peer->agent()->router_id().to_string());
+    string rtr(agent_->router_id().to_string());
     item_nexthop.address = rtr;
-    item_nexthop.label = peer->GetMcastLabelRange();
+    item_nexthop.label = GetMcastLabelRange();
     item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation.push_back("gre");
     item_nexthop.tunnel_encapsulation_list.tunnel_encapsulation.push_back("udp");
     item.entry.next_hops.next_hop.push_back(item_nexthop);
@@ -1693,8 +1660,8 @@ bool AgentXmppChannel::ControllerSendMcastRoute(AgentXmppChannel *peer,
     //Build the pugi tree
     pugi->AddNode("iq", "");
     pugi->AddAttribute("type", "set");
-    pugi->AddAttribute("from", peer->channel_->FromString());
-    std::string to(peer->channel_->ToString());
+    pugi->AddAttribute("from", channel_->FromString());
+    std::string to(channel_->ToString());
     to += "/";
     to += XmppInit::kBgpPeer; 
     pugi->AddAttribute("to", to);
@@ -1724,7 +1691,7 @@ bool AgentXmppChannel::ControllerSendMcastRoute(AgentXmppChannel *peer,
 
     datalen_ = XmppProto::EncodeMessage(impl.get(), data_, sizeof(data_));
     // send data
-    peer->SendUpdate(data_,datalen_);
+    SendUpdate(data_,datalen_);
 
 
     pugi->DeleteNode("pubsub");
@@ -1747,7 +1714,126 @@ bool AgentXmppChannel::ControllerSendMcastRoute(AgentXmppChannel *peer,
 
     datalen_ = XmppProto::EncodeMessage(impl.get(), data_, sizeof(data_));
     // send data
-    return (peer->SendUpdate(data_,datalen_));
+    return (SendUpdate(data_,datalen_));
+}
+
+bool AgentXmppChannel::ControllerSendEvpnRouteAdd(AgentXmppChannel *peer,
+                                                  AgentRoute *route,
+                                                  std::string vn,
+                                                  uint32_t label,
+                                                  uint32_t tunnel_bmap) {
+    if (!peer) return false;
+
+    CONTROLLER_TRACE(RouteExport, peer->GetBgpPeerName(),
+                     route->vrf()->GetName(),
+                     route->ToString(), true, label);
+    return (peer->ControllerSendEvpnRouteCommon(route,
+                                                vn,
+                                                label,
+                                                tunnel_bmap,
+                                                true));
+}
+
+bool AgentXmppChannel::ControllerSendEvpnRouteDelete(AgentXmppChannel *peer,
+                                                     AgentRoute *route,
+                                                     std::string vn,
+                                                     uint32_t label,
+                                                     uint32_t tunnel_bmap) {
+    if (!peer) return false;
+
+    CONTROLLER_TRACE(RouteExport, peer->GetBgpPeerName(),
+                     route->vrf()->GetName(),
+                     route->ToString(), false, label);
+    return (peer->ControllerSendEvpnRouteCommon(route,
+                                                vn,
+                                                label,
+                                                tunnel_bmap,
+                                                false));
+}
+
+bool AgentXmppChannel::ControllerSendRouteAdd(AgentXmppChannel *peer,
+                                              AgentRoute *route,
+                                              std::string vn,
+                                              uint32_t label,
+                                              TunnelType::TypeBmap bmap,
+                                              const SecurityGroupList *sg_list,
+                                              Agent::RouteTableType type,
+                                              const PathPreference
+                                              &path_preference)
+{
+    if (!peer) return false;
+
+    CONTROLLER_TRACE(RouteExport,
+                     peer->GetBgpPeerName(),
+                     route->vrf()->GetName(),
+                     route->ToString(),
+                     true, label);
+    bool ret = false;
+    if ((type == Agent::INET4_UNICAST) &&
+        (peer->agent()->simulate_evpn_tor() == false)) {
+        ret = peer->ControllerSendV4UnicastRouteCommon(route, vn,
+                                                       sg_list, label, bmap,
+                                                       path_preference, true);
+    }
+    if (type == Agent::LAYER2) {
+        ret = peer->ControllerSendEvpnRouteCommon(route, vn,
+                                                  label, bmap, true);
+    }
+    return ret;
+}
+
+bool AgentXmppChannel::ControllerSendRouteDelete(AgentXmppChannel *peer,
+                                          AgentRoute *route,
+                                          std::string vn,
+                                          uint32_t label,
+                                          TunnelType::TypeBmap bmap,
+                                          const SecurityGroupList *sg_list,
+                                          Agent::RouteTableType type,
+                                          const PathPreference
+                                          &path_preference)
+{
+    if (!peer) return false;
+
+    CONTROLLER_TRACE(RouteExport,
+                     peer->GetBgpPeerName(),
+                     route->vrf()->GetName(),
+                     route->ToString(),
+                     false, 0);
+    bool ret = false;
+    if ((type == Agent::INET4_UNICAST) &&
+        (peer->agent()->simulate_evpn_tor() == false)) {
+        ret = peer->ControllerSendV4UnicastRouteCommon(route, vn,
+                                                       sg_list, label,
+                                                       bmap,
+                                                       path_preference,
+                                                       false);
+    }
+    if (type == Agent::LAYER2) {
+        ret = peer->ControllerSendEvpnRouteCommon(route, vn,
+                                                  label, bmap, false);
+    }
+    return ret;
+}
+
+bool AgentXmppChannel::ControllerSendMcastRouteAdd(AgentXmppChannel *peer,
+                                                   AgentRoute *route) {
+    if (!peer) return false;
+
+    CONTROLLER_TRACE(RouteExport, peer->GetBgpPeerName(),
+                     route->vrf()->GetName(),
+                     route->ToString(), true, 0);
+    return peer->ControllerSendMcastRouteCommon(route, true);
+}
+
+bool AgentXmppChannel::ControllerSendMcastRouteDelete(AgentXmppChannel *peer,
+                                                      AgentRoute *route) {
+    if (!peer) return false;
+
+    CONTROLLER_TRACE(RouteExport, peer->GetBgpPeerName(),
+                     route->vrf()->GetName(),
+                     route->ToString(), false, 0);
+
+    return peer->ControllerSendMcastRouteCommon(route, false);
 }
 
 void AgentXmppChannel::UpdateConnectionInfo(xmps::PeerState state) {

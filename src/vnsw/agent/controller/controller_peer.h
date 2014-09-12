@@ -52,36 +52,43 @@ public:
     static void HandleAgentXmppClientChannelEvent(AgentXmppChannel *peer,
                                                   xmps::PeerState state);
     static bool ControllerSendCfgSubscribe(AgentXmppChannel *peer);
-    static bool ControllerSendVmCfgSubscribe(AgentXmppChannel *peer, 
+    static bool ControllerSendVmCfgSubscribe(AgentXmppChannel *peer,
             const boost::uuids::uuid &vm_id, bool subscribe);
     static bool ControllerSendSubscribe(AgentXmppChannel *peer,
                                         VrfEntry *vrf,
                                         bool subscribe);
-    static bool ControllerSendRoute(AgentXmppChannel *peer,
-                                    AgentRoute *route, std::string vn,
-                                    uint32_t label, 
-                                    uint32_t tunnel_bmap,
-                                    const SecurityGroupList *sg_list, 
-                                    bool add_route, 
-                                    Agent::RouteTableType type,
-                                    const PathPreference &path_preference);
-    static bool ControllerSendMcastRoute(AgentXmppChannel *peer,
-                                         AgentRoute *route, bool add_route);
-    static bool ControllerSendV4UnicastRoute(AgentXmppChannel *peer,
-                                             AgentRoute *route, 
-                                             std::string vn,
-                                             const SecurityGroupList *sg_list,
-                                             uint32_t mpls_label,
-                                             uint32_t tunnel_bmap,
-                                             bool add_route,
-                                             const PathPreference
-                                             &path_preference);
-    static bool ControllerSendEvpnRoute(AgentXmppChannel *peer,
-                                        AgentRoute *route, 
-                                        std::string vn,
-                                        uint32_t mpls_label, 
-                                        uint32_t tunnel_bmap, 
-                                        bool add_route);
+    //Add to control-node
+    static bool ControllerSendRouteAdd(AgentXmppChannel *peer,
+                                       AgentRoute *route,
+                                       std::string vn,
+                                       uint32_t label,
+                                       uint32_t tunnel_bmap,
+                                       const SecurityGroupList *sg_list,
+                                       Agent::RouteTableType type,
+                                       const PathPreference &path_preference);
+    static bool ControllerSendEvpnRouteAdd(AgentXmppChannel *peer,
+                                           AgentRoute *route,
+                                           std::string vn,
+                                           uint32_t mpls_label,
+                                           uint32_t tunnel_bmap);
+    static bool ControllerSendMcastRouteAdd(AgentXmppChannel *peer,
+                                            AgentRoute *route);
+    //Deletes to control node
+    static bool ControllerSendRouteDelete(AgentXmppChannel *peer,
+                                          AgentRoute *route,
+                                          std::string vn,
+                                          uint32_t label,
+                                          uint32_t tunnel_bmap,
+                                          const SecurityGroupList *sg_list,
+                                          Agent::RouteTableType type,
+                                          const PathPreference &path_preference);
+    static bool ControllerSendEvpnRouteDelete(AgentXmppChannel *peer,
+                                              AgentRoute *route,
+                                              std::string vn,
+                                              uint32_t mpls_label,
+                                              uint32_t tunnel_bmap);
+    static bool ControllerSendMcastRouteDelete(AgentXmppChannel *peer,
+                                               AgentRoute *route);
 
     // Routines for BGP peer manipulations, lifecycle of bgp peer in xmpp
     // channel is as follows:
@@ -109,7 +116,22 @@ public:
     void increment_unicast_sequence_number() {unicast_sequence_number_++;}
     uint64_t unicast_sequence_number() const {return unicast_sequence_number_;}
 
-   
+    //Common helpers
+    bool ControllerSendV4UnicastRouteCommon(AgentRoute *route,
+                                            std::string vn,
+                                            const SecurityGroupList *sg_list,
+                                            uint32_t mpls_label,
+                                            uint32_t tunnel_bmap,
+                                            const PathPreference &path_preference,
+                                            bool associate);
+    bool ControllerSendEvpnRouteCommon(AgentRoute *route,
+                                       std::string vn,
+                                       uint32_t mpls_label,
+                                       uint32_t tunnel_bmap,
+                                       bool associate);
+    bool ControllerSendMcastRouteCommon(AgentRoute *route,
+                                        bool associate);
+
 protected:
     virtual void WriteReadyCb(const boost::system::error_code &ec);
 

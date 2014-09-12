@@ -561,10 +561,6 @@ bool MulticastRoute::AddChangePath(Agent *agent, AgentPath *path) {
     agent->nexthop_table()->Process(composite_nh_req_);
     nh = static_cast<NextHop *>(agent->nexthop_table()->
             FindActiveEntry(composite_nh_req_.key.get()));
-    if (nh == NULL) {
-        nh = static_cast<NextHop *>(agent->nexthop_table()->
-                            FindActiveEntry(composite_nh_req_.key.get()));
-    }
     assert(nh);
     if (nh && (nh->GetType() == NextHop::COMPOSITE)) {
         const CompositeNH *cnh = static_cast<const CompositeNH *>(nh);

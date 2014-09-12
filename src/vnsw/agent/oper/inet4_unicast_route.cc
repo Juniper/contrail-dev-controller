@@ -29,6 +29,10 @@ Inet4UnicastRouteKey::AllocRouteEntry(VrfEntry *vrf, bool is_multicast) const {
     return static_cast<AgentRoute *>(entry);
 }
 
+AgentRouteKey *Inet4UnicastRouteKey::Clone() const {
+    return (new Inet4UnicastRouteKey(peer_, vrf_name_, dip_, plen_));
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // Inet4UnicastAgentRouteTable functions
 /////////////////////////////////////////////////////////////////////////////
@@ -337,14 +341,16 @@ bool Inet4UnicastRouteEntry::EcmpDeletePath(AgentPath *path) {
     return true;
 }
 
-bool Inet4UnicastRouteEntry::ReComputePaths(AgentPath *path, bool del) {
+bool Inet4UnicastRouteEntry::ReComputePathAdd(AgentPath *path) {
     // ECMP path are managed by route module. Update ECMP path with
     // addition of new path
-    if (del) {
-        return EcmpDeletePath(path);
-    }
-
     return EcmpAddPath(path);
+}
+
+bool Inet4UnicastRouteEntry::ReComputePathDeletion(AgentPath *path) {
+    // ECMP path are managed by route module. Update ECMP path with
+    // deletion of new path
+    return EcmpDeletePath(path);
 }
 
 // Handle add/update of a path in route. 
@@ -1096,12 +1102,12 @@ Inet4UnicastAgentRouteTable::AddSubnetRoute(const string &vrf_name,
                                             uint8_t plen,
                                             const string &vn_name,
                                             uint32_t vxlan_id) {
-    Agent *agent = Agent::GetInstance();
+    Agent *agent_ptr = agent();
     struct ether_addr flood_mac;
 
     memcpy(&flood_mac, ether_aton("ff:ff:ff:ff:ff:ff"),
            sizeof(struct ether_addr));
-    AgentRoute *route = Layer2AgentRouteTable::FindRoute(agent, vrf_name,
+    AgentRoute *route = Layer2AgentRouteTable::FindRoute(agent_ptr, vrf_name,
                                                          flood_mac);
 
     DBRequest nh_req(DBRequest::DB_ENTRY_ADD_CHANGE);
@@ -1116,7 +1122,7 @@ Inet4UnicastAgentRouteTable::AddSubnetRoute(const string &vrf_name,
                 continue;
             }
             NextHopKey *evpn_peer_key =
-                static_cast<NextHopKey *>((path->nexthop(agent)->
+                static_cast<NextHopKey *>((path->nexthop(agent_ptr)->
                                            GetDBRequestKey()).release());
             DBRequest nh_req(DBRequest::DB_ENTRY_ADD_CHANGE);
             nh_req.key.reset(evpn_peer_key);
@@ -1128,7 +1134,7 @@ Inet4UnicastAgentRouteTable::AddSubnetRoute(const string &vrf_name,
             req.key.reset(new Inet4UnicastRouteKey(path->peer(),
                                                    vrf_name, dst_addr, plen));
             req.data.reset(new SubnetRoute(vn_name, vxlan_id, nh_req));
-            UnicastTableEnqueue(Agent::GetInstance(), &req);
+            UnicastTableProcess(agent_ptr, vrf_name, req);
         }
     }
 
@@ -1139,8 +1145,8 @@ Inet4UnicastAgentRouteTable::AddSubnetRoute(const string &vrf_name,
 
     DBRequest req;
     req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
-    req.key.reset(new Inet4UnicastRouteKey(Agent::GetInstance()->local_peer(),
+    req.key.reset(new Inet4UnicastRouteKey(agent_ptr->local_peer(),
                                             vrf_name, dst_addr, plen));
     req.data.reset(new SubnetRoute(vn_name, vxlan_id, dscd_nh_req));
-    UnicastTableEnqueue(Agent::GetInstance(), &req);
+    UnicastTableProcess(agent_ptr, vrf_name, req);
 }

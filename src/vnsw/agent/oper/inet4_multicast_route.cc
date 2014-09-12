@@ -134,6 +134,10 @@ Inet4MulticastRouteKey::AllocRouteEntry(VrfEntry *vrf, bool is_multicast) const
     return static_cast<AgentRoute *>(entry);
 }
 
+AgentRouteKey *Inet4MulticastRouteKey::Clone() const {
+    return (new Inet4MulticastRouteKey(vrf_name_, dip_, sip_));
+}
+
 string Inet4MulticastRouteKey::ToString() const {
     ostringstream str;
     str << "Group:";

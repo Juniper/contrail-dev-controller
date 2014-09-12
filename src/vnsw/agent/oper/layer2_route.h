@@ -113,8 +113,8 @@ public:
     }
     virtual bool DBEntrySandesh(Sandesh *sresp, bool stale) const;
     virtual uint32_t GetActiveLabel() const;
-    virtual bool ReComputePaths(AgentPath *path, bool del);
-    virtual bool ReComputeMulticastPaths(AgentPath *path, bool del);
+    virtual bool ReComputePathDeletion(AgentPath *path);
+    virtual bool ReComputePathAdd(AgentPath *path);
     virtual void DeletePath(const AgentRouteKey *key);
     virtual AgentPath *FindPathUsingKey(const AgentRouteKey *key);
 
@@ -123,6 +123,8 @@ public:
     const uint32_t GetVmIpPlen() const {return plen_;}
 
 private:
+    bool ReComputeMulticastPaths(AgentPath *path, bool del);
+
     struct ether_addr mac_;
     Ip4Address vm_ip_;
     uint32_t plen_;

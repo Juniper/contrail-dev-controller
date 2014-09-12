@@ -123,7 +123,7 @@ void MulticastHandler::HandleFamilyConfig(const VnEntry *vn)
             (*it)->SetLayer2Forwarding(new_layer2_forwarding);
             if (IS_BCAST_MCAST((*it)->GetGroupAddress())) { 
                 Layer2AgentRouteTable::DeleteBroadcastReq(agent_->
-                                                          multicast_peer(),
+                                                          local_vm_peer(),
                                                           (*it)->vrf_name(), 0);
             }
         }
@@ -201,23 +201,6 @@ void MulticastHandler::ModifyVmInterface(DBTablePartBase *partition,
 }
 
 /*
- * Delete the old mpls label and add the new mpls label if it is non zero
- * Delete route if group is non subnet broadcast, subnet bcast is deleted 
- * via IPAM going off
- */
-void MulticastHandler::DeleteRouteandMPLS(MulticastGroupObject *obj)
-{
-    //delete mcast routes, subnet bcast gets deleted via vn delete
-    if (IS_BCAST_MCAST(obj->GetGroupAddress())) { 
-        obj->FlushAllPeerInfo(agent_,
-                              agent_->multicast_peer(),
-                              INVALID_PEER_IDENTIFIER);
-    }
-    MCTRACE(Log, "delete route ", obj->vrf_name(),
-            obj->GetGroupAddress().to_string(), 0);
-}
-
-/*
  * Delete VM interface
  * Traverse the multicast obj list of which this VM is a member.
  * Delete the VM from them and check if local VM list size is zero.
@@ -248,7 +231,9 @@ void MulticastHandler::DeleteVmInterface(const Interface *intf)
             MCTRACE(Info, "Del route for multicast address",
                     vm_itf->ip_addr().to_string());
             //Time to delete route(for mcast address) and mpls
-            DeleteRouteandMPLS(*it);
+            MulticastHandler::GetInstance()->
+                DeleteBroadcast(agent_->local_vm_peer(),
+                                (*it)->vrf_name_, 0);
             /* delete mcast object */
             DeleteMulticastObject((*it)->vrf_name_, (*it)->grp_address_);
         }
@@ -352,6 +337,7 @@ void MulticastHandler::TriggerLocalRouteChange(MulticastGroupObject *obj,
 
 void MulticastHandler::TriggerRemoteRouteChange(MulticastGroupObject *obj,
                                                 const Peer *peer,
+                                                const string &vrf_name,
                                                 const TunnelOlist &olist,
                                                 uint64_t peer_identifier,
                                                 bool delete_op,
@@ -359,11 +345,8 @@ void MulticastHandler::TriggerRemoteRouteChange(MulticastGroupObject *obj,
                                                 uint32_t label,
                                                 bool fabric,
                                                 uint32_t ethernet_tag) {
-    if (obj->layer2_forwarding() == false) {
-        return;
-    }
-
-    uint64_t obj_peer_identifier = obj->peer_identifier();
+    uint64_t obj_peer_identifier = obj ? obj->peer_identifier()
+        : ControllerPeerPath::kInvalidPeerIdentifier;
 
     // Peer identifier cases
     // if its a delete operation -
@@ -379,26 +362,27 @@ void MulticastHandler::TriggerRemoteRouteChange(MulticastGroupObject *obj,
     // if its internal delete then peer_identifier will be 0xFFFFFFFF;
     // if external delete(via control node) then its stale cleanup so delete
     // only when local peer identifier is less than global multicast sequence.
-    if (delete_op && peer_identifier <= obj_peer_identifier) {
+    if (delete_op) {
+        if ((peer_identifier != ControllerPeerPath::kInvalidPeerIdentifier) &&
+            (peer_identifier <= obj_peer_identifier))
+            return;
+
+        // After resetting tunnel and mpls label return if it was a delete call,
+        // dont update peer_identifier. Let it get updated via update operation only
+        MCTRACE(Log, "delete bcast path from remote peer", vrf_name,
+                "255.255.255.255", 0);
+        Layer2AgentRouteTable::DeleteBroadcastReq(peer, vrf_name,
+                                                  ethernet_tag);
+        ComponentNHKeyList component_nh_key_list; //dummy list
+        RebakeSubnetRoute(peer, vrf_name, 0, ethernet_tag,
+                          obj ? obj->GetVnName() : "",
+                          true, component_nh_key_list);
         return;
     }
 
     // - Update operation with lower sequence number sent compared to
     // local identifier, ignore
-    if (!delete_op && peer_identifier < obj_peer_identifier) {
-        return;
-    }
-
-    // After resetting tunnel and mpls label return if it was a delete call,
-    // dont update peer_identifier. Let it get updated via update operation only
-    if (delete_op) {
-        MCTRACE(Log, "delete bcast path from remote peer", obj->vrf_name(),
-                "255.255.255.255", 0);
-        Layer2AgentRouteTable::DeleteBroadcastReq(peer, obj->vrf_name(),
-                                                  ethernet_tag);
-        ComponentNHKeyList component_nh_key_list; //dummy list
-        RebakeSubnetRoute(peer, obj->vrf_name(), 0, obj->vxlan_id(),
-                          obj->GetVnName(), true, component_nh_key_list);
+    if (peer_identifier < obj_peer_identifier) {
         return;
     }
 
@@ -567,12 +551,19 @@ void MulticastHandler::ModifyFabricMembers(const Peer *peer,
     MCTRACE(Log, "XMPP call(edge replicate) multicast handler ", vrf_name,
             grp.to_string(), label);
 
-    if (obj == NULL) {
+    bool delete_op = false;
+
+    //Invalid peer identifier signifies delete.
+    //If add operation, obj should exist, else return.
+    if (peer_identifier == ControllerPeerPath::kInvalidPeerIdentifier) {
+        delete_op = true;
+    } else if (obj == NULL) {
         return;
     }
 
-    MulticastHandler::GetInstance()->TriggerRemoteRouteChange(obj, peer, olist,
-                                     peer_identifier, false, Composite::FABRIC,
+    MulticastHandler::GetInstance()->TriggerRemoteRouteChange(obj, peer,
+                                     vrf_name, olist, peer_identifier,
+                                     delete_op, Composite::FABRIC,
                                      label, true, 0);
     MCTRACE(Log, "Add fabric grp label ", vrf_name, grp.to_string(), label);
 }
@@ -602,7 +593,7 @@ void MulticastHandler::ModifyEvpnMembers(const Peer *peer,
         return;
     }
 
-    MulticastHandler::GetInstance()->TriggerRemoteRouteChange(obj, peer, olist,
+    MulticastHandler::GetInstance()->TriggerRemoteRouteChange(obj, peer, vrf_name, olist,
                                      peer_identifier, false, Composite::EVPN,
                                      obj->evpn_mpls_label(), false, ethernet_tag);
     MCTRACE(Log, "Add EVPN TOR Olist ", vrf_name, grp.to_string(), 0);
@@ -647,16 +638,32 @@ bool MulticastHandler::FlushPeerInfo(uint64_t peer_sequence) {
 void MulticastHandler::Shutdown() {
     const Agent *agent = MulticastHandler::GetInstance()->agent();
     //Delete all route mpls and trigger cnh change
+
+    struct ether_addr flood_mac;
+
+    memcpy(&flood_mac, ether_aton("ff:ff:ff:ff:ff:ff"),
+           sizeof(struct ether_addr));
     for (std::set<MulticastGroupObject *>::iterator it =
          MulticastHandler::GetInstance()->GetMulticastObjList().begin(); 
-         it != MulticastHandler::GetInstance()->GetMulticastObjList().end(); it++) {
-        //Delete the tunnel OLIST
-        (*it)->FlushAllPeerInfo(agent,
-                                agent->multicast_peer(),
-                                INVALID_PEER_IDENTIFIER);
-        //Delete the label and route
-        MulticastHandler::GetInstance()->DeleteRouteandMPLS(*it);
+         it != MulticastHandler::GetInstance()->GetMulticastObjList().end();
+         it++) {
+        MulticastGroupObject *obj = (*it);
+        AgentRoute *route = Layer2AgentRouteTable::FindRoute(agent,
+                                                             obj->vrf_name(),
+                                                             flood_mac);
+        if (route == NULL)
+            return;
+
+        for(Route::PathList::iterator it = route->GetPathList().begin();
+            it != route->GetPathList().end(); it++) {
+            const AgentPath *path =
+                static_cast<const AgentPath *>(it.operator->());
+            //Delete the tunnel OLIST
+            (obj)->FlushAllPeerInfo(agent,
+                                    path->peer(),
+                                    INVALID_PEER_IDENTIFIER);
+        }
         //Delete the multicast object
-        delete (*it);
+        delete (obj);
     }
 }

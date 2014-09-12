@@ -167,7 +167,9 @@ void Layer2AgentRouteTable::AddLayer2BroadcastRoute(const Peer *peer,
     req.oper = DBRequest::DB_ENTRY_ADD_CHANGE;
 
     req.key.reset(new Layer2RouteKey(peer, vrf_name, ethernet_tag));
-    req.data.reset(new MulticastRoute(vn_name, label, vxlan_id, nh_req));
+    req.data.reset(new MulticastRoute(vn_name, label,
+                                      ((peer->GetType() == Peer::BGP_PEER) ?
+                                      ethernet_tag : vxlan_id), nh_req));
     Layer2TableEnqueue(Agent::GetInstance(), &req);
 }
 
@@ -261,17 +263,16 @@ AgentPath *Layer2RouteEntry::FindPathUsingKey(const AgentRouteKey *key) {
 void Layer2RouteEntry::DeletePath(const AgentRouteKey *key) {
     const Layer2RouteKey *l2_rt_key =
         static_cast<const Layer2RouteKey *>(key);
-    Route::PathList::iterator it = GetPathList().begin();
-    while (it != GetPathList().end()) {
+    Route::PathList::iterator it;
+    for (it = GetPathList().begin(); it != GetPathList().end();
+         it++) {
         AgentPath *path = static_cast<AgentPath *>(it.operator->());
         if (key->peer() == path->peer() &&
-            ((path->tunnel_type() != TunnelType::VXLAN) ||
-            (path->peer()->GetType() != Peer::BGP_PEER) || 
+            ((path->peer()->GetType() != Peer::BGP_PEER) ||
             (path->vxlan_id() == l2_rt_key->ethernet_tag()))) {
             DeletePathInternal(path);
             return;
         }
-        it++;
     }
 }
 
@@ -299,9 +300,8 @@ bool Layer2RouteEntry::ReComputeMulticastPaths(AgentPath *path, bool del) {
     Agent *agent =
         (static_cast<Inet4UnicastAgentRouteTable *> (get_table()))->agent();
     std::vector<AgentPath *> delete_paths;
-    bool delete_all = false;
     if (del && (path->peer() == agent->multicast_peer()))
-        delete_all = true;
+        return false;
 
     //Possible paths:
     //EVPN path - can be from multiple peers.
@@ -322,16 +322,6 @@ bool Layer2RouteEntry::ReComputeMulticastPaths(AgentPath *path, bool del) {
         AgentPath *it_path =
             static_cast<AgentPath *>(it.operator->());
         //Handle deletions
-        if (delete_all) {
-            //Since the delete is issued for multicast_peer,
-            //delete all other paths as it is an indication remove
-            //route.
-            if (it_path->peer() != agent->multicast_peer()) {
-                delete_paths.push_back(it_path);
-            }
-            continue;
-        }
-
         if (del && (path->peer() == it_path->peer())) {
             continue;
         }
@@ -351,16 +341,12 @@ bool Layer2RouteEntry::ReComputeMulticastPaths(AgentPath *path, bool del) {
         }
     }
 
-    if (delete_all) {
-        for (std::vector<AgentPath *>::iterator it = delete_paths.begin();
-             it != delete_paths.end(); it++) {
-            //If multicast peer is the first request received for deletion,
-            //pick the mpls label fro BGP peer evpn paths and delete explicitly.
-            if ((*it)->peer()->GetType() == Peer::BGP_PEER) {
-                MplsLabel::DeleteReq((*it)->label());
-            }
-            RemovePath(*it);
-        }
+    //all paths are gone so delete multicast_peer path as well
+    if ((local_peer_path == NULL) &&
+        (evpn_peer_path == NULL) &&
+        (fabric_peer_path == NULL) &&
+        (multicast_peer_path != NULL)) {
+        RemovePath(multicast_peer_path);
         return true;
     }
 
@@ -492,9 +478,18 @@ bool Layer2RouteEntry::DBEntrySandesh(Sandesh *sresp, bool stale) const {
     return true;
 }
 
-bool Layer2RouteEntry::ReComputePaths(AgentPath *path, bool del) {
+bool Layer2RouteEntry::ReComputePathAdd(AgentPath *path) {
     if (is_multicast()) {
-        return ReComputeMulticastPaths(path, del);
+        //evaluate add of path
+        return ReComputeMulticastPaths(path, false);
+    }
+    return false;
+}
+
+bool Layer2RouteEntry::ReComputePathDeletion(AgentPath *path) {
+    if (is_multicast()) {
+        //evaluate delete of path
+        return ReComputeMulticastPaths(path, true);
     }
     return false;
 }
