@@ -28,6 +28,7 @@ import re
 from cfgm_common import vnc_cpu_info
 import pycassa
 from pycassa.system_manager import *
+from pycassa.pool import AllServersUnavailable
 
 import cfgm_common as common
 from cfgm_common.exceptions import *
@@ -2703,6 +2704,9 @@ class SchemaTransformer(object):
         if virtual_network:
             del virtual_network.policies[policy_name]
             self.current_network_set.add(network_name)
+        for pol in NetworkPolicyST.values():
+            if policy_name in pol.policies:
+                self.current_network_set |= pol.networks_back_ref
     # end delete_virtual_network_network_policy
 
     def delete_project_virtual_network(self, idents, meta):
@@ -3355,6 +3359,18 @@ class SchemaTransformer(object):
             vmi.recreate_vrf_assign_table()
     # end process_poll_result
 
+    def _log_exceptions(self, func):
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except AllServersUnavailable:
+                ConnectionState.update(conn_type = ConnectionType.DATABASE,
+                    name = 'Cassandra', status = ConnectionStatus.DOWN,
+                    message = '', server_addrs = self._args.cassandra_server_list)
+                raise
+        return wrapper
+    # end _log_exceptions
+
     def _cassandra_init(self):
         result_dict = {}
 
@@ -3431,6 +3447,14 @@ class SchemaTransformer(object):
             self._SERVICE_CHAIN_CF]
         ServiceChain._service_chain_uuid_cf = result_dict[
             self._SERVICE_CHAIN_UUID_CF]
+
+        pycassa.ColumnFamily.get = self._log_exceptions(pycassa.ColumnFamily.get)
+        pycassa.ColumnFamily.xget = self._log_exceptions(pycassa.ColumnFamily.xget)
+        pycassa.ColumnFamily.get_range = self._log_exceptions(pycassa.ColumnFamily.get_range)
+        pycassa.ColumnFamily.insert = self._log_exceptions(pycassa.ColumnFamily.insert)
+        pycassa.ColumnFamily.remove = self._log_exceptions(pycassa.ColumnFamily.remove)
+        pycassa.batch.Mutator.send = self._log_exceptions(pycassa.batch.Mutator.send)
+
     # end _cassandra_init
 
     def sandesh_ri_build(self, vn_name, ri_name):

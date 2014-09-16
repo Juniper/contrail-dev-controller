@@ -143,42 +143,47 @@ void RouteExport::UnicastNotify(AgentXmppChannel *bgp_xmpp_peer,
                 //movement of tunnelt type from vxlan to mpls should result in
                 //withdraw and re add of route.
                 bool withdraw = false;
-                uint32_t withdraw_label = state->label_;
+                uint32_t withdraw_label = 0;
+                TunnelType::TypeBmap tunnel_type_to_be_withdrawn =
+                    TunnelType::AllType();
                 if (state->tunnel_type_ == TunnelType::VXLAN) {
                     //Vxlan ID changed or tunnel type is no more VXLAN
                     if ((path->GetActiveLabel() != state->label_) ||
                         (TunnelType::ComputeType(path->GetTunnelBmap()) !=
                          TunnelType::VXLAN)) {
                         withdraw = true;
+                        withdraw_label = state->label_;
+                        tunnel_type_to_be_withdrawn = TunnelType::VxlanType();
                     }
                 } else {
                     if (TunnelType::ComputeType(path->GetTunnelBmap()) ==
                         TunnelType::VXLAN) {
                         withdraw = true;
                         withdraw_label = 0;
+                        tunnel_type_to_be_withdrawn = TunnelType::MplsType();
                     }
                 }
 
                 if (withdraw) {
                     state->exported_ =
-                     AgentXmppChannel::ControllerSendRouteDelete(bgp_xmpp_peer,
+                        AgentXmppChannel::ControllerSendRouteDelete(bgp_xmpp_peer,
                              static_cast<AgentRoute * >(route), state->vn_,
-                             withdraw_label, path->GetTunnelBmap(),
+                             withdraw_label, tunnel_type_to_be_withdrawn,
                              &path->sg_list(), type,
                              state->path_preference_);
                 }
             }
             state->Update(path);
             state->exported_ = 
-                AgentXmppChannel::ControllerSendRouteAdd(bgp_xmpp_peer,
-                        static_cast<AgentRoute * >(route), state->vn_,
+                AgentXmppChannel::ControllerSendRouteAdd(bgp_xmpp_peer, 
+                        static_cast<AgentRoute * >(route), state->vn_, 
                         state->label_, path->GetTunnelBmap(),
                         &path->sg_list(), type, state->path_preference_);
         }
     } else {
         if (state->exported_ == true) {
-            AgentXmppChannel::ControllerSendRouteDelete(bgp_xmpp_peer,
-                    static_cast<AgentRoute *>(route), state->vn_,
+            AgentXmppChannel::ControllerSendRouteDelete(bgp_xmpp_peer, 
+                    static_cast<AgentRoute *>(route), state->vn_, 
                     (state->tunnel_type_ == TunnelType::VXLAN ?
                      state->label_ : 0),
                     TunnelType::AllType(), NULL,
@@ -198,7 +203,12 @@ done:
 static bool RouteCanDissociate(const AgentRoute *route) {
     bool can_dissociate = route->IsDeleted();
     if (route->is_multicast()) {
-        const NextHop *nh = route->GetActiveNextHop();
+        Agent *agent = static_cast<AgentRouteTable*>(route->get_table())->
+            agent();
+        const AgentPath *active_path = route->FindPath(agent->local_vm_peer());
+        if (active_path == NULL)
+            return true;
+        const NextHop *nh = active_path ? active_path->nexthop(agent) : NULL;
         const CompositeNH *cnh = static_cast<const CompositeNH *>(nh);
         if (cnh && cnh->ComponentNHCount() == 0)
             return true;
@@ -214,7 +224,6 @@ void RouteExport::MulticastNotify(AgentXmppChannel *bgp_xmpp_peer,
     State *state = static_cast<State *>(route->GetState(partition->parent(), id_));
     bool route_can_be_dissociated = RouteCanDissociate(route);
     const Agent *agent = bgp_xmpp_peer->agent();
-
     if (route_can_be_dissociated && (state != NULL)) {
         if ((state->exported_ == true) && !(agent->simulate_evpn_tor())) {
             AgentXmppChannel::ControllerSendMcastRouteDelete(bgp_xmpp_peer,

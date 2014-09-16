@@ -18,6 +18,7 @@
 #include <oper/mirror_table.h>
 #include <oper/nexthop.h>
 #include <pkt/pkt_trace.h>
+#include <pkt/packet_buffer.h>
 
 #include "vr_defs.h"
 
@@ -31,7 +32,7 @@
 #define VLAN_PROTOCOL      0x8100       
 
 struct agent_hdr;
-class TapInterface;
+class PacketBuffer;
 
 struct InterTaskMsg {
     InterTaskMsg(uint16_t command): cmd(command) {}
@@ -88,8 +89,13 @@ struct AgentHdr {
     };
 
     AgentHdr() :
-        ifindex(-1), vrf(-1), cmd(-1), cmd_param(-1), nh(-1), flow_index(0),
+        ifindex(-1), vrf(-1), cmd(-1), cmd_param(-1), nh(-1), flow_index(-1),
         mtu(0) {}
+
+    AgentHdr(uint16_t ifindex_p, uint16_t vrf_p, uint16_t cmd_p) :
+        ifindex(ifindex_p), vrf(vrf_p), cmd(cmd_p), cmd_param(-1), nh(-1),
+        flow_index(-1), mtu(0) {}
+
     ~AgentHdr() {}
 
     // Fields from agent_hdr
@@ -172,6 +178,7 @@ public:
         ICMP,
         DIAG,
         ICMP_ERROR,
+        RX_PACKET,
         MAX_MODULES
     };
 
@@ -192,23 +199,16 @@ public:
         void PktQThresholdExceeded(PktModuleName mod);
     };
 
-    PktHandler(Agent *, const std::string &, boost::asio::io_service &, bool);
+    PktHandler(Agent *, PktModule *pkt_module);
     virtual ~PktHandler();
-
-    void Init();
-    void Shutdown();
-    void IoShutdown();
-    void CreateInterfaces(const std::string &if_name);
 
     void Register(PktModuleName type, RcvQueueFunc cb);
 
-    const unsigned char *mac_address();
-    const TapInterface *tap_interface() { return tap_interface_.get(); }
-
-    void Send(uint8_t *msg, std::size_t len, PktModuleName mod);
+    void Send(const AgentHdr &hdr, PacketBufferPtr buff);
 
     // identify pkt type and send to the registered handler
-    void HandleRcvPkt(uint8_t*, std::size_t, std::size_t);  
+    void HandleRcvPkt(const AgentHdr &hdr, uint8_t *ptr, uint32_t offset,
+                      std::size_t data_len, std::size_t max_len);
     void SendMessage(PktModuleName mod, InterTaskMsg *msg); 
 
     bool IsGwPacket(const Interface *intf, uint32_t dst_ip);
@@ -228,10 +228,11 @@ public:
     }
 
     uint32_t EncapHeaderLen() const;
+    Agent *agent() const { return agent_; }
+    PktModule *pkt_module() const { return pkt_module_; }
 private:
     friend bool ::CallPktParse(PktInfo *pkt_info, uint8_t *ptr, int len);
 
-    uint8_t *ParseAgentHdr(PktInfo *pkt_info);
     uint8_t *ParseIpPacket(PktInfo *pkt_info, PktType::Type &pkt_type,
                            uint8_t *ptr);
     uint8_t *ParseUserPkt(PktInfo *pkt_info, Interface *intf,
@@ -248,7 +249,7 @@ private:
     boost::array<PktTrace, MAX_MODULES> pkt_trace_;
 
     Agent *agent_;
-    boost::scoped_ptr<TapInterface> tap_interface_;
+    PktModule *pkt_module_;
 
     DISALLOW_COPY_AND_ASSIGN(PktHandler);
 };
