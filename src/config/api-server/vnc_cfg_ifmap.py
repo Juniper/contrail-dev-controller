@@ -24,6 +24,7 @@ import socket
 import errno
 import subprocess
 import netaddr
+from netaddr import IPNetwork
 from bitarray import bitarray
 
 from cfgm_common import ignore_exceptions
@@ -1298,6 +1299,7 @@ class VncKombuClient(object):
 class VncZkClient(object):
     _SUBNET_PATH = "/api-server/subnets"
     _FQ_NAME_TO_UUID_PATH = "/fq-name-to-uuid"
+    _MAX_SUBNET_ADDR_ALLOC = 65535
 
     def __init__(self, instance_id, zk_server_ip, reset_config, db_prefix):
         self._db_prefix = db_prefix
@@ -1334,7 +1336,8 @@ class VncZkClient(object):
             self._subnet_allocators[subnet] = IndexAllocator(
                 self._zk_client, self._subnet_path+'/'+subnet+'/',
                 size=0, start_idx=0, reverse=not addr_from_start,
-                alloc_list=subnet_alloc_list)
+                alloc_list=subnet_alloc_list,
+		max_alloc=self._MAX_SUBNET_ADDR_ALLOC)
     # end create_subnet_allocator
 
     def delete_subnet_allocator(self, subnet):
@@ -1527,7 +1530,36 @@ class VncDbClient(object):
             return True
 
         return False
-    # end
+    # end match_uuid
+
+    def _update_subnet_uuid(self, vn_dict):
+        vn_uuid = vn_dict['uuid']
+
+        def _get_subnet_key(subnet):
+            pfx = subnet['subnet']['ip_prefix']
+            pfx_len = subnet['subnet']['ip_prefix_len']
+
+            network = IPNetwork('%s/%s' % (pfx, pfx_len))
+            return '%s %s/%s' % (vn_uuid, str(network.ip), pfx_len)
+
+        ipam_refs = vn_dict['network_ipam_refs']
+        updated = False
+        for ipam in ipam_refs:
+            vnsn = ipam['attr']
+            subnets = vnsn['ipam_subnets']
+            for subnet in subnets:
+                if subnet.get('subnet_uuid'):
+                    continue
+
+                subnet_key = _get_subnet_key(subnet)
+                subnet_uuid = self.useragent_kv_retrieve(subnet_key)
+                subnet['subnet_uuid'] = subnet_uuid
+                if not updated:
+                    updated = True
+
+        if updated:
+            self._cassandra_db._cassandra_virtual_network_update(vn_uuid, vn_dict)
+    # end _update_subnet_uuid
 
     def _dbe_resync(self, obj_uuid, obj_cols):
         obj_type = None
@@ -1546,6 +1578,9 @@ class VncDbClient(object):
                                                    'logical_router',
                                                    router['uuid'])
 
+            if (obj_type == 'virtual_network' and
+                'network_ipam_refs' in obj_dict):
+                self._update_subnet_uuid(obj_dict)
         except Exception as e:
             self.config_object_error(
                 obj_uuid, None, obj_type, 'dbe_resync:cassandra_read', str(e))

@@ -154,7 +154,6 @@ class Subnet(object):
                  dns_nameservers=None,
                  alloc_pool_list=None,
                  addr_from_start=False):
-        self._version = 0
 
         """
         print 'Name = %s, prefix = %s, len = %s, gw = %s, db_conn = %s' \
@@ -226,6 +225,7 @@ class Subnet(object):
 
         self._name = name
         self._network = network
+        self._version = network.version
         self._exclude = exclude
         self.gw_ip = gw_ip
         self._alloc_pool_list = alloc_pool_list
@@ -418,15 +418,7 @@ class AddrMgmt(object):
     # end net_create_notify
 
     def net_update_req(self, vn_fq_name, db_vn_dict, req_vn_dict, obj_uuid=None):
-        # ideally 3 way sync/audit needed here. DB to what we is in subnet_objs
-        # DB to what is in request. To simplify blow away subnet_objs and do
-        # sync only from DB to request.
         vn_fq_name_str = ':'.join(vn_fq_name)
-
-        try:
-            del self._subnet_objs[vn_fq_name_str]
-        except KeyError:
-            pass
 
         db_subnet_dicts = self._get_subnet_dicts(vn_fq_name, db_vn_dict)
         req_subnet_dicts = self._get_subnet_dicts(vn_fq_name, req_vn_dict)
@@ -454,7 +446,7 @@ class AddrMgmt(object):
                     raise AddrMgmtSubnetInvalid(vn_fq_name_str, key)
 
                 req_alloc_list = req_subnet['allocation_pools'] or []
-                db_alloc_list = db_subnet['allocation_pools']  or []
+                db_alloc_list = db_subnet['allocation_pools'] or []
                 if (len(req_alloc_list) != len(db_alloc_list)):
                     raise AddrMgmtSubnetInvalid(vn_fq_name_str, key)
 
@@ -481,11 +473,6 @@ class AddrMgmt(object):
 
         vn_dict = result
         vn_fq_name_str = ':'.join(vn_dict['fq_name'])
-        try:
-            del self._subnet_objs[vn_fq_name_str]
-        except KeyError:
-            pass
-
         self._create_subnet_objs(vn_fq_name_str, vn_dict)
     # end net_update_notify
 
@@ -596,6 +583,9 @@ class AddrMgmt(object):
         for ipam_ref in ipam_refs:
             vnsn_data = ipam_ref['attr']
             ipam_subnets = vnsn_data['ipam_subnets']
+            l2_mode = False
+            l2_l3_mode = False
+            link_local_network = IPNetwork('169.254.0.0/16')
             for ipam_subnet in ipam_subnets:
                 subnet_dict = copy.deepcopy(ipam_subnet['subnet'])
                 prefix = subnet_dict['ip_prefix']
@@ -627,11 +617,27 @@ class AddrMgmt(object):
                         err_msg = "Invalid gateway Ip address:%s" \
                             %(gw)
                         return False, err_msg
-                    if gw_ip < IPAddress(network.first + 1) or gw_ip > IPAddress(network.last - 1):
+                    # gateway being 0.0.0.0 or 169.254.0.0/16 results in
+                    # vn being spawned in l2 forwarding mode
+                    if gw_ip == IPAddress('0.0.0.0') or \
+                       (gw_ip >= IPAddress(link_local_network.first) and \
+                       gw_ip <= IPAddress(link_local_network.last)):
+                        l2_mode = True
+                    elif gw_ip < IPAddress(network.first + 1) or \
+                         gw_ip > IPAddress(network.last - 1):
                         err_msg = "gateway Ip %s out of cidr: %s" \
                             %(gw, subnet_name)
                         return False, err_msg
-                
+                    else:
+                        l2_l3_mode = True
+
+                # Either all subnet will have gateway as required for l2 mode
+                # or for l2_l3 mode. Both can not co-exist as vn forwarding mode
+                # becomes ambiguous
+                if l2_mode and l2_l3_mode:
+                    err_msg = "gateway Ip of configured subnets conflicting " \
+                        "in deciding forwarding mode for virtual network."
+                    return False, err_msg
         return True, ""
     # end net_check_subnet
 
@@ -709,7 +715,8 @@ class AddrMgmt(object):
 
     # allocate an IP address for given virtual network
     # we use the first available subnet unless provided
-    def ip_alloc_req(self, vn_fq_name, sub=None, asked_ip_addr=None):
+    def ip_alloc_req(self, vn_fq_name, sub=None, asked_ip_addr=None, 
+                     asked_ip_version=4):
         vn_fq_name_str = ':'.join(vn_fq_name)
         subnet_dicts = self._get_subnet_dicts(vn_fq_name)
 
@@ -743,6 +750,8 @@ class AddrMgmt(object):
                                     addr_from_start = subnet_dict['addr_start'])
                 self._subnet_objs[vn_fq_name_str][subnet_name] = subnet_obj
 
+            if asked_ip_version != subnet_obj.get_version():
+                continue
             if asked_ip_addr and not subnet_obj.ip_belongs(asked_ip_addr):
                 continue
             try:

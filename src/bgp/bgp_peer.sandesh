@@ -73,6 +73,7 @@ struct BgpNeighborResp {
     33: peer_info.PeerUpdateStats tx_update_stats;
     34: peer_info.PeerSocketStats rx_socket_stats;
     35: peer_info.PeerSocketStats tx_socket_stats;
+    42: peer_info.PeerRxErrorStats rx_error_stats;
 }
 
 response sandesh BgpNeighborListResp {
@@ -350,16 +351,16 @@ request sandesh ShowBgpServerReq {
 }
 
 response sandesh ShowBgpServerResp {
-    1: io.TcpServerSocketStats rx_socket_stats;
-    2: io.TcpServerSocketStats tx_socket_stats;
+    1: io.SocketIOStats rx_socket_stats;
+    2: io.SocketIOStats tx_socket_stats;
 }
 
 request sandesh ShowXmppServerReq {
 }
 
 response sandesh ShowXmppServerResp {
-    1: io.TcpServerSocketStats rx_socket_stats;
-    2: io.TcpServerSocketStats tx_socket_stats;
+    1: io.SocketIOStats rx_socket_stats;
+    2: io.SocketIOStats tx_socket_stats;
 }
 
 response sandesh ClearComputeNodeConnectionResp {
