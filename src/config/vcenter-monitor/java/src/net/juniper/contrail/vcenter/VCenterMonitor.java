@@ -287,15 +287,21 @@ class VCenterMonitorTask implements Runnable {
         SortedMap<String, VncVirtualNetworkInfo> vncVirtualNetworkInfos =
                 vncDB.populateVirtualNetworkInfo();
         s_logger.info("VNs vmware size: " + vmwareVirtualNetworkInfos.size() + ", vnc size: " + vncVirtualNetworkInfos.size());
-        Iterator<Entry<String, VmwareVirtualNetworkInfo>> vmwareIter = 
-                vmwareVirtualNetworkInfos.entrySet().iterator();
+
+        Iterator<Entry<String, VmwareVirtualNetworkInfo>> vmwareIter = null;
+        if (vmwareVirtualNetworkInfos != null && vmwareVirtualNetworkInfos.size() > 0 && vmwareVirtualNetworkInfos.entrySet() != null) {
+            vmwareIter = vmwareVirtualNetworkInfos.entrySet().iterator();
+        }
+        Map.Entry<String, VmwareVirtualNetworkInfo> vmwareItem = null;
+        if (vmwareIter != null) { 
+                vmwareItem = (Entry<String, VmwareVirtualNetworkInfo>) 
+                (vmwareIter.hasNext() ? vmwareIter.next() : null);
+        }
+
         Iterator<Entry<String, VncVirtualNetworkInfo>> vncIter = null;
         if (vncVirtualNetworkInfos != null && vncVirtualNetworkInfos.size() > 0 && vncVirtualNetworkInfos.entrySet() != null) {
                 vncIter = vncVirtualNetworkInfos.entrySet().iterator();
         }
-        
-        Map.Entry<String, VmwareVirtualNetworkInfo> vmwareItem = 
-                (Entry<String, VmwareVirtualNetworkInfo>)vmwareIter.next();
         Map.Entry<String, VncVirtualNetworkInfo> vncItem = null;
         if (vncIter != null) { 
                 vncItem = (Entry<String, VncVirtualNetworkInfo>) 
