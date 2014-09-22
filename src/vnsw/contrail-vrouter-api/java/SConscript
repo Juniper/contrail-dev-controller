@@ -1,0 +1,12 @@
+import os
+import re
+import subprocess
+import sys
+
+env = DefaultEnvironment()
+
+mvn_target = env.build_maven('contrail-vrouter-api-java', source = ['#controller/src/vnsw/contrail-vrouter-api/java/src/net/juniper/contrail/contrail_vrouter_api'], path=Dir('#controller/src/vnsw/contrail-vrouter-api/java'))
+
+env.Alias('contrail-vrouter-api-java', mvn_target)
+env.Default(mvn_target)
+

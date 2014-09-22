@@ -3,6 +3,8 @@
 Import('BuildEnv')
 env = BuildEnv.Clone()
 
+SConscript(dirs=['java'])
+
 sources = [
     'setup.py',
     'test-requirements.txt',

@@ -1,0 +1,12 @@
+import os
+import re
+import subprocess
+import sys
+
+env = DefaultEnvironment()
+
+mvn_target = env.build_maven('java-api-lib', source ='#controller/src/api-lib/java/src/net/juniper/contrail/api', path=Dir('#controller/src/api-lib/java'))
+
+env.Alias('java-api-lib', mvn_target)
+env.Default(mvn_target)
+

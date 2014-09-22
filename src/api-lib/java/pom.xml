@@ -129,8 +129,8 @@
         <configuration>
           <argLine>-Xmx1024m</argLine>
           <excludes>
-	    <!--exclude>**/ContrailApiTest.java</exclude>-->
-	    <!--exclude>**/ContrailApiMockTest.java</exclude>-->
+	    <exclude>**/ContrailApiTest.java</exclude>
+	    <exclude>**/ContrailApiMockTest.java</exclude>
 	  </excludes>
         </configuration>
       </plugin>

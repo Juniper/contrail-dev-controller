@@ -1,0 +1,11 @@
+# -*- mode: python; -*-
+#
+# Copyright (c) 2013 Juniper Networks, Inc. All rights reserved.
+#
+# src directory
+
+import os
+import re
+import sys
+
+SConscript(dirs=['java'])

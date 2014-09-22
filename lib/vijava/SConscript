@@ -1,0 +1,12 @@
+import os
+import re
+import subprocess
+import sys
+
+env = DefaultEnvironment()
+
+mvn_target = env.build_maven('vijava', source ='#third_party/vijava', path=Dir('#controller/lib/vijava'))
+
+env.Alias('vijava', mvn_target)
+env.Default(mvn_target)
+

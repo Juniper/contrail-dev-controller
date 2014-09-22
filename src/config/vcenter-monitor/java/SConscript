@@ -1,0 +1,12 @@
+import os
+import re
+import subprocess
+import sys
+
+env = DefaultEnvironment()
+
+mvn_target = env.build_maven('vcenter-monitor', source = ['#controller/src/config/vcenter-monitor/java/src/net/juniper/contrail/vcenter'], path=Dir('#controller/src/config/vcenter-monitor/java'))
+
+env.Alias('vcenter-monitor', mvn_target)
+env.Default(mvn_target)
+
