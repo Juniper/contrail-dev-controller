@@ -41,9 +41,11 @@ public class VncDB {
     
     private ApiConnector apiConnector;
     private Project vCenterProject;
+    private NetworkIpam vCenterIpam;
 
-    public static final String VNC_ROOT_DOMAIN = "default-domain";
+    public static final String VNC_ROOT_DOMAIN     = "default-domain";
     public static final String VNC_VCENTER_PROJECT = "vCenter";
+    public static final String VNC_VCENTER_IPAM    = "vCenter-ipam";
     
     public VncDB(String apiServerAddress, int apiServerPort) {
         this.apiServerAddress = apiServerAddress;
@@ -55,10 +57,11 @@ public class VncDB {
         apiConnector = ApiConnectorFactory.build(apiServerAddress,
                 apiServerPort);
 
-        // Check if Vmware Project exists on VNc. If not create one.
-        vCenterProject = (Project) apiConnector.findByFQN(Project.class, VNC_ROOT_DOMAIN + ":" + VNC_VCENTER_PROJECT);
+        // Check if Vmware Project exists on VNC. If not, create one.
+        vCenterProject = (Project) apiConnector.findByFQN(Project.class, 
+                                        VNC_ROOT_DOMAIN + ":" + VNC_VCENTER_PROJECT);
         if (vCenterProject == null) {
-            s_logger.info(" vCenter project not present, create one ");
+            s_logger.info(" vCenter project not present, creating ");
             vCenterProject = new Project();
             vCenterProject.setName("vCenter");
             if (!apiConnector.create(vCenterProject)) {
@@ -66,6 +69,21 @@ public class VncDB {
             }
         } else {
             s_logger.info(" vCenter project present, continue ");
+        }
+
+        // Check if VMWare vCenter-ipam exist on VNC. If not, create one.
+        vCenterIpam = (NetworkIpam) apiConnector.findByFQN(Project.class, 
+                       VNC_ROOT_DOMAIN + ":" + VNC_VCENTER_PROJECT + ":" + VNC_VCENTER_IPAM);
+        if (vCenterIpam == null) {
+            s_logger.info(" vCenter Ipam not present, creating ...");
+            vCenterIpam = new NetworkIpam();
+            vCenterIpam.setParent(vCenterProject);
+            vCenterIpam.setName("vCenter-ipam");
+            if (!apiConnector.create(vCenterIpam)) {
+              s_logger.error("Unable to create Ipam: " + vCenterIpam.getName());
+            }
+        } else {
+            s_logger.info(" vCenter Ipam present, continue ");
         }
     }
     
@@ -82,13 +100,24 @@ public class VncDB {
         }
         // There should only be one virtual machine hanging off the virtual
         // machine interface
-        String vmUuid = vmInterface.getParentUuid();   
-        VirtualMachine vm = (VirtualMachine) apiConnector.findById(
-                VirtualMachine.class, vmUuid);
-        boolean deleteVm = false;
-        if (vm.getVirtualMachineInterfaces().size() == 1) {
-            deleteVm = true;
+        //String vmUuid = vmInterface.getParentUuid();   
+        List<ObjectReference<ApiPropertyBase>> vmRefs = vmInterface.getVirtualMachine();
+        if (vmRefs == null || vmRefs.size() == 0) {
+            s_logger.error("Virtual Machine Interface : " + vmInterface.getDisplayName() + 
+                    " NO associated virtual machine ");
         }
+        if (vmRefs.size() > 1) {
+            s_logger.error("Virtual Machine Interface : " + vmInterface.getDisplayName() + 
+                           "(" + vmRefs.size() + ")" + " associated virtual machines ");
+        }
+
+        ObjectReference<ApiPropertyBase> vmRef = vmRefs.get(0);
+        VirtualMachine vm = (VirtualMachine) apiConnector.findById(
+                VirtualMachine.class, vmRef.getUuid());
+        boolean deleteVm = false;
+        //if (vm.getVirtualMachineInterfaces().size() == 1) {
+            deleteVm = true;
+        //}
         // Extract VRouter IP address from display name
         String vrouterIpAddress = vm.getDisplayName();
         s_logger.info("Delete virtual machine interface: " + 
@@ -98,7 +127,7 @@ public class VncDB {
                 vmInterfaceUuid);
         if (deleteVm) {
             s_logger.info("Delete virtual machine: " + vm.getName());
-            apiConnector.delete(VirtualMachine.class, vmUuid);      
+            apiConnector.delete(VirtualMachine.class, vmRef.getUuid());      
         }
         // Unplug notification to vrouter
         if (vrouterIpAddress == null) {
@@ -277,7 +306,7 @@ public class VncDB {
                 UUID.randomUUID().toString());*/
         subnet.addIpamSubnets(new VnSubnetsType.IpamSubnetType(new SubnetType(addr_pair[0], Integer.parseInt(addr_pair[1])), gatewayAddr, UUID.randomUUID().toString(), true, null, null, false, null, null, vn.getName() + "-subnet"));
 
-        vn.setNetworkIpam(ipam, subnet);
+        vn.setNetworkIpam(vCenterIpam, subnet);
         apiConnector.create(vn); 
         if (vmMapInfos == null)
             return;

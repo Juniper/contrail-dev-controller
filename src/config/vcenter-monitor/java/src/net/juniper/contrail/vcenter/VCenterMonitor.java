@@ -16,6 +16,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
 
 import org.apache.log4j.BasicConfigurator;
 import org.apache.log4j.Logger;
@@ -249,14 +250,26 @@ class VCenterMonitorTask implements Runnable {
             // Do Vmware and Vnc virtual machines match?
             String vmwareVmUuid = vmwareItem.getKey();
             String vncVmUuid = vncItem.getKey();
-            if (!vmwareVmUuid.equals(vncVmUuid)) {
-                // Delete Vnc virtual machine
-                vncDB.DeleteVirtualMachine(vncItem.getValue());
-                vncItem = (Entry<String, VncVirtualMachineInfo>) 
-                        (vncIter.hasNext() ? vncIter.next() : null);
-            } else {
+            Integer cmp = vmwareVmUuid.compareTo(vncVmUuid);
+
+            if (cmp == 0) {
                 // Match found, advance Vmware and Vnc iters
                 vncItem = vncIter.hasNext() ? vncIter.next() : null;
+                vmwareItem = vmwareIter.hasNext() ? vmwareIter.next() : null;
+            } else if (cmp > 0){
+                // Delete Vnc virtual machine
+                vncDB.DeleteVirtualMachine(vncItem.getValue());
+                vncItem = vncIter.hasNext() ? vncIter.next() : null;
+            } else if (cmp < 0){
+                // create VMWare virtual machine in VNC
+                VmwareVirtualMachineInfo vmwareVmInfo = vmwareItem.getValue();
+                vncDB.CreateVirtualMachine(vnUuid, vmwareVmUuid,
+                        vmwareVmInfo.getMacAddress(),
+                        vmwareVmInfo.getName(),
+                        vmwareVmInfo.getVrouterIpAddress(),
+                        vmwareVmInfo.getHostName(), 
+                        vmwareNetworkInfo.getIsolatedVlanId(),
+                        vmwareNetworkInfo.getPrimaryVlanId());
                 vmwareItem = vmwareIter.hasNext() ? vmwareIter.next() : null;
             }
         }       
